@@ -1,37 +1,46 @@
 @echo off
-REM -----------------------------------
-REM Script para inicializar el worker T3
-REM -----------------------------------
+REM =====================================
+REM  Script de instalación y ejecución Worker T3
+REM =====================================
 
-REM CONFIGURACIÓN
-SET PC_ID=pc1   
-SET TIPO=deudas
-SET BACKEND=http://192.168.9.142:8000
-SET DELAY=10
+REM --- Habilitar ejecución de scripts en PowerShell (si no está habilitado) ---
+powershell -Command "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force"
 
-REM Ruta donde está el worker (ajustar si es otra)
-SET WORKER_DIR=%~dp0
+REM --- Configuración ---
+set SERVER_URL=http://192.168.9.142:8000
+set PC_ID=%COMPUTERNAME%
+set WORKER_TYPE=deudas
+set PROCESS_DELAY=5
 
-REM -----------------------------------
-REM 1️⃣ Ir al directorio del worker
-cd /d "%WORKER_DIR%"
+echo =====================================
+echo Iniciando setup para Worker %PC_ID% tipo %WORKER_TYPE%
+echo =====================================
 
-REM 2️⃣ Crear entorno virtual si no existe
+REM --- Crear entorno virtual si no existe ---
 if not exist venv (
-    echo [INFO] Creando entorno virtual...
+    echo Creando entorno virtual...
     python -m venv venv
 )
 
-REM 3️⃣ Activar entorno virtual
+REM --- Activar entorno virtual ---
 call venv\Scripts\activate
 
-REM 4️⃣ Instalar dependencias
-echo [INFO] Instalando dependencias...
-pip install --upgrade pip
-pip install -r requirements.txt
+REM --- Actualizar pip ---
+python -m pip install --upgrade pip
 
-REM 5️⃣ Ejecutar el cliente
-echo [INFO] Iniciando el worker...
-python pc_client.py --pc_id %PC_ID% --tipo %TIPO% --backend %BACKEND% --delay %DELAY%
+REM --- Instalar dependencias ---
+if exist requirements.txt (
+    echo Instalando dependencias desde requirements.txt...
+    pip install -r requirements.txt
+) else (
+    echo No se encontro requirements.txt, instalando dependencias basicas...
+    pip install requests
+)
 
+REM --- Arrancar worker principal ---
+start cmd /k "python worker.py --pc_id %PC_ID% --tipo %WORKER_TYPE% --backend %SERVER_URL% --delay %PROCESS_DELAY%"
+
+echo =====================================
+echo Worker %PC_ID% inicializado
+echo =====================================
 pause
