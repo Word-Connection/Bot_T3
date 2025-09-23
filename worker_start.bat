@@ -6,7 +6,7 @@ REM -----------------------------------
 REM CONFIGURACIÓN
 SET PC_ID=pc1   
 SET TIPO=deudas
-SET BACKEND=http://192.168.9.65:8000
+SET BACKEND=http://192.168.9.142:8000
 SET DELAY=10
 
 REM Ruta donde está el worker (ajustar si es otra)
