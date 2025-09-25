@@ -1,101 +1,61 @@
+
+
 @echo off
 REM =====================================
-REM  Worker T3 - Ejecutor Simple
+REM  Ejecutor Worker T3
 REM =====================================
 
-echo =====================================
-echo   WORKER T3 - INICIANDO
-echo =====================================
-
-REM --- Habilitar PowerShell scripts ---
-powershell -Command "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force" >nul 2>&1
-
-REM --- Verificar que Python existe ---
-python --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ ERROR: Python no está instalado
-    echo Instala Python desde https://python.org y vuelve a intentar
+REM --- Verificar si el directorio Workers-T3 existe ---
+if not exist Workers-T3 (
+    echo ERROR: Directorio Workers-T3 no encontrado. Ejecuta config_worker.bat primero.
     pause
     exit /b 1
 )
 
-echo ✓ Python encontrado:
-python --version
+REM --- Cambiar al directorio del repositorio ---
+cd Workers-T3
 
-REM --- Verificar que existe .env ---
-if not exist .env (
-    echo ❌ ERROR: No se encontró archivo .env
-    echo Ejecuta config.bat primero para crear la configuración
-    pause
-    exit /b 1
-)
-
-REM --- Mostrar configuración actual ---
-echo.
-echo =====================================
-echo CONFIGURACION ACTUAL (.env):
-echo =====================================
-type .env
-echo =====================================
-echo.
-set /p CONTINUE="¿La configuración es correcta? (s/n): "
-if /i "%CONTINUE%"=="n" (
-    echo Ejecuta config.bat para cambiar la configuración
-    pause
-    exit /b 0
-)
-
-REM --- Verificar que existe worker.py ---
-if not exist worker.py (
-    echo ❌ ERROR: No se encontró worker.py
-    echo Copia worker.py a esta carpeta
-    pause
-    exit /b 1
-)
-
-REM --- Setup entorno virtual ---
-echo Configurando entorno virtual...
+REM --- Verificar si el entorno virtual existe ---
 if not exist venv (
-    python -m venv venv
-    if %ERRORLEVEL% NEQ 0 (
-        echo ❌ ERROR: No se pudo crear entorno virtual
-        pause
-        exit /b 1
-    )
-    echo ✓ Entorno virtual creado
-) else (
-    echo ✓ Usando entorno virtual existente
-)
-
-REM --- Activar entorno ---
-call venv\Scripts\activate
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ ERROR: No se pudo activar entorno virtual
+    echo ERROR: Entorno virtual no encontrado. Ejecuta config_worker.bat primero.
     pause
     exit /b 1
 )
 
-REM --- Instalar/actualizar dependencias ---
-echo Instalando dependencias...
-python -m pip install --upgrade pip --quiet
-pip install requests>=2.31.0 python-dotenv>=1.0.0 --quiet
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ ERROR: No se pudieron instalar dependencias
+REM --- Activar entorno virtual ---
+call venv\Scripts\activate.bat
+
+REM --- Leer PC_ID desde .env ---
+for /f "tokens=1,* delims==" %%a in (.env) do (
+    if "%%a"=="PC_ID" set PC_ID=%%b
+)
+
+if not defined PC_ID (
+    echo ERROR: PC_ID no definido en .env. Ejecuta config_worker.bat para configurar.
     pause
     exit /b 1
 )
-echo ✓ Dependencias instaladas
 
-REM --- Ejecutar worker ---
-echo.
-echo =====================================
-echo   INICIANDO WORKER...
-echo =====================================
-python worker.py
+:run_worker
+REM --- Iniciar worker en segundo plano ---
+echo Iniciando worker %PC_ID%...
+start /b python worker.py > worker_%PC_ID%.log 2>&1
 
-REM --- Worker terminado ---
-echo.
-echo =====================================
-echo Worker finalizado
-echo =====================================
-pause
+REM --- Bucle para verificar actualizaciones cada 5 minutos ---
+:check_updates
+timeout /t 300 /nobreak >nul
+echo Verificando actualizaciones...
+git fetch
+for /f %%i in ('git rev-parse HEAD') do set CURRENT_HASH=%%i
+for /f %%i in ('git rev-parse origin/main') do set REMOTE_HASH=%%i
+if "%CURRENT_HASH%" neq "%REMOTE_HASH%" (
+    echo Nuevos cambios detectados, actualizando...
+    git pull
+    call venv\Scripts\activate.bat
+    pip install requests python-dotenv
+    echo Reiniciando worker...
+    taskkill /im python.exe /f >nul 2>&1
+    start /b python worker.py > worker_%PC_ID%.log 2>&1
+)
+goto :check_updates
+```

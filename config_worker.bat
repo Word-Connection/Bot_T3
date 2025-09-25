@@ -1,4 +1,4 @@
-```bat
+
 @echo off
 REM =====================================
 REM  Configurador Worker T3 con Git
@@ -31,11 +31,12 @@ if exist .env (
     set /p CHANGE="¿Cambiar configuración? (s/n): "
     if /i "%CHANGE%"=="n" (
         echo Configuración mantenida
-        goto :run_worker
+        goto :update_repo
     )
 )
 
 REM --- Clonar o actualizar el repositorio ---
+:update_repo
 if exist Workers-T3 (
     echo Actualizando repositorio...
     cd Workers-T3
@@ -72,72 +73,54 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM --- Solicitar nueva configuración ---
-echo.
-echo --- NUEVA CONFIGURACION ---
-set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
-if "%PC_ID%"=="" set PC_ID=%COMPUTERNAME%
+REM --- Solicitar nueva configuración si se requiere ---
+if /i "%CHANGE%"=="s" (
+    echo.
+    echo --- NUEVA CONFIGURACION ---
+    set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
+    if "%PC_ID%"=="" set PC_ID=%COMPUTERNAME%
 
-echo.
-echo Tipos de worker:
-echo   1. deudas
-echo   2. movimientos
-set /p TYPE_NUM="Selecciona tipo (1-2): "
-if "%TYPE_NUM%"=="1" (
-    set WORKER_TYPE=deudas
-) else if "%TYPE_NUM%"=="2" (
-    set WORKER_TYPE=movimientos
-) else (
-    echo Tipo inválido, usando 'deudas'
-    set WORKER_TYPE=deudas
+    echo.
+    echo Tipos de worker:
+    echo   1. deudas
+    echo   2. movimientos
+    set /p TYPE_NUM="Selecciona tipo (1-2): "
+    if "%TYPE_NUM%"=="1" (
+        set WORKER_TYPE=deudas
+    ) else if "%TYPE_NUM%"=="2" (
+        set WORKER_TYPE=movimientos
+    ) else (
+        echo Tipo inválido, usando 'deudas'
+        set WORKER_TYPE=deudas
+    )
+
+    set /p BACKEND_URL="URL del servidor [http://192.168.9.160:8000]: "
+    if "%BACKEND_URL%"=="" set BACKEND_URL=http://192.168.9.160:8000
+
+    set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
+    if "%PROCESS_DELAY%"=="" set PROCESS_DELAY=5
+
+    REM --- Crear .env ---
+    echo.
+    echo Guardando configuración...
+    echo PC_ID=%PC_ID% > .env
+    echo WORKER_TYPE=%WORKER_TYPE% >> .env
+    echo BACKEND_URL=%BACKEND_URL% >> .env
+    echo PROCESS_DELAY=%PROCESS_DELAY% >> .env
+    echo POLL_INTERVAL=2 >> .env
+    echo CONNECTION_TIMEOUT=10 >> .env
+    echo LOG_LEVEL=INFO >> .env
+
+    echo.
+    echo =====================================
+    echo CONFIGURACION GUARDADA:
+    echo =====================================
+    type .env
+    echo =====================================
 )
 
-set /p BACKEND_URL="URL del servidor [http://192.168.9.160:8000]: "
-if "%BACKEND_URL%"=="" set BACKEND_URL=http://192.168.9.160:8000
-
-set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
-if "%PROCESS_DELAY%"=="" set PROCESS_DELAY=5
-
-REM --- Crear .env ---
 echo.
-echo Guardando configuración...
-echo PC_ID=%PC_ID% > .env
-echo WORKER_TYPE=%WORKER_TYPE% >> .env
-echo BACKEND_URL=%BACKEND_URL% >> .env
-echo PROCESS_DELAY=%PROCESS_DELAY% >> .env
-echo POLL_INTERVAL=2 >> .env
-echo CONNECTION_TIMEOUT=10 >> .env
-echo LOG_LEVEL=INFO >> .env
-
-echo.
-echo =====================================
-echo CONFIGURACION GUARDADA:
-echo =====================================
-type .env
-echo =====================================
-echo.
-
-:run_worker
-REM --- Iniciar worker en segundo plano ---
-echo Iniciando worker en segundo plano...
-start /b python worker.py > worker_%PC_ID%.log 2>&1
-
-REM --- Bucle para verificar actualizaciones cada 5 minutos ---
-:check_updates
-timeout /t 300 /nobreak >nul
-echo Verificando actualizaciones...
-cd Workers-T3
-git fetch
-for /f %%i in ('git rev-parse HEAD') do set CURRENT_HASH=%%i
-for /f %%i in ('git rev-parse origin/main') do set REMOTE_HASH=%%i
-if "%CURRENT_HASH%" neq "%REMOTE_HASH%" (
-    echo Nuevos cambios detectados, actualizando...
-    git pull
-    call venv\Scripts\activate.bat
-    pip install requests python-dotenv
-    echo Reiniciando worker...
-    taskkill /im python.exe /f >nul 2>&1
-    start /b python worker.py > worker_%PC_ID%.log 2>&1
-)
-cd ..
-goto :check_updates
+echo ✓ Configuración creada/actualizada exitosamente
+echo Ahora ejecuta run_worker.bat
+pause
+```
