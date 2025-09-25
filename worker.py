@@ -1,4 +1,4 @@
-# worker.py
+
 import requests
 import time
 import argparse
@@ -8,6 +8,12 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 import random
+import subprocess
+import json
+from tenacity import retry, stop_after_attempt, wait_exponential
+from datetime import datetime
+import pytz
+import re
 
 load_dotenv()
 
@@ -15,31 +21,35 @@ load_dotenv()
 # Configuración de argumentos
 # -----------------------------
 parser = argparse.ArgumentParser(description="Cliente de PC para T3")
-parser.add_argument("--pc_id", default=os.getenv("PC_ID", None), help="ID de la PC (ej: pc1)")
-parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE", None), help="Tipo de automatización (deudas/movimientos)")
+parser.add_argument("--pc_id", default=os.getenv("PC_ID"), help="ID de la PC (ej: pc1)")
+parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE"), help="Tipo de automatización (deudas/movimientos)")
 parser.add_argument("--backend", default=os.getenv("BACKEND_URL", "http://192.168.9.160:8000"), help="URL del backend")
-parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", "5")), help="Tiempo de procesamiento simulado (segundos)")
-parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "2")), help="Intervalo entre polls (segundos)")
+parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", "30")), help="Tiempo de procesamiento simulado (segundos)")
+parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "5")), help="Intervalo entre polls (segundos)")
 parser.add_argument("--log_level", default=os.getenv("LOG_LEVEL", "INFO"), help="Nivel de log (DEBUG, INFO, WARNING, ERROR)")
+parser.add_argument("--api_key", default=os.getenv("API_KEY"), help="API key para autenticación")
 
 args = parser.parse_args()
 
 if not args.pc_id:
-    print("ERROR: PC_ID es obligatorio. Especificar con --pc_id o en el archivo .env")
+    print("ERROR: PC_ID es obligatorio. Especificar con --pc_id o en .env")
     sys.exit(1)
 if not args.tipo:
-    print("ERROR: WORKER_TYPE es obligatorio. Especificar con --tipo o en el archivo .env")
+    print("ERROR: WORKER_TYPE es obligatorio. Especificar con --tipo o en .env")
+    sys.exit(1)
+if not args.api_key:
+    print("ERROR: API_KEY es obligatorio. Especificar con --api_key o en .env")
     sys.exit(1)
 
 # -----------------------------
 # Configuración de logging
 # -----------------------------
-log_level = getattr(logging, args.log_level.upper())
+log_level = getattr(logging, args.log_level.upper(), logging.INFO)
 logging.basicConfig(
     level=log_level,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format='{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}',
     handlers=[
-        logging.FileHandler(f"worker_{args.pc_id}.log"),
+        logging.FileHandler(f"logs/worker_{args.pc_id}.log"),
         logging.StreamHandler()
     ]
 )
@@ -53,11 +63,18 @@ TIPO = args.tipo
 BACKEND = args.backend
 PROCESS_DELAY = args.delay
 POLL_INTERVAL = args.poll_interval
+API_KEY = args.api_key
+TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
+OPERATING_START = os.getenv("OPERATING_START", "09:00")
+OPERATING_END = os.getenv("OPERATING_END", "21:00")
+VALID_TASK_TYPES = ["deudas", "movimientos"]
 
 stats = {
     "tasks_completed": 0,
     "tasks_failed": 0,
     "connection_errors": 0,
+    "vpn_errors": 0,
+    "scraping_errors": 0,
     "started_at": time.time()
 }
 
@@ -66,28 +83,53 @@ stats = {
 # -----------------------------
 def log_stats():
     uptime = time.time() - stats["started_at"]
-    logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | Errores conexión: {stats['connection_errors']} | Uptime: {uptime:.0f}s")
+    logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
 
-def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, timeout: int = 10):
+def is_within_operating_hours():
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    start_time = datetime.strptime(OPERATING_START, "%H:%M").replace(tzinfo=tz, year=now.year, month=now.month, day=now.day)
+    end_time = datetime.strptime(OPERATING_END, "%H:%M").replace(tzinfo=tz, year=now.year, month=now.month, day=now.day)
+    return start_time <= now <= end_time
+
+def check_vpn() -> bool:
+    try:
+        # Simula verificación de VPN (reemplazar con IP o host real)
+        result = subprocess.run(["ping", "-c", "1", "remote.vpn.host"], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except subprocess.SubprocessError as e:
+        logger.error(f"[VPN] Error verificando VPN: {e}")
+        stats["vpn_errors"] += 1
+        return False
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, timeout: int = 300):
     url = f"{BACKEND}{endpoint}"
+    headers = {"X-API-KEY": API_KEY}
     try:
         if method.upper() == "POST":
-            response = requests.post(url, json=json_data, timeout=timeout)
+            response = requests.post(url, json=json_data, headers=headers, timeout=timeout)
         else:
-            response = requests.get(url, timeout=timeout)
+            response = requests.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return response.json()
     except Exception as e:
         logger.error(f"[HTTP] Error en {method} {endpoint}: {e}")
         stats["connection_errors"] += 1
-        return None
+        raise
+
+def validate_dni(dni: str) -> bool:
+    return bool(re.match(r'^\d{8}$', dni))
 
 # -----------------------------
 # Funciones principales
 # -----------------------------
 def register_pc() -> bool:
     logger.info(f"[REGISTRO] Registrando PC '{PC_ID}' tipo '{TIPO}' en {BACKEND}")
-    result = make_request("POST", f"/register_pc/{TIPO}/{PC_ID}")
+    if TIPO not in VALID_TASK_TYPES:
+        logger.error(f"[ERROR] Tipo inválido: {TIPO}")
+        return False
+    result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
     if result and result.get("status") == "ok":
         logger.info(f"[OK] PC registrada correctamente | pc_id={result.get('pc_id')}, tipo={result.get('tipo')}")
         return True
@@ -95,12 +137,18 @@ def register_pc() -> bool:
     return False
 
 def get_task() -> Optional[dict]:
+    if not is_within_operating_hours():
+        logger.debug("[HORARIO] Fuera de horario operativo, esperando...")
+        return None
     payload = {"pc_id": PC_ID, "tipo": TIPO}
-    result = make_request("POST", "/get_task", payload)
+    result = make_request("POST", "/workers/get_task", payload)
     if not result:
         return None
     if result.get("status") == "ok":
         task = result.get("task")
+        if not validate_dni(task["datos"]):
+            logger.error(f"[ERROR] DNI inválido: {task['datos']}")
+            return None
         logger.info(f"[RECIBIDO] Nueva tarea recibida: {task['task_id']}")
         return task
     elif result.get("status") == "empty":
@@ -110,38 +158,74 @@ def get_task() -> Optional[dict]:
         logger.warning(f"[ADVERTENCIA] Respuesta inesperada de get_task: {result}")
         return None
 
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=5, max=15))
+def process_task(task: dict) -> bool:
+    task_id = task["task_id"]
+    dni = task["datos"]
+    logger.info(f"[PROCESO] Iniciando scraping DNI {dni} | Task: {task_id}")
+    
+    if not check_vpn():
+        logger.error("[VPN] Conexión VPN no disponible")
+        return False
+    
+    try:
+        # Reemplazar con script real (deudas.py o movimientos.py)
+        script_path = f"scripts/{TIPO}.py"
+        if not os.path.exists(script_path):
+            logger.error(f"[ERROR] Script {script_path} no encontrado")
+            stats["scraping_errors"] += 1
+            return False
+        
+        # Ejecutar script de scraping
+        process = subprocess.run(
+            ["python", script_path, dni],
+            capture_output=True,
+            text=True,
+            timeout=240  # 4 minutos máximo
+        )
+        
+        if process.returncode != 0:
+            logger.error(f"[ERROR] Fallo en scraping: {process.stderr}")
+            stats["scraping_errors"] += 1
+            return False
+        
+        # Procesar salida del script (simulado: asumir JSON con texto/imágenes)
+        output = json.loads(process.stdout)
+        stages = output.get("stages", [])
+        
+        for i, stage_data in enumerate(stages, 1):
+            partial_data = {
+                "dni": dni,
+                "etapa": i,
+                "info": stage_data.get("info"),
+                "image": stage_data.get("image")  # Base64 o path
+            }
+            send_partial_update(task_id, partial_data)
+            time.sleep(random.uniform(1, 3))  # Simula delay entre etapas
+        
+        logger.info(f"[OK] Scraping de {task_id} completado")
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error(f"[ERROR] Timeout en scraping para {task_id}")
+        stats["scraping_errors"] += 1
+        return False
+    except Exception as e:
+        logger.error(f"[ERROR] Error procesando {task_id}: {e}")
+        stats["scraping_errors"] += 1
+        return False
+
 def send_partial_update(task_id: str, partial_data: dict):
     payload = {"task_id": task_id, "partial_data": partial_data}
-    result = make_request("POST", "/task_update", payload)
+    result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
         logger.info(f"[PARCIAL] Actualización enviada para {task_id}: {partial_data}")
         return True
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
 
-def process_task(task: dict) -> bool:
-    task_id = task["task_id"]
-    dni = task["datos"]
-    logger.info(f"[PROCESO] Scraping DNI {dni} | Task: {task_id} | Delay simulado: {PROCESS_DELAY}s")
-    try:
-        # scrapping simulado
-        for i in range(4):  # Ejemplo: 3 etapas de scraping
-                stage_delay = random.uniform(5, 15)  # Tiempo aleatorio entre 5 y 15 segundos
-                logger.info(f"[PROCESO] Etapa {i+1} | Delay: {stage_delay:.2f}s")
-                time.sleep(stage_delay)
-                partial_data = {"dni": dni, "etapa": i + 1, "info": f"Datos etapa {i + 1}"}
-                send_partial_update(task_id, partial_data)
-        logger.info(f"[OK] Scraping de {task_id} completado")
-        return True
-    except Exception as e:
-        logger.error(f"[ERROR] Error procesando {task_id}: {e}")
-        return False
-
-
-
 def task_done(task_id: str) -> bool:
     payload = {"pc_id": PC_ID, "task_id": task_id}
-    result = make_request("POST", "/task_done", payload)
+    result = make_request("POST", "/workers/task_done", payload)
     if result and result.get("status") == "ok":
         exec_time = result.get("execution_time_seconds", "?")
         logger.info(f"[ENVIADO] Tarea {task_id} reportada como completada | Tiempo backend: {exec_time}s")
@@ -154,7 +238,10 @@ def task_done(task_id: str) -> bool:
 # -----------------------------
 def main_loop():
     logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Poll: {POLL_INTERVAL}s | Delay: {PROCESS_DELAY}s")
-
+    
+    # Crear directorio de logs
+    os.makedirs("logs", exist_ok=True)
+    
     # Registro inicial
     for attempt in range(5):
         if register_pc():
@@ -164,15 +251,15 @@ def main_loop():
     else:
         logger.error("[ERROR] No se pudo registrar después de 5 intentos. Terminando.")
         sys.exit(1)
-
+    
     last_stats_log = time.time()
-
+    
     while True:
         try:
             if time.time() - last_stats_log > 60:
                 log_stats()
                 last_stats_log = time.time()
-
+            
             task = get_task()
             if task:
                 if process_task(task):
@@ -182,9 +269,9 @@ def main_loop():
                         stats["tasks_failed"] += 1
                 else:
                     stats["tasks_failed"] += 1
-                    task_done(task["task_id"])  # intentar reportar igual
+                    task_done(task["task_id"])  # Reportar fallo
             time.sleep(POLL_INTERVAL)
-
+        
         except KeyboardInterrupt:
             logger.info("[DETENIDO] Worker detenido por usuario")
             log_stats()

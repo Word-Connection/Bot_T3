@@ -1,5 +1,5 @@
-```bat
 @echo off
+setlocal enabledelayedexpansion
 REM =====================================
 REM  Configurador y Ejecutor Worker T3
 REM =====================================
@@ -7,7 +7,7 @@ REM =====================================
 REM --- Verificar si Git está instalado ---
 where git >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: Git no está instalado. Instálalo desde https://git-scm.com/
+    echo ERROR: Git no esta instalado. Instalalo desde https://git-scm.com/
     pause
     exit /b 1
 )
@@ -15,7 +15,7 @@ if %ERRORLEVEL% neq 0 (
 REM --- Verificar si Python está instalado ---
 where python >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: Python no está instalado. Instálalo desde https://www.python.org/
+    echo ERROR: Python no esta instalado. Instalalo desde https://www.python.org/
     pause
     exit /b 1
 )
@@ -29,8 +29,8 @@ if exist Workers-T3 (
 ) else (
     echo Clonando repositorio...
     git clone https://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@github.com/Word-Connection/Workers-T3.git
-    if %ERRORLEVEL% neq 0 (
-        echo ERROR: No se pudo clonar el repositorio. Verifica el token o la conexión.
+    if !ERRORLEVEL! neq 0 (
+        echo ERROR: No se pudo clonar el repositorio. Verifica el token o la conexion.
         pause
         exit /b 1
     )
@@ -51,7 +51,7 @@ call venv\Scripts\activate.bat
 REM --- Instalar dependencias ---
 echo Instalando dependencias...
 pip install requests python-dotenv
-if %ERRORLEVEL% neq 0 (
+if !ERRORLEVEL! neq 0 (
     echo ERROR: No se pudieron instalar las dependencias.
     pause
     exit /b 1
@@ -60,14 +60,14 @@ if %ERRORLEVEL% neq 0 (
 REM --- Mostrar configuración actual si existe ---
 if exist .env (
     echo.
-    echo Configuración actual:
+    echo Configuracion actual:
     echo =====================================
     type .env
     echo =====================================
     echo.
-    set /p CHANGE="¿Cambiar configuración? (s/n): "
+    set /p CHANGE="Cambiar configuracion? (s/n): "
     if /i "!CHANGE!"=="n" (
-        echo Configuración mantenida
+        echo Configuracion mantenida
         goto :run_worker
     )
 )
@@ -75,65 +75,94 @@ if exist .env (
 REM --- Solicitar nueva configuración ---
 echo.
 echo --- NUEVA CONFIGURACION ---
-set "PC_ID=%COMPUTERNAME%"
-set /p INPUT_PC_ID="ID de esta PC [%PC_ID%]: "
-if not "!INPUT_PC_ID!"=="" set "PC_ID=%INPUT_PC_ID: =%"
+
+REM PC_ID
+set "DEFAULT_PC_ID=%COMPUTERNAME%"
+set /p PC_ID="ID de esta PC [!DEFAULT_PC_ID!]: "
+if "!PC_ID!"=="" set "PC_ID=!DEFAULT_PC_ID!"
 
 echo.
 echo Tipos de worker:
 echo   1. deudas
 echo   2. movimientos
-set "WORKER_TYPE=deudas"
 set /p TYPE_NUM="Selecciona tipo (1-2) [1]: "
-if "!TYPE_NUM!"=="1" (
-    set "WORKER_TYPE=deudas"
-) else if "!TYPE_NUM!"=="2" (
+if "!TYPE_NUM!"=="2" (
     set "WORKER_TYPE=movimientos"
-) else if not "!TYPE_NUM!"=="" (
-    echo Tipo inválido, usando 'deudas'
+) else (
     set "WORKER_TYPE=deudas"
 )
-set "WORKER_TYPE=%WORKER_TYPE: =%"
 
-set "BACKEND_URL=http://192.168.9.160:8000"
-set /p INPUT_BACKEND_URL="URL del servidor [%BACKEND_URL%]: "
-if not "!INPUT_BACKEND_URL!"=="" set "BACKEND_URL=%INPUT_BACKEND_URL: =%"
+REM Backend URL
+set "DEFAULT_BACKEND=http://192.168.9.160:8000"
+set /p BACKEND_URL="URL del servidor [!DEFAULT_BACKEND!]: "
+if "!BACKEND_URL!"=="" set "BACKEND_URL=!DEFAULT_BACKEND!"
 
-set "PROCESS_DELAY=5"
-set /p INPUT_PROCESS_DELAY="Tiempo de procesamiento [%PROCESS_DELAY%]: "
-if not "!INPUT_PROCESS_DELAY!"=="" set "PROCESS_DELAY=%INPUT_PROCESS_DELAY: =%"
+REM Process Delay
+set "DEFAULT_DELAY=5"
+set /p PROCESS_DELAY="Tiempo de procesamiento [!DEFAULT_DELAY!]: "
+if "!PROCESS_DELAY!"=="" set "PROCESS_DELAY=!DEFAULT_DELAY!"
 
-REM --- Verificar variables antes de escribir ---
-echo.
-echo Verificando configuración...
-echo PC_ID=%PC_ID%
-echo WORKER_TYPE=%WORKER_TYPE%
-echo BACKEND_URL=%BACKEND_URL%
-echo PROCESS_DELAY=%PROCESS_DELAY%
-
-REM --- Crear .env dentro de Workers-T3 ---
-echo.
-echo Guardando configuración...
-(
-    echo PC_ID=%PC_ID%
-    echo WORKER_TYPE=%WORKER_TYPE%
-    echo BACKEND_URL=%BACKEND_URL%
-    echo PROCESS_DELAY=%PROCESS_DELAY%
-    echo POLL_INTERVAL=2
-    echo CONNECTION_TIMEOUT=10
-    echo LOG_LEVEL=INFO
-) > .env
-
+REM --- Mostrar resumen antes de guardar ---
 echo.
 echo =====================================
-echo CONFIGURACION GUARDADA:
+echo RESUMEN DE CONFIGURACION:
 echo =====================================
-type .env
+echo PC_ID=!PC_ID!
+echo WORKER_TYPE=!WORKER_TYPE!
+echo BACKEND_URL=!BACKEND_URL!
+echo PROCESS_DELAY=!PROCESS_DELAY!
 echo =====================================
+echo.
+set /p CONFIRM="Es correcta la configuracion? (s/n): "
+if /i "!CONFIRM!"=="n" (
+    echo Configuracion cancelada. Ejecuta el script nuevamente.
+    pause
+    exit /b 0
+)
+
+REM --- Crear archivo .env ---
+echo.
+echo Guardando configuracion...
+echo PC_ID=!PC_ID!> .env
+echo WORKER_TYPE=!WORKER_TYPE!>> .env
+echo BACKEND_URL=!BACKEND_URL!>> .env
+echo PROCESS_DELAY=!PROCESS_DELAY!>> .env
+echo POLL_INTERVAL=2>> .env
+echo CONNECTION_TIMEOUT=10>> .env
+echo LOG_LEVEL=INFO>> .env
+
+REM --- Verificar que se creó correctamente ---
+if exist .env (
+    echo.
+    echo =====================================
+    echo CONFIGURACION GUARDADA EXITOSAMENTE:
+    echo =====================================
+    type .env
+    echo =====================================
+) else (
+    echo ERROR: No se pudo crear el archivo .env
+    pause
+    exit /b 1
+)
 
 :run_worker
-REM --- Ejecutar worker en primer plano ---
+REM --- Verificar que existe worker.py ---
+if not exist worker.py (
+    echo ERROR: No se encontro worker.py en el directorio Workers-T3
+    echo Verifica que el repositorio se clono correctamente
+    pause
+    exit /b 1
+)
+
+REM --- Ejecutar worker ---
 echo.
-echo Iniciando worker...
+echo Iniciando worker en 3 segundos...
+timeout /t 3 /nobreak >nul
+echo =====================================
 python worker.py
+
+echo.
+echo =====================================
+echo Worker finalizado
+echo =====================================
 pause
