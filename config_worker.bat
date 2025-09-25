@@ -1,4 +1,3 @@
-
 @echo off
 REM =====================================
 REM  Configurador Worker T3 con Git
@@ -20,23 +19,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM --- Mostrar configuración actual si existe ---
-if exist .env (
-    echo.
-    echo Configuración actual:
-    echo =====================================
-    type .env
-    echo =====================================
-    echo.
-    set /p CHANGE="¿Cambiar configuración? (s/n): "
-    if /i "%CHANGE%"=="n" (
-        echo Configuración mantenida
-        goto :update_repo
-    )
-)
-
 REM --- Clonar o actualizar el repositorio ---
-:update_repo
 if exist Workers-T3 (
     echo Actualizando repositorio...
     cd Workers-T3
@@ -73,8 +56,24 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM --- Solicitar nueva configuración si se requiere ---
-if /i "%CHANGE%"=="s" (
+REM --- Mostrar configuración actual si existe ---
+set CREATE_ENV=1
+if exist .env (
+    echo.
+    echo Configuración actual:
+    echo =====================================
+    type .env
+    echo =====================================
+    echo.
+    set /p CHANGE="¿Cambiar configuración? (s/n): "
+    if /i "%CHANGE%"=="n" (
+        echo Configuración mantenida
+        set CREATE_ENV=0
+    )
+)
+
+REM --- Solicitar nueva configuración si se requiere o si no existe .env ---
+if "%CREATE_ENV%"=="1" (
     echo.
     echo --- NUEVA CONFIGURACION ---
     set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
@@ -100,7 +99,7 @@ if /i "%CHANGE%"=="s" (
     set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
     if "%PROCESS_DELAY%"=="" set PROCESS_DELAY=5
 
-    REM --- Crear .env ---
+    REM --- Crear .env dentro de Workers-T3 ---
     echo.
     echo Guardando configuración...
     echo PC_ID=%PC_ID% > .env
@@ -123,4 +122,3 @@ echo.
 echo ✓ Configuración creada/actualizada exitosamente
 echo Ahora ejecuta run_worker.bat
 pause
-```
