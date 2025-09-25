@@ -1,6 +1,6 @@
 @echo off
 REM =====================================
-REM  Configurador Worker T3 con Git
+REM  Configurador y Ejecutor Worker T3
 REM =====================================
 
 REM --- Verificar si Git está instalado ---
@@ -27,7 +27,8 @@ if exist Workers-T3 (
     cd ..
 ) else (
     echo Clonando repositorio...
-    git clone https://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@github.com/Word-Connection/Workers-T3.git
+    set GIT_TOKEN=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
+    git clone https://%GIT_TOKEN%@github.com/Word-Connection/Workers-T3.git
     if %ERRORLEVEL% neq 0 (
         echo ERROR: No se pudo clonar el repositorio. Verifica el token o la conexión.
         pause
@@ -67,43 +68,40 @@ if exist .env (
     set /p CHANGE="¿Cambiar configuración? (s/n): "
     if /i "!CHANGE!"=="n" (
         echo Configuración mantenida
-        echo.
-        echo ✓ Configuración creada/actualizada exitosamente
-        echo Ahora ejecuta run_worker.bat
-        pause
-        exit /b 0
+        goto :run_worker
     )
 )
 
 REM --- Solicitar nueva configuración ---
 echo.
 echo --- NUEVA CONFIGURACION ---
-set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
-if "!PC_ID!"=="" set PC_ID=%COMPUTERNAME%
-set PC_ID=%PC_ID: =%
+set "PC_ID=%COMPUTERNAME%"
+set /p INPUT_PC_ID="ID de esta PC [%PC_ID%]: "
+if not "!INPUT_PC_ID!"=="" set "PC_ID=%INPUT_PC_ID: =%"
 
 echo.
 echo Tipos de worker:
 echo   1. deudas
 echo   2. movimientos
-set /p TYPE_NUM="Selecciona tipo (1-2): "
+set "WORKER_TYPE=deudas"
+set /p TYPE_NUM="Selecciona tipo (1-2) [1]: "
 if "!TYPE_NUM!"=="1" (
-    set WORKER_TYPE=deudas
+    set "WORKER_TYPE=deudas"
 ) else if "!TYPE_NUM!"=="2" (
-    set WORKER_TYPE=movimientos
-) else (
+    set "WORKER_TYPE=movimientos"
+) else if not "!TYPE_NUM!"=="" (
     echo Tipo inválido, usando 'deudas'
-    set WORKER_TYPE=deudas
+    set "WORKER_TYPE=deudas"
 )
-set WORKER_TYPE=%WORKER_TYPE: =%
+set "WORKER_TYPE=%WORKER_TYPE: =%"
 
-set /p BACKEND_URL="URL del servidor [http://192.168.9.160:8000]: "
-if "!BACKEND_URL!"=="" set BACKEND_URL=http://192.168.9.160:8000
-set BACKEND_URL=%BACKEND_URL: =%
+set "BACKEND_URL=http://192.168.9.160:8000"
+set /p INPUT_BACKEND_URL="URL del servidor [%BACKEND_URL%]: "
+if not "!INPUT_BACKEND_URL!"=="" set "BACKEND_URL=%INPUT_BACKEND_URL: =%"
 
-set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
-if "!PROCESS_DELAY!"=="" set PROCESS_DELAY=5
-set PROCESS_DELAY=%PROCESS_DELAY: =%
+set "PROCESS_DELAY=5"
+set /p INPUT_PROCESS_DELAY="Tiempo de procesamiento [%PROCESS_DELAY%]: "
+if not "!INPUT_PROCESS_DELAY!"=="" set "PROCESS_DELAY=%INPUT_PROCESS_DELAY: =%"
 
 REM --- Verificar variables antes de escribir ---
 echo.
@@ -132,7 +130,10 @@ echo CONFIGURACION GUARDADA:
 echo =====================================
 type .env
 echo =====================================
+
+:run_worker
+REM --- Ejecutar worker en primer plano ---
 echo.
-echo ✓ Configuración creada exitosamente
-echo Ahora ejecuta run_worker.bat
+echo Iniciando worker...
+python worker.py
 pause
