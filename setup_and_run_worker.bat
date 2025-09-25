@@ -1,3 +1,4 @@
+```bat
 @echo off
 REM =====================================
 REM  Configurador y Ejecutor Worker T3
@@ -27,8 +28,7 @@ if exist Workers-T3 (
     cd ..
 ) else (
     echo Clonando repositorio...
-    set GIT_TOKEN=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
-    git clone https://%GIT_TOKEN%@github.com/Word-Connection/Workers-T3.git
+    git clone https://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@github.com/Word-Connection/Workers-T3.git
     if %ERRORLEVEL% neq 0 (
         echo ERROR: No se pudo clonar el repositorio. Verifica el token o la conexión.
         pause
