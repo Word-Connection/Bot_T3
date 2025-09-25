@@ -57,7 +57,6 @@ if %ERRORLEVEL% neq 0 (
 )
 
 REM --- Mostrar configuración actual si existe ---
-set CREATE_ENV=1
 if exist .env (
     echo.
     echo Configuración actual:
@@ -66,59 +65,74 @@ if exist .env (
     echo =====================================
     echo.
     set /p CHANGE="¿Cambiar configuración? (s/n): "
-    if /i "%CHANGE%"=="n" (
+    if /i "!CHANGE!"=="n" (
         echo Configuración mantenida
-        set CREATE_ENV=0
+        echo.
+        echo ✓ Configuración creada/actualizada exitosamente
+        echo Ahora ejecuta run_worker.bat
+        pause
+        exit /b 0
     )
 )
 
-REM --- Solicitar nueva configuración si se requiere o si no existe .env ---
-if "%CREATE_ENV%"=="1" (
-    echo.
-    echo --- NUEVA CONFIGURACION ---
-    set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
-    if "%PC_ID%"=="" set PC_ID=%COMPUTERNAME%
-
-    echo.
-    echo Tipos de worker:
-    echo   1. deudas
-    echo   2. movimientos
-    set /p TYPE_NUM="Selecciona tipo (1-2): "
-    if "%TYPE_NUM%"=="1" (
-        set WORKER_TYPE=deudas
-    ) else if "%TYPE_NUM%"=="2" (
-        set WORKER_TYPE=movimientos
-    ) else (
-        echo Tipo inválido, usando 'deudas'
-        set WORKER_TYPE=deudas
-    )
-
-    set /p BACKEND_URL="URL del servidor [http://192.168.9.160:8000]: "
-    if "%BACKEND_URL%"=="" set BACKEND_URL=http://192.168.9.160:8000
-
-    set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
-    if "%PROCESS_DELAY%"=="" set PROCESS_DELAY=5
-
-    REM --- Crear .env dentro de Workers-T3 ---
-    echo.
-    echo Guardando configuración...
-    echo PC_ID=%PC_ID% > .env
-    echo WORKER_TYPE=%WORKER_TYPE% >> .env
-    echo BACKEND_URL=%BACKEND_URL% >> .env
-    echo PROCESS_DELAY=%PROCESS_DELAY% >> .env
-    echo POLL_INTERVAL=2 >> .env
-    echo CONNECTION_TIMEOUT=10 >> .env
-    echo LOG_LEVEL=INFO >> .env
-
-    echo.
-    echo =====================================
-    echo CONFIGURACION GUARDADA:
-    echo =====================================
-    type .env
-    echo =====================================
-)
+REM --- Solicitar nueva configuración ---
+echo.
+echo --- NUEVA CONFIGURACION ---
+set /p PC_ID="ID de esta PC [%COMPUTERNAME%]: "
+if "!PC_ID!"=="" set PC_ID=%COMPUTERNAME%
+set PC_ID=%PC_ID: =%
 
 echo.
-echo ✓ Configuración creada/actualizada exitosamente
+echo Tipos de worker:
+echo   1. deudas
+echo   2. movimientos
+set /p TYPE_NUM="Selecciona tipo (1-2): "
+if "!TYPE_NUM!"=="1" (
+    set WORKER_TYPE=deudas
+) else if "!TYPE_NUM!"=="2" (
+    set WORKER_TYPE=movimientos
+) else (
+    echo Tipo inválido, usando 'deudas'
+    set WORKER_TYPE=deudas
+)
+set WORKER_TYPE=%WORKER_TYPE: =%
+
+set /p BACKEND_URL="URL del servidor [http://192.168.9.160:8000]: "
+if "!BACKEND_URL!"=="" set BACKEND_URL=http://192.168.9.160:8000
+set BACKEND_URL=%BACKEND_URL: =%
+
+set /p PROCESS_DELAY="Tiempo de procesamiento [5]: "
+if "!PROCESS_DELAY!"=="" set PROCESS_DELAY=5
+set PROCESS_DELAY=%PROCESS_DELAY: =%
+
+REM --- Verificar variables antes de escribir ---
+echo.
+echo Verificando configuración...
+echo PC_ID=%PC_ID%
+echo WORKER_TYPE=%WORKER_TYPE%
+echo BACKEND_URL=%BACKEND_URL%
+echo PROCESS_DELAY=%PROCESS_DELAY%
+
+REM --- Crear .env dentro de Workers-T3 ---
+echo.
+echo Guardando configuración...
+(
+    echo PC_ID=%PC_ID%
+    echo WORKER_TYPE=%WORKER_TYPE%
+    echo BACKEND_URL=%BACKEND_URL%
+    echo PROCESS_DELAY=%PROCESS_DELAY%
+    echo POLL_INTERVAL=2
+    echo CONNECTION_TIMEOUT=10
+    echo LOG_LEVEL=INFO
+) > .env
+
+echo.
+echo =====================================
+echo CONFIGURACION GUARDADA:
+echo =====================================
+type .env
+echo =====================================
+echo.
+echo ✓ Configuración creada exitosamente
 echo Ahora ejecuta run_worker.bat
 pause
