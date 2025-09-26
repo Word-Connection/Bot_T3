@@ -45,19 +45,32 @@ if not args.api_key:
 # Configuración de logging
 # -----------------------------
 log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-logging.basicConfig(
-    level=log_level,
-    format='{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}',
-    handlers=[
-        logging.FileHandler(f"logs/worker_{args.pc_id}.log"),
-        logging.StreamHandler()
-    ]
+
+# Formato consola (legible)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(log_level)
+console_formatter = logging.Formatter(
+    "[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
+    datefmt="%H:%M:%S"
 )
+console_handler.setFormatter(console_formatter)
+
+# Formato archivo (JSON estructurado)
+file_handler = logging.FileHandler(f"logs/worker_{args.pc_id}.log")
+file_handler.setLevel(log_level)
+file_formatter = logging.Formatter(
+    '{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}'
+)
+file_handler.setFormatter(file_formatter)
+
+# Configuración raíz
+logging.basicConfig(level=log_level, handlers=[console_handler, file_handler])
 logger = logging.getLogger(f"worker_{args.pc_id}")
+
 
 # -----------------------------
 # Variables globales
-# -----------------------------
+# -----------------------------º
 PC_ID = args.pc_id
 TIPO = args.tipo
 BACKEND = args.backend
@@ -149,7 +162,8 @@ def get_task() -> Optional[dict]:
         if not validate_dni(task["datos"]):
             logger.error(f"[ERROR] DNI inválido: {task['datos']}")
             return None
-        logger.info(f"[RECIBIDO] Nueva tarea recibida: {task['task_id']}")
+        logger.info("===== NUEVA TAREA =====")
+        logger.info(f"[TAREA] ID={task['task_id']} DNI={task['datos']} Tipo={TIPO}")
         return task
     elif result.get("status") == "empty":
         logger.debug("[VACÍO] No hay tareas disponibles")
@@ -162,7 +176,7 @@ def get_task() -> Optional[dict]:
 def process_task(task: dict) -> bool:
     task_id = task["task_id"]
     dni = task["datos"]
-    logger.info(f"[PROCESO] Iniciando scraping DNI {dni} | Task: {task_id}")
+    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id}")
     
     if not check_vpn():
         logger.error("[VPN] Conexión VPN no disponible")
@@ -181,7 +195,7 @@ def process_task(task: dict) -> bool:
             ["python", script_path, dni],
             capture_output=True,
             text=True,
-            timeout=240  # 4 minutos máximo
+            timeout=240  
         )
         
         if process.returncode != 0:
@@ -198,10 +212,11 @@ def process_task(task: dict) -> bool:
                 "dni": dni,
                 "etapa": i,
                 "info": stage_data.get("info"),
-                "image": stage_data.get("image")  # Base64 o path
+                "image": stage_data.get("image")  
             }
             send_partial_update(task_id, partial_data)
-            time.sleep(random.uniform(1, 3))  # Simula delay entre etapas
+            logger.info(f"[PARCIAL] Task={task_id} Etapa={i} Info={partial_data.get('info')}")
+            time.sleep(random.uniform(1, 3))  
         
         logger.info(f"[OK] Scraping de {task_id} completado")
         return True
