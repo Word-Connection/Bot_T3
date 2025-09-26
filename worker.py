@@ -16,7 +16,7 @@ import pytz
 import re
 
 load_dotenv()
-
+os.makedirs("logs", exist_ok=True)
 # -----------------------------
 # Configuración de argumentos
 # -----------------------------

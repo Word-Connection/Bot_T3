@@ -48,9 +48,14 @@ if not exist venv (
 REM --- Activar entorno virtual ---
 call venv\Scripts\activate.bat
 
-REM --- Instalar dependencias ---
-echo Instalando dependencias...
-pip install requests python-dotenv
+REM --- Instalar dependencias desde requirements.txt ---
+if not exist requirements.txt (
+    echo ERROR: No se encontro requirements.txt en el directorio Workers-T3
+    pause
+    exit /b 1
+)
+echo Instalando dependencias desde requirements.txt...
+pip install -r requirements.txt
 if !ERRORLEVEL! neq 0 (
     echo ERROR: No se pudieron instalar las dependencias.
     pause
@@ -97,8 +102,16 @@ set "DEFAULT_BACKEND=http://192.168.9.160:8000"
 set /p BACKEND_URL="URL del servidor [!DEFAULT_BACKEND!]: "
 if "!BACKEND_URL!"=="" set "BACKEND_URL=!DEFAULT_BACKEND!"
 
+REM API Key (contraseña)
+set /p API_KEY="Clave API (lucas123): "
+if "!API_KEY!"=="" (
+    echo ERROR: La clave API es obligatoria.
+    pause
+    exit /b 1
+)
+
 REM Process Delay
-set "DEFAULT_DELAY=5"
+set "DEFAULT_DELAY=30"
 set /p PROCESS_DELAY="Tiempo de procesamiento [!DEFAULT_DELAY!]: "
 if "!PROCESS_DELAY!"=="" set "PROCESS_DELAY=!DEFAULT_DELAY!"
 
@@ -110,6 +123,7 @@ echo =====================================
 echo PC_ID=!PC_ID!
 echo WORKER_TYPE=!WORKER_TYPE!
 echo BACKEND_URL=!BACKEND_URL!
+echo API_KEY=!API_KEY!
 echo PROCESS_DELAY=!PROCESS_DELAY!
 echo =====================================
 echo.
@@ -126,10 +140,14 @@ echo Guardando configuracion...
 echo PC_ID=!PC_ID!> .env
 echo WORKER_TYPE=!WORKER_TYPE!>> .env
 echo BACKEND_URL=!BACKEND_URL!>> .env
+echo API_KEY=!API_KEY!>> .env
 echo PROCESS_DELAY=!PROCESS_DELAY!>> .env
-echo POLL_INTERVAL=2>> .env
-echo CONNECTION_TIMEOUT=10>> .env
+echo POLL_INTERVAL=5>> .env
+echo CONNECTION_TIMEOUT=300>> .env
 echo LOG_LEVEL=INFO>> .env
+echo TIMEZONE=America/Argentina/Buenos_Aires>> .env
+echo OPERATING_START=09:00>> .env
+echo OPERATING_END=21:00>> .env
 
 REM --- Verificar que se creó correctamente ---
 if exist .env (
