@@ -105,15 +105,6 @@ def is_within_operating_hours():
     end_time = datetime.strptime(OPERATING_END, "%H:%M").replace(tzinfo=tz, year=now.year, month=now.month, day=now.day)
     return start_time <= now <= end_time
 
-def check_vpn() -> bool:
-    try:
-        # Simula verificación de VPN (reemplazar con IP o host real)
-        result = subprocess.run(["ping", "-c", "1", "remote.vpn.host"], capture_output=True, timeout=5)
-        return result.returncode == 0
-    except subprocess.SubprocessError as e:
-        logger.error(f"[VPN] Error verificando VPN: {e}")
-        stats["vpn_errors"] += 1
-        return False
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, timeout: int = 300):
@@ -177,20 +168,14 @@ def process_task(task: dict) -> bool:
     task_id = task["task_id"]
     dni = task["datos"]
     logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id}")
-    
-    if not check_vpn():
-        logger.error("[VPN] Conexión VPN no disponible")
-        return False
-    
+   
     try:
-        # Reemplazar con script real (deudas.py o movimientos.py)
         script_path = f"scripts/{TIPO}.py"
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script {script_path} no encontrado")
             stats["scraping_errors"] += 1
             return False
         
-        # Ejecutar script de scraping
         process = subprocess.run(
             ["python", script_path, dni],
             capture_output=True,
