@@ -106,7 +106,7 @@ def is_within_operating_hours():
     return start_time <= now <= end_time
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
 def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, timeout: int = 300):
     url = f"{BACKEND}{endpoint}"
     headers = {"X-API-KEY": API_KEY}
@@ -117,6 +117,10 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
             response = requests.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[HTTP] Error HTTP en {method} {endpoint}: {e} | Response: {e.response.text if e.response else 'No response'}")
+        stats["connection_errors"] += 1
+        raise
     except Exception as e:
         logger.error(f"[HTTP] Error en {method} {endpoint}: {e}")
         stats["connection_errors"] += 1
@@ -141,8 +145,9 @@ def register_pc() -> bool:
     return False
 
 def get_task() -> Optional[dict]:
+    logger.info("[POLL] Intentando obtener tarea...")
     if not is_within_operating_hours():
-        logger.debug("[HORARIO] Fuera de horario operativo, esperando...")
+        logger.info("[HORARIO] Fuera de horario operativo, esperando...")
         return None
     payload = {"pc_id": PC_ID, "tipo": TIPO}
     result = make_request("POST", "/workers/get_task", payload)
@@ -157,7 +162,7 @@ def get_task() -> Optional[dict]:
         logger.info(f"[TAREA] ID={task['task_id']} DNI={task['datos']} Tipo={TIPO}")
         return task
     elif result.get("status") == "empty":
-        logger.debug("[VACÍO] No hay tareas disponibles")
+        logger.info("[VACÍO] No hay tareas disponibles")
         return None
     else:
         logger.warning(f"[ADVERTENCIA] Respuesta inesperada de get_task: {result}")
@@ -171,8 +176,12 @@ def process_task(task: dict) -> bool:
    
     try:
         script_path = f"scripts/{TIPO}.py"
+        #Para test sin el scrapping
+        script_path = f"scripts/{TIPO}-test.py"
+        
+        # Validar que el script existe
         if not os.path.exists(script_path):
-            logger.error(f"[ERROR] Script {script_path} no encontrado")
+            logger.error(f"[ERROR] Script no encontrado: {script_path}")
             stats["scraping_errors"] += 1
             return False
         
@@ -180,37 +189,67 @@ def process_task(task: dict) -> bool:
             ["python", script_path, dni],
             capture_output=True,
             text=True,
-            timeout=240  
+            timeout=240
         )
         
         if process.returncode != 0:
-            logger.error(f"[ERROR] Fallo en scraping: {process.stderr}")
+            logger.error(f"[ERROR] Fallo en scraping (code {process.returncode}): {process.stderr}")
             stats["scraping_errors"] += 1
             return False
         
-        # Procesar salida del script (simulado: asumir JSON con texto/imágenes)
-        output = json.loads(process.stdout)
-        stages = output.get("stages", [])
+        # Buscar JSON en stdout
+        output = process.stdout.strip()
+        if not output:
+            logger.error(f"[ERROR] Sin output del script")
+            stats["scraping_errors"] += 1
+            return False
         
+        # Parsear JSON
+        pos = output.find('{')
+        if pos == -1:
+            logger.error(f"[ERROR] No JSON en output: {output[:200]}")
+            stats["scraping_errors"] += 1
+            return False
+        
+        json_str = output[pos:]
+        data = json.loads(json_str)
+        
+        # Validar estructura
+        if "stages" not in data:
+            logger.error(f"[ERROR] JSON sin 'stages': {data}")
+            stats["scraping_errors"] += 1
+            return False
+        
+        stages = data["stages"]
+        logger.info(f"[SCRAPING] Procesando {len(stages)} etapas para {task_id}")
+        
+        # Enviar updates parciales
         for i, stage_data in enumerate(stages, 1):
             partial_data = {
                 "dni": dni,
                 "etapa": i,
-                "info": stage_data.get("info"),
-                "image": stage_data.get("image")  
+                "total_etapas": len(stages),  # <- Útil para dashboard
+                "info": stage_data.get("info", "Sin info"),
+                "image": stage_data.get("image"),
+                "timestamp": int(time.time())
             }
             send_partial_update(task_id, partial_data)
-            logger.info(f"[PARCIAL] Task={task_id} Etapa={i} Info={partial_data.get('info')}")
-            time.sleep(random.uniform(1, 3))  
+            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)}")
+            time.sleep(random.uniform(0.5, 1.5))  # Reducir delay
         
-        logger.info(f"[OK] Scraping de {task_id} completado")
+        logger.info(f"[OK] Scraping de {task_id} completado ({len(stages)} etapas)")
         return True
+        
     except subprocess.TimeoutExpired:
-        logger.error(f"[ERROR] Timeout en scraping para {task_id}")
+        logger.error(f"[ERROR] Timeout (240s) en scraping para {task_id}")
+        stats["scraping_errors"] += 1
+        return False
+    except json.JSONDecodeError as e:
+        logger.error(f"[ERROR] JSON inválido en {task_id}: {e}")
         stats["scraping_errors"] += 1
         return False
     except Exception as e:
-        logger.error(f"[ERROR] Error procesando {task_id}: {e}")
+        logger.error(f"[ERROR] Excepción procesando {task_id}: {e}", exc_info=True)
         stats["scraping_errors"] += 1
         return False
 
@@ -223,12 +262,15 @@ def send_partial_update(task_id: str, partial_data: dict):
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
 
-def task_done(task_id: str) -> bool:
-    payload = {"pc_id": PC_ID, "task_id": task_id}
+def task_done(task_id: str, execution_time: int) -> bool:  
+    payload = {
+        "pc_id": PC_ID, 
+        "task_id": task_id,
+        "execution_time": execution_time  
+    }
     result = make_request("POST", "/workers/task_done", payload)
     if result and result.get("status") == "ok":
-        exec_time = result.get("execution_time_seconds", "?")
-        logger.info(f"[ENVIADO] Tarea {task_id} reportada como completada | Tiempo backend: {exec_time}s")
+        logger.info(f"[ENVIADO] Tarea {task_id} completada en {execution_time}s")
         return True
     logger.error(f"[ERROR] Fallo reportando tarea {task_id}")
     return False
@@ -262,14 +304,19 @@ def main_loop():
             
             task = get_task()
             if task:
-                if process_task(task):
-                    if task_done(task["task_id"]):
+                start_time = time.time()  
+                success = process_task(task)
+                execution_time = int(time.time() - start_time)  
+                
+                if success:
+                    if task_done(task["task_id"], execution_time): 
                         stats["tasks_completed"] += 1
                     else:
                         stats["tasks_failed"] += 1
                 else:
                     stats["tasks_failed"] += 1
-                    task_done(task["task_id"])  # Reportar fallo
+                    task_done(task["task_id"], execution_time)  
+            
             time.sleep(POLL_INTERVAL)
         
         except KeyboardInterrupt:
