@@ -186,7 +186,7 @@ def process_task(task: dict) -> bool:
             return False
         
         process = subprocess.run(
-            ["python3", script_path, dni],
+            ["python", script_path, dni],
             capture_output=True,
             text=True,
             timeout=240
