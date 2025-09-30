@@ -176,13 +176,13 @@ def process_task(task: dict) -> bool:
    
     try:
         script_path = f"scripts/{TIPO}.py"
-        #Para test sin el scrapping
+        # Para test sin el scrapping
         script_path = f"scripts/{TIPO}-test.py"
         
-        # Validar que el script existe
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script no encontrado: {script_path}")
             stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": "Script no encontrado"}, status="error")
             return False
         
         process = subprocess.run(
@@ -195,65 +195,62 @@ def process_task(task: dict) -> bool:
         if process.returncode != 0:
             logger.error(f"[ERROR] Fallo en scraping (code {process.returncode}): {process.stderr}")
             stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": "Error en script"}, status="error")
             return False
         
-        # Buscar JSON en stdout
         output = process.stdout.strip()
         if not output:
             logger.error(f"[ERROR] Sin output del script")
             stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": "Sin output"}, status="error")
             return False
         
-        # Parsear JSON
         pos = output.find('{')
         if pos == -1:
             logger.error(f"[ERROR] No JSON en output: {output[:200]}")
             stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": "JSON inválido"}, status="error")
             return False
         
-        json_str = output[pos:]
-        data = json.loads(json_str)
+        data = json.loads(output[pos:])
         
-        # Validar estructura
         if "stages" not in data:
             logger.error(f"[ERROR] JSON sin 'stages': {data}")
             stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": "JSON sin 'stages'"}, status="error")
             return False
         
         stages = data["stages"]
         logger.info(f"[SCRAPING] Procesando {len(stages)} etapas para {task_id}")
         
-        # Enviar updates parciales
+        # Enviar updates parciales con status="running"
         for i, stage_data in enumerate(stages, 1):
             partial_data = {
                 "dni": dni,
                 "etapa": i,
-                "total_etapas": len(stages),  # <- Útil para dashboard
+                "total_etapas": len(stages),
                 "info": stage_data.get("info", "Sin info"),
                 "image": stage_data.get("image"),
                 "timestamp": int(time.time())
             }
-            send_partial_update(task_id, partial_data)
+            send_partial_update(task_id, partial_data, status="running")
             logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)}")
-            time.sleep(random.uniform(0.5, 1.5))  # Reducir delay
+            time.sleep(random.uniform(0.5, 1.5))
         
+        # Último update con status="completed"
+        send_partial_update(task_id, {"info": "Tarea completada"}, status="completed")
         logger.info(f"[OK] Scraping de {task_id} completado ({len(stages)} etapas)")
         return True
-        
-    except subprocess.TimeoutExpired:
-        logger.error(f"[ERROR] Timeout (240s) en scraping para {task_id}")
-        stats["scraping_errors"] += 1
-        return False
-    except json.JSONDecodeError as e:
-        logger.error(f"[ERROR] JSON inválido en {task_id}: {e}")
-        stats["scraping_errors"] += 1
-        return False
+
     except Exception as e:
         logger.error(f"[ERROR] Excepción procesando {task_id}: {e}", exc_info=True)
         stats["scraping_errors"] += 1
+        send_partial_update(task_id, {"info": f"Excepción: {e}"}, status="error")
         return False
 
-def send_partial_update(task_id: str, partial_data: dict):
+
+def send_partial_update(task_id: str, partial_data: dict, status: str = "running"):
+    partial_data["status"] = status
     payload = {"task_id": task_id, "partial_data": partial_data}
     result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
@@ -261,6 +258,7 @@ def send_partial_update(task_id: str, partial_data: dict):
         return True
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
+
 
 def task_done(task_id: str, execution_time: int) -> bool:  
     payload = {

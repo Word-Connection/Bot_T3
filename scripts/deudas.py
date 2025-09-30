@@ -11,12 +11,11 @@ def get_image_base64(image_path: str) -> str:
     """Convierte imagen a JPEG base64 optimizado."""
     try:
         with Image.open(image_path) as img:
-            # Convertir a RGB si es necesario
             if img.mode in ('RGBA', 'LA', 'P'):
                 img = img.convert('RGB')
             
             buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=85)  # 85% es suficiente
+            img.save(buffer, format='JPEG', quality=85)  
             return base64.b64encode(buffer.getvalue()).decode()
     except Exception as e:
         print(f"ERROR: Fallo convirtiendo imagen {image_path}: {e}", file=sys.stderr)
