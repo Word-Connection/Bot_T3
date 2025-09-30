@@ -7,6 +7,7 @@ import random
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
+
 def generate_fake_image(text: str, width: int = 800, height: int = 600) -> str:
     """Genera una imagen simulada con texto."""
     img = Image.new('RGB', (width, height), color=(240, 240, 245))
