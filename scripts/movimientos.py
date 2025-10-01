@@ -28,7 +28,7 @@ def main():
     })
 
     # Ruta al CSV principal
-    csv_main = Path(__file__).parent / '../../../20250918_Mza_MIXTA_TM_TT.csv'
+    csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
     if not csv_main.exists():
         print(json.dumps({"error": "CSV principal no encontrado"}))
         sys.exit(1)
@@ -77,9 +77,9 @@ def main():
         tmp_csv = tmp.name
 
     # Ejecutar run_camino_b_multi.py
-    script_path = Path(__file__).parent / '../../../run_camino_b_multi.py'
-    coords_path = Path(__file__).parent / '../../../camino_b_coords_multi.json'
-    log_path = Path(__file__).parent / '../../../multi_copias.log'
+    script_path = Path(__file__).parent / '../../run_camino_b_multi.py'
+    coords_path = Path(__file__).parent / '../../camino_b_coords_multi.json'
+    log_path = Path(__file__).parent / '../../multi_copias.log'
 
     try:
         result_proc = subprocess.run([
