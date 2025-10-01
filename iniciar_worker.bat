@@ -10,9 +10,9 @@ echo.
 
 REM ===== CONFIGURACIÓN DE RUTAS Y TOKEN =====
 REM IMPORTANTE: Reemplaza con tu nuevo token regenerado
-set "GIT_TOKEN=TU_NUEVO_TOKEN_AQUI"
-set "GIT_REPO_URL=https://%GIT_TOKEN%@github.com/Word-Connection/frontend-T3.git"
-set "REPO_DIR=frontend-T3"
+set "GIT_TOKEN=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"
+set "GIT_REPO_URL=https://%GIT_TOKEN%@github.com/Word-Connection/Workers-T3.git"
+set "REPO_DIR=Workers-T3"
 
 REM ===== CLONAR O ACTUALIZAR REPOSITORIO =====
 echo [1/6] Verificando repositorio...
@@ -66,7 +66,7 @@ if exist "venv" (
     python -m venv venv
     if %errorlevel% neq 0 (
         echo [ERROR] No se pudo crear el entorno virtual
-        echo Verifica que Python esté instalado (python --version)
+        echo Verifica que Python esté instalado: python --version
         pause
         exit /b 1
     )
