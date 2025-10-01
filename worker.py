@@ -251,7 +251,10 @@ def process_task(task: dict) -> bool:
                 pass
         
         if process.returncode != 0:
-            logger.error(f"[ERROR] Fallo en scraping (code {process.returncode}): {stderr_output[:500]}")
+            logger.error(f"[ERROR] Fallo en scraping (code {process.returncode})")
+            logger.error(f"[STDOUT]:\n{output}")
+            logger.error(f"[STDERR]:\n{stderr_output}")
+
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Error en script"}, status="error")
             return False
