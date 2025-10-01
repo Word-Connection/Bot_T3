@@ -1,0 +1,14 @@
+.
+├── iniciar_worker.bat
+├── requirements.txt
+├── run-WORKER.bat
+├── scripts
+│   ├── deudas.py
+│   ├── deudas-test.py
+│   └── movimientos.py
+├── tree.txt
+├── worker-deudas.py
+├── worker-movimientos.py
+└── worker.py
+
+198 directories, 2143 files
