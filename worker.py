@@ -1,4 +1,3 @@
-
 import requests
 import time
 import argparse
@@ -17,10 +16,11 @@ import re
 
 load_dotenv()
 os.makedirs("logs", exist_ok=True)
+
 # -----------------------------
 # Configuración de argumentos
 # -----------------------------
-parser = argparse.ArgumentParser(description="Cliente de PC para T3")
+parser = argparse.ArgumentParser(description="Cliente Worker Unificado para T3")
 parser.add_argument("--pc_id", default=os.getenv("PC_ID"), help="ID de la PC (ej: pc1)")
 parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE"), help="Tipo de automatización (deudas/movimientos)")
 parser.add_argument("--backend", default=os.getenv("BACKEND_URL", "http://192.168.9.160:8000"), help="URL del backend")
@@ -28,7 +28,6 @@ parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", 
 parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "5")), help="Intervalo entre polls (segundos)")
 parser.add_argument("--log_level", default=os.getenv("LOG_LEVEL", "INFO"), help="Nivel de log (DEBUG, INFO, WARNING, ERROR)")
 parser.add_argument("--api_key", default=os.getenv("API_KEY"), help="API key para autenticación")
-parser.add_argument("--new_console", action="store_true", default=os.getenv("NEW_CONSOLE", "0") == "1", help="Abrir nueva consola al ejecutar el script externo")
 
 args = parser.parse_args()
 
@@ -47,7 +46,6 @@ if not args.api_key:
 # -----------------------------
 log_level = getattr(logging, args.log_level.upper(), logging.INFO)
 
-# Formato consola (legible)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(log_level)
 console_formatter = logging.Formatter(
@@ -56,7 +54,6 @@ console_formatter = logging.Formatter(
 )
 console_handler.setFormatter(console_formatter)
 
-# Formato archivo (JSON estructurado)
 file_handler = logging.FileHandler(f"logs/worker_{args.pc_id}.log")
 file_handler.setLevel(log_level)
 file_formatter = logging.Formatter(
@@ -64,14 +61,12 @@ file_formatter = logging.Formatter(
 )
 file_handler.setFormatter(file_formatter)
 
-# Configuración raíz
 logging.basicConfig(level=log_level, handlers=[console_handler, file_handler])
 logger = logging.getLogger(f"worker_{args.pc_id}")
 
-
 # -----------------------------
 # Variables globales
-# -----------------------------º
+# -----------------------------
 PC_ID = args.pc_id
 TIPO = args.tipo
 BACKEND = args.backend
@@ -82,7 +77,6 @@ TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
 OPERATING_START = os.getenv("OPERATING_START", "09:00")
 OPERATING_END = os.getenv("OPERATING_END", "21:00")
 VALID_TASK_TYPES = ["deudas", "movimientos"]
-NEW_CONSOLE = args.new_console
 
 stats = {
     "tasks_completed": 0,
@@ -98,7 +92,9 @@ stats = {
 # -----------------------------
 def log_stats():
     uptime = time.time() - stats["started_at"]
-    logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
+    logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
+                f"Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | "
+                f"Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
 
 def is_within_operating_hours():
     tz = pytz.timezone(TIMEZONE)
@@ -170,40 +166,25 @@ def get_task() -> Optional[dict]:
         logger.warning(f"[ADVERTENCIA] Respuesta inesperada de get_task: {result}")
         return None
 
+
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=5, max=15))
 def process_task(task: dict) -> bool:
     task_id = task["task_id"]
     dni = task["datos"]
-    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id}")
+    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id} | Tipo: {TIPO}")
    
     try:
-        # Importar módulos de captura EN EL WORKER (no en subproceso)
-        from PIL import Image, ImageGrab
-        import base64
-        import io
-        
-        # Resolver el script de forma absoluta relativo a este archivo
+        # Resolver el script de forma absoluta
         base_dir = os.path.dirname(__file__)
         script_path = os.path.join(base_dir, 'scripts', f"{TIPO}.py")
-        
-        # Cargar coordenadas para captura
-        coords_file = os.path.join(os.path.dirname(base_dir), 'camino_c_coords_multi.json')
-        with open(coords_file, 'r', encoding='utf-8') as f:
-            coords = json.load(f)
-        
-        region = coords.get('screenshot_region', {})
-        rx = region.get('x', 1922)
-        ry = region.get('y', 47)
-        rw = region.get('w', 1761)
-        rh = region.get('h', 365)
-        
-        logger.info(f"[WORKER] Ejecutando script de automatizacion...")
         
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script no encontrado: {script_path}")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Script no encontrado"}, status="error")
             return False
+        
+        logger.info(f"[WORKER] Ejecutando script de automatización: {script_path}")
         
         # Archivos temporales para stdout/stderr
         import tempfile
@@ -213,16 +194,16 @@ def process_task(task: dict) -> bool:
             err_file = tmp_err.name
         
         try:
-            # Ejecutar script SIN captura de pantalla (--no-screenshot flag)
-            # El script debe soportar este flag para saltar la captura
+            # Ejecutar script con timeout según tipo
+            timeout = 360 if TIPO == "deudas" else 600  # 6 min para deudas, 10 min para movimientos
+            
             with open(out_file, 'wb') as f_out, open(err_file, 'wb') as f_err:
-                # Ejecutar normalmente - el script hará su trabajo
                 process = subprocess.run(
                     [sys.executable, script_path, dni],
                     stdout=f_out,
                     stderr=f_err,
                     cwd=os.path.dirname(script_path),
-                    timeout=360
+                    timeout=timeout
                 )
             
             # Leer los resultados
@@ -254,7 +235,6 @@ def process_task(task: dict) -> bool:
             logger.error(f"[ERROR] Fallo en scraping (code {process.returncode})")
             logger.error(f"[STDOUT]:\n{output}")
             logger.error(f"[STDERR]:\n{stderr_output}")
-
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Error en script"}, status="error")
             return False
@@ -265,53 +245,7 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": "Sin output"}, status="error")
             return False
         
-        # **BUSCAR IMAGEN GENERADA POR EL SCRIPT EN CAPTURAS_CAMINO_C**
-        logger.info(f"[WORKER] Buscando imagen generada por script...")
-        screenshot_b64 = None
-        
-        try:
-            # Directorio donde el script guarda las capturas
-            capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
-            
-            # Buscar imagen con el DNI en el nombre (formato: score_DNI_timestamp.png)
-            import glob
-            pattern = os.path.join(capturas_dir, f'score_{dni}_*.png')
-            matching_files = glob.glob(pattern)
-            
-            if matching_files:
-                # Tomar la imagen más reciente
-                latest_image = max(matching_files, key=os.path.getctime)
-                logger.info(f"[WORKER] Imagen encontrada: {os.path.basename(latest_image)}")
-                
-                # Leer y convertir a base64
-                with open(latest_image, 'rb') as img_file:
-                    img_data = img_file.read()
-                    screenshot_b64 = base64.b64encode(img_data).decode()
-                    logger.info(f"[WORKER] Imagen cargada: {len(screenshot_b64)} bytes")
-                
-                # Opcional: verificar la imagen
-                try:
-                    img = Image.open(latest_image)
-                    logger.info(f"[WORKER] Imagen válida: {img.size}, formato={img.format}")
-                except Exception as img_error:
-                    logger.warning(f"[WORKER] Advertencia verificando imagen: {img_error}")
-                    
-            else:
-                logger.warning(f"[WORKER] No se encontró imagen para DNI {dni} en {capturas_dir}")
-                logger.info(f"[WORKER] Patrón de búsqueda: {pattern}")
-                
-                # Listar archivos disponibles para debug
-                try:
-                    all_files = os.listdir(capturas_dir) if os.path.exists(capturas_dir) else []
-                    logger.info(f"[WORKER] Archivos en capturas_camino_c: {all_files}")
-                except Exception:
-                    logger.warning(f"[WORKER] No se pudo listar directorio {capturas_dir}")
-                    
-        except Exception as e:
-            logger.error(f"[WORKER] Error buscando imagen: {e}", exc_info=True)
-            screenshot_b64 = None
-        
-        # Extraer JSON del stdout (lo que imprime scripts/deudas.py)
+        # Parsear JSON del output
         data = None
         try:
             pos = output.find('{')
@@ -319,39 +253,22 @@ def process_task(task: dict) -> bool:
                 data = json.loads(output[pos:])
         except Exception as e:
             logger.warning(f"[WARN] No se pudo parsear JSON de salida: {e}")
-            data = None
+            send_partial_update(task_id, {"info": "Error parseando resultado"}, status="error")
+            return False
 
-        # Extraer score del JSON o del output
-        score_val = None
-        if data and isinstance(data, dict):
-            score_val = data.get("score")
-        
-        # Si no hay screenshot del worker, intentar usar la del script (fallback)
-        if not screenshot_b64 and data and isinstance(data, dict):
-            try:
-                stages = data.get("stages") or []
-                if stages and isinstance(stages, list):
-                    screenshot_b64 = stages[0].get("image")
-                    if screenshot_b64:
-                        logger.info(f"[WORKER] Usando captura del script como fallback")
-            except Exception:
-                pass
+        if not data or not isinstance(data, dict):
+            logger.error(f"[ERROR] Datos inválidos del script")
+            send_partial_update(task_id, {"info": "Datos inválidos"}, status="error")
+            return False
 
-        # Construir payload final
-        partial = {
-            "dni": dni,
-            "success": True,
-            "score": score_val,
-            "image": screenshot_b64,
-        }
-        
-        if not screenshot_b64:
-            logger.warning(f"[WORKER] ADVERTENCIA: No se pudo capturar pantalla")
-        
-        # Enviar update completed
-        send_partial_update(task_id, partial, status="completed")
-        logger.info(f"[OK] Scraping de {task_id} completado")
-        return True
+        # Procesar según el tipo de tarea
+        if TIPO == "deudas":
+            return process_deudas_result(task_id, dni, data)
+        elif TIPO == "movimientos":
+            return process_movimientos_result(task_id, dni, data)
+        else:
+            logger.error(f"[ERROR] Tipo desconocido: {TIPO}")
+            return False
 
     except subprocess.TimeoutExpired:
         logger.error(f"[ERROR] Timeout ejecutando script para {task_id}")
@@ -365,22 +282,114 @@ def process_task(task: dict) -> bool:
         return False
 
 
+def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
+    """Procesa resultado del script de deudas (con captura de imagen)."""
+    try:
+        import base64
+        import glob
+        
+        score_val = data.get("score", "No encontrado")
+        
+        # Buscar imagen generada por el script
+        base_dir = os.path.dirname(__file__)
+        capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
+        
+        screenshot_b64 = None
+        pattern = os.path.join(capturas_dir, f'score_{dni}_*.png')
+        matching_files = glob.glob(pattern)
+        
+        if matching_files:
+            latest_image = max(matching_files, key=os.path.getctime)
+            logger.info(f"[WORKER] Imagen encontrada: {os.path.basename(latest_image)}")
+            
+            with open(latest_image, 'rb') as img_file:
+                img_data = img_file.read()
+                screenshot_b64 = base64.b64encode(img_data).decode()
+                logger.info(f"[WORKER] Imagen cargada: {len(screenshot_b64)} bytes")
+        else:
+            logger.warning(f"[WORKER] No se encontró imagen para DNI {dni}")
+            # Intentar usar imagen del JSON si existe
+            stages = data.get("stages", [])
+            if stages and isinstance(stages, list) and stages[0].get("image"):
+                screenshot_b64 = stages[0].get("image")
+                logger.info(f"[WORKER] Usando captura del script como fallback")
+        
+        # Enviar update final
+        partial = {
+            "dni": dni,
+            "success": True,
+            "score": score_val,
+            "image": screenshot_b64,
+        }
+        
+        if not screenshot_b64:
+            logger.warning(f"[WORKER] ADVERTENCIA: No se pudo obtener imagen")
+        
+        send_partial_update(task_id, partial, status="completed")
+        logger.info(f"[OK] Procesamiento deudas de {task_id} completado | Score: {score_val}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error procesando deudas: {e}", exc_info=True)
+        return False
+
+
+def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
+    """Procesa resultado del script de movimientos (múltiples stages)."""
+    try:
+        stages = data.get("stages", [])
+        
+        if not stages:
+            logger.warning(f"[WARN] No hay stages en el resultado")
+            send_partial_update(task_id, {"info": "Sin resultados"}, status="error")
+            return False
+        
+        # Enviar cada stage como actualización parcial
+        for i, stage_data in enumerate(stages, 1):
+            info = stage_data.get("info", "")
+            
+            partial_data = {
+                "dni": dni,
+                "etapa": i,
+                "info": info,
+                "total_etapas": len(stages)
+            }
+            
+            # Último stage marca como completed
+            status = "completed" if i == len(stages) else "running"
+            send_partial_update(task_id, partial_data, status=status)
+            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info}")
+            
+            # Pequeña pausa entre stages
+            if i < len(stages):
+                time.sleep(random.uniform(0.5, 1.5))
+        
+        logger.info(f"[OK] Procesamiento movimientos de {task_id} completado | {len(stages)} etapas")
+        return True
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error procesando movimientos: {e}", exc_info=True)
+        return False
+
+
 def send_partial_update(task_id: str, partial_data: dict, status: str = "running"):
+    """Envía actualización parcial al backend."""
     partial_data["status"] = status
     payload = {"task_id": task_id, "partial_data": partial_data}
     result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
-        logger.info(f"[PARCIAL] Actualización enviada para {task_id}: {partial_data}")
+        logger.info(f"[PARCIAL] Actualización enviada para {task_id} (status={status})")
         return True
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
 
 
-def task_done(task_id: str, execution_time: int) -> bool:  
+def task_done(task_id: str, execution_time: int) -> bool:
+    """Reporta tarea completada al backend."""
     payload = {
         "pc_id": PC_ID, 
         "task_id": task_id,
-        "execution_time": execution_time  
+        "execution_time": execution_time
     }
     result = make_request("POST", "/workers/task_done", payload)
     if result and result.get("status") == "ok":
@@ -389,11 +398,12 @@ def task_done(task_id: str, execution_time: int) -> bool:
     logger.error(f"[ERROR] Fallo reportando tarea {task_id}")
     return False
 
+
 # -----------------------------
 # Loop principal
 # -----------------------------
 def main_loop():
-    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Poll: {POLL_INTERVAL}s | Delay: {PROCESS_DELAY}s")
+    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Poll: {POLL_INTERVAL}s")
     
     # Crear directorio de logs
     os.makedirs("logs", exist_ok=True)
@@ -418,18 +428,18 @@ def main_loop():
             
             task = get_task()
             if task:
-                start_time = time.time()  
+                start_time = time.time()
                 success = process_task(task)
-                execution_time = int(time.time() - start_time)  
+                execution_time = int(time.time() - start_time)
                 
                 if success:
-                    if task_done(task["task_id"], execution_time): 
+                    if task_done(task["task_id"], execution_time):
                         stats["tasks_completed"] += 1
                     else:
                         stats["tasks_failed"] += 1
                 else:
                     stats["tasks_failed"] += 1
-                    task_done(task["task_id"], execution_time)  
+                    task_done(task["task_id"], execution_time)
             
             time.sleep(POLL_INTERVAL)
         
@@ -441,6 +451,7 @@ def main_loop():
             logger.error(f"[ERROR] Inesperado en loop principal: {e}")
             stats["connection_errors"] += 1
             time.sleep(POLL_INTERVAL)
+
 
 # -----------------------------
 # Punto de entrada
