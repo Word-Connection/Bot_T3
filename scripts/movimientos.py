@@ -82,8 +82,24 @@ def main():
     log_path = Path(__file__).parent / '../../multi_copias.log'
 
     try:
+        # Usar el Python del sistema disponible
+        system_python = r"C:\Users\Usuario\AppData\Local\Programs\Python\Python313\python.exe"
+        
+        if not Path(system_python).exists():
+            stages.append({
+                "info": f"Error: No se encuentra Python en {system_python}"
+            })
+            result = {"dni": dni, "stages": stages}
+            print(json.dumps(result))
+            return
+            
+        python_exe = system_python
+        
+        # Log para debugging
+        print(f"DEBUG: Usando Python del sistema: {python_exe}", file=sys.stderr)
+        
         result_proc = subprocess.run([
-            sys.executable, str(script_path),
+            python_exe, str(script_path),
             '--dni', dni,
             '--csv', tmp_csv,
             '--coords', str(coords_path),
