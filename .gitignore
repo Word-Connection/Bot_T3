@@ -1,7 +1,6 @@
 __pycache__/
 venv/
 .venv/
-.env
 playwright-report/
 pytest_cache/
 *.log
