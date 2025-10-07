@@ -1,1 +1,16 @@
-venv
+__pycache__/
+venv/
+.venv/
+.env
+playwright-report/
+pytest_cache/
+*.log
+capturas/
+# Node modules (contiene chromium >100MB)
+node_modules/
+# Cachés y sesiones
+whatsapp_sessions/
+.wwebjs_cache/
+# Builds
+build/
+dist/

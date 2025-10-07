@@ -1,0 +1,131 @@
+{
+  "created_at": "2025-10-07T12:55:04",
+  "duration": 7.483937499999229,
+  "events": [
+    {
+      "t": 1.514164599999276,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 1.602109699999346,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 1.882443599999533,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 2.002119299999322,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 2.2821496999986266,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 2.3941049999993993,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 2.6421368999999686,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 2.778017299999192,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 3.034137599999667,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 3.2021152999986953,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 3.418138499999259,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 3.5860966999989614,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 3.8420798999995895,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 4.0100579999998445,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 4.2979965999984415,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 4.466099199999007,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 4.738017299998319,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 4.930023499999152,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 5.138117699998475,
+      "type": "key_down",
+      "key": "Key.right"
+    },
+    {
+      "t": 5.322092999998858,
+      "type": "key_up",
+      "key": "Key.right"
+    },
+    {
+      "t": 6.066120399998908,
+      "type": "key_down",
+      "key": "Key.ctrl"
+    },
+    {
+      "t": 6.218335899999147,
+      "type": "key_down",
+      "key": "\u0003"
+    },
+    {
+      "t": 6.314364399999249,
+      "type": "key_up",
+      "key": "\u0003"
+    },
+    {
+      "t": 6.337971599999946,
+      "type": "key_up",
+      "key": "Key.ctrl"
+    }
+  ],
+  "meta": {
+    "include_moves": false,
+    "move_interval": 0.12,
+    "stop_key": "F12"
+  }
+}

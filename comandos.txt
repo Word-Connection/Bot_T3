@@ -1,0 +1,9 @@
+WINDOWS
+python -m venv venv
+.\venv\Scripts\activate
+python Workers-T3/worker.py --tipo deduas --pc_id test --api_key lucas123 
+
+UBUNTU
+python3 -m venv venv
+source venv/bin/activate
+python3 Workers-T3/worker.py --tipo deduas --pc_id test --api_key lucas123 

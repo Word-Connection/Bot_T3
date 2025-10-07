@@ -1,0 +1,30 @@
+{
+  "dni_field": {
+    "x": 1560,
+    "y": 256
+  },
+  "service_id_field": {
+    "x": 305,
+    "y": 257
+  },
+  "first_row": {
+    "x": 951,
+    "y": 273
+  },
+  "actividad_btn": {
+    "x": 44,
+    "y": 272
+  },
+  "filtro_btn": {
+   "x": 832,
+    "y": 318
+  },
+  "close_tab_btn": {
+    "x": 1899,
+    "y": 134
+  },
+  "copy_area": {
+    "x": 837,
+    "y": 374
+  }
+}

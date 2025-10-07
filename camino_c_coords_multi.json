@@ -1,0 +1,85 @@
+{
+  "cliente_section": {
+    "x": 135,
+    "y": 168
+  },
+  "tipo_doc_btn": {
+    "x": 244,
+    "y": 237
+  },
+  "dni_option": {
+    "x": 140,
+    "y": 276
+  },
+  "dni_field": {
+    "x": 913,
+    "y": 240
+  },
+  "client_id_field": {
+    "x": 97,
+    "y": 237
+  },
+  "seleccionar_btn": {
+    "x": 37,
+    "y": 981
+  },
+  "nombre_cliente_btn": {
+    "x": 504,
+    "y": 111
+  },
+  "score_area_copy": {
+    "x": 981,
+    "y": 66
+  },
+  "copy_menu_option": {
+    "x": 1016,
+    "y": 76
+  },
+  "score_area_page": {
+    "x": 981,
+    "y": 66
+  },
+  "screenshot_confirm": {
+    "x": 953,
+    "y": 979
+  },
+  "close_tab_btn": {
+    "x": 1896,
+    "y": 138
+  },
+  "home_area": {
+    "x": 888,
+    "y": 110
+  },
+  "screenshot_top_left": {
+    "x": 10,
+    "y": 47
+  },
+  "screenshot_bottom_right": {
+    "x": 1763,
+    "y": 412
+  },
+  "screenshot_region": {
+    "x": 10,
+    "y": 47,
+    "w": 1720,
+    "h": 365
+  },
+  "clear_clipboard": {
+    "action": "clear_clipboard"
+  },
+  "steps": [
+    "cliente_section",
+    "tipo_doc_btn",
+    "dni_option",
+    "dni_field",
+    "client_id_field",
+    "seleccionar_btn",
+    "nombre_cliente_btn",
+    "score_area",
+    "screenshot_region",
+    "close_tab_btn",
+    "home_area",
+    "clear_clipboard"
+  ]
+}
