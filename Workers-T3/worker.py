@@ -198,54 +198,153 @@ def process_task(task: dict) -> bool:
         # Enviar actualización inicial
         send_partial_update(task_id, {"info": f"Iniciando automatización para DNI {dni}"}, status="running")
         
-        # Archivos temporales para stdout/stderr
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.out', delete=False) as tmp_out:
-            out_file = tmp_out.name
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.err', delete=False) as tmp_err:
-            err_file = tmp_err.name
+        # Ejecutar script con lectura en tiempo real para updates progresivos
+        timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
+        
+        # Usar Popen para leer output en tiempo real con unbuffered
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'  # Forzar unbuffered output
+        
+        process = subprocess.Popen(
+            [python_executable, '-u', script_path, dni],  # -u para unbuffered
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.path.dirname(script_path),
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=0,  # Unbuffered
+            universal_newlines=True,
+            env=env
+        )
+        
+        output_lines = []
+        stderr_lines = []
+        
+        # Variables para tracking de updates progresivos
+        score_sent = False
+        searching_sent = False
         
         try:
-            # Ejecutar script con timeout según tipo
-            timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
+            # Leer output línea por línea en tiempo real con polling agresivo
+            while True:
+                # Intentar leer línea con timeout corto
+                import select
+                import sys
+                
+                if sys.platform == 'win32':
+                    # En Windows, usar polling directo
+                    output_line = process.stdout.readline()
+                    if output_line:
+                        output_lines.append(output_line.strip())
+                        line = output_line.strip()
+                        logger.info(f"[REALTIME] Línea detectada: {line[:50]}...")
+                        
+                        # Buscar patrones para enviar updates progresivos
+                        if not score_sent and ("score" in line.lower()):
+                            # Intentar extraer el score y enviarlo inmediatamente
+                            try:
+                                import re
+                                score_match = re.search(r'score[:\s]*(\d+)', line, re.IGNORECASE)
+                                if score_match:
+                                    score_val = int(score_match.group(1))
+                                    logger.info(f"[REALTIME] Score {score_val} detectado INMEDIATAMENTE")
+                                    
+                                    # Buscar imagen de score con retry
+                                    import base64
+                                    import glob
+                                    base_dir = os.path.dirname(__file__)
+                                    capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
+                                    
+                                    screenshot_b64 = None
+                                    pattern = os.path.join(capturas_dir, f'score_{dni}_*.png')
+                                    
+                                    # Retry para encontrar imagen (puede tardar unos segundos)
+                                    for attempt in range(10):  # 10 intentos, 0.5s cada uno = 5s máximo
+                                        matching_files = glob.glob(pattern)
+                                        if matching_files:
+                                            latest_image = max(matching_files, key=os.path.getctime)
+                                            try:
+                                                with open(latest_image, 'rb') as img_file:
+                                                    img_data = img_file.read()
+                                                    screenshot_b64 = base64.b64encode(img_data).decode()
+                                                    logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
+                                                break
+                                            except Exception as img_e:
+                                                logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
+                                        time.sleep(0.5)  # Esperar 0.5s antes del siguiente intento
+                                    
+                                    # Enviar update del score con imagen inmediatamente
+                                    score_update = {
+                                        "dni": dni,
+                                        "score": score_val,
+                                        "etapa": "score_obtenido",
+                                        "info": f"Score obtenido: {score_val}",
+                                        "timestamp": int(time.time() * 1000)
+                                    }
+                                    
+                                    # Incluir imagen si existe
+                                    if screenshot_b64:
+                                        score_update["image"] = screenshot_b64
+                                    
+                                    send_partial_update(task_id, score_update, status="running")
+                                    logger.info(f"[SCORE] Enviado score {score_val} para DNI {dni} {'con imagen' if screenshot_b64 else 'sin imagen'}")
+                                    score_sent = True
+                                    
+                                    # Si el score está entre 80-89, preparar mensaje de búsqueda
+                                    if 80 <= score_val <= 89:
+                                        time.sleep(2)  # Pausa antes del siguiente update
+                                        
+                                        search_update = {
+                                            "dni": dni,
+                                            "score": score_val,
+                                            "etapa": "buscando_deudas",
+                                            "info": "Buscando deudas...",
+                                            "timestamp": int(time.time() * 1000)
+                                        }
+                                        
+                                        send_partial_update(task_id, search_update, status="running")
+                                        logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {dni}")
+                                        searching_sent = True
+                            except Exception as e:
+                                logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
+                
+                # Verificar si el proceso terminó
+                if process.poll() is not None:
+                    # Leer cualquier output restante
+                    remaining_out = process.stdout.read()
+                    if remaining_out:
+                        output_lines.extend(remaining_out.split('\n'))
+                    break
+                
+                # Pequeña pausa para no saturar CPU
+                time.sleep(0.1)
             
-            with open(out_file, 'wb') as f_out, open(err_file, 'wb') as f_err:
-                process = subprocess.run(
-                    [python_executable, script_path, dni],
-                    stdout=f_out,
-                    stderr=f_err,
-                    cwd=os.path.dirname(script_path),
-                    timeout=timeout
-                )
-            
-            # Leer los resultados
-            try:
-                with open(out_file, 'r', encoding='utf-8') as f:
-                    output = f.read().strip()
-            except UnicodeDecodeError:
-                with open(out_file, 'r', encoding='cp1252', errors='replace') as f:
-                    output = f.read().strip()
-            
-            try:
-                with open(err_file, 'r', encoding='utf-8') as f:
-                    stderr_output = f.read().strip()
-            except UnicodeDecodeError:
-                with open(err_file, 'r', encoding='cp1252', errors='replace') as f:
-                    stderr_output = f.read().strip()
-                    
-            # Log del debug output si existe
+            # Leer stderr al final
+            stderr_output = process.stderr.read()
             if stderr_output:
+                stderr_lines = stderr_output.split('\n')
                 logger.info(f"[DEBUG] Script stderr: {stderr_output[:200]}...")
-        finally:
-            # Limpiar archivos temporales
-            try:
-                os.remove(out_file)
-            except Exception:
-                pass
-            try:
-                os.remove(err_file)
-            except Exception:
-                pass
+            
+            # Esperar a que termine el proceso
+            process.wait(timeout=timeout)
+            
+        except subprocess.TimeoutExpired:
+            process.kill()
+            logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
+            stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
+            return False
+        except Exception as e:
+            logger.error(f"[ERROR] Error durante ejecución en tiempo real: {e}")
+            process.kill()
+            stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": f"Error durante procesamiento: {str(e)}"}, status="error")
+            return False
+        
+        # Combinar todas las líneas para el procesamiento final
+        output = '\n'.join([line for line in output_lines if line])
+        stderr_output = '\n'.join([line for line in stderr_lines if line])
         
         if process.returncode != 0:
             error_msg = f"Script falló (código {process.returncode})"
@@ -300,54 +399,145 @@ def process_task(task: dict) -> bool:
         return False
 
 
-def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
-    """Procesa resultado del script de deudas (con captura de imagen)."""
-    try:
-        import base64
-        import glob
+def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
+    """Limpia y formatea los datos del Camino A para el frontend SIN FILTROS."""
+    if not camino_a_data:
+        return {}
+    
+    def format_amount(val):
+        """Formatea un monto como string legible."""
+        if val is None:
+            return "0,00"
+        if isinstance(val, str):
+            if not val.strip():
+                return "0,00"
+            return val.strip()
+        try:
+            # Convertir número a formato argentino (punto para miles, coma para decimales)
+            num = float(val)
+            # Formatear con separador de miles y 2 decimales
+            formatted = f"{num:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            return formatted
+        except:
+            return str(val) if val else "0,00"
+    
+    def clean_apartado(apartado):
+        """Limpia nombre del apartado."""
+        if not apartado or not apartado.strip():
+            return "Sin Descripción"
+        return apartado.strip()
+    
+    cleaned = {
+        "dni": camino_a_data.get("dni"),
+        "success": camino_a_data.get("success", True),
+        "records": camino_a_data.get("records", {}),
+        "fa_cobranzas": [],        # FA Actual = Sección de Cobranzas
+        "resumen_facturacion": []  # Cuenta Financiera = Resumen de Facturación
+    }
+    
+    # FA Cobranzas (fa_actual) - SIN FILTROS, mantener todo
+    fa_actual = camino_a_data.get("fa_actual", [])
+    for item in fa_actual:
+        if not isinstance(item, dict):
+            continue
         
-        score_val = data.get("score", "No encontrado")
+        cleaned["fa_cobranzas"].append({
+            "apartado": clean_apartado(item.get("apartado")),
+            "saldo": format_amount(item.get("saldo")),
+            "id": str(item.get("id", ""))
+        })
+    
+    # Resumen de Facturación (cuenta_financiera) - SIN FILTROS, mantener todo
+    cf_list = camino_a_data.get("cuenta_financiera", [])
+    for cf in cf_list:
+        if not isinstance(cf, dict):
+            continue
         
-        # Buscar imagen generada por el script
-        base_dir = os.path.dirname(__file__)
-        capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
-        
-        screenshot_b64 = None
-        pattern = os.path.join(capturas_dir, f'score_{dni}_*.png')
-        matching_files = glob.glob(pattern)
-        
-        if matching_files:
-            latest_image = max(matching_files, key=os.path.getctime)
-            logger.info(f"[WORKER] Imagen encontrada: {os.path.basename(latest_image)}")
+        cf_items = []
+        for cf_item in cf.get("items", []):
+            if not isinstance(cf_item, dict):
+                continue
             
-            with open(latest_image, 'rb') as img_file:
-                img_data = img_file.read()
-                screenshot_b64 = base64.b64encode(img_data).decode()
-                logger.info(f"[WORKER] Imagen cargada: {len(screenshot_b64)} bytes")
+            cf_items.append({
+                "saldo": format_amount(cf_item.get("saldo")),
+                "id": str(cf_item.get("id", ""))
+            })
+        
+        # Agregar TODOS los niveles, incluso si están vacíos
+        cleaned["resumen_facturacion"].append({
+            "nivel": cf.get("n", 0),
+            "items": cf_items
+        })
+    
+    return cleaned
+
+
+def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
+    """Procesa resultado final del script de deudas (los updates progresivos ya se enviaron en tiempo real)."""
+    try:
+        score_val = data.get("score", "No encontrado")
+        camino_a_data = data.get("camino_a")
+        
+        print(f"\n[DEUDAS] DNI {dni} - Procesando resultado final")
+        
+        # Solo enviar el resultado final
+        if camino_a_data:
+            # Limpiar y formatear los datos de Camino A
+            cleaned_camino_a = _clean_and_format_camino_a(camino_a_data)
+            
+            final_data = {
+                "dni": dni,
+                "score": score_val,
+                "etapa": "deudas_completas",
+                "info": "Análisis de deudas completado",
+                "camino_a": cleaned_camino_a,
+                "success": True,
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            print(f"[RESULTADO FINAL] DEUDAS_COMPLETAS:")
+            print(f"  dni: {cleaned_camino_a.get('dni')}")
+            print(f"  success: {cleaned_camino_a.get('success')}")
+            print(f"  records: {json.dumps(cleaned_camino_a.get('records', {}), indent=2)}")
+            
+            # Mostrar FA Cobranzas
+            fa_cobranzas = cleaned_camino_a.get("fa_cobranzas", [])
+            print(f"  fa_cobranzas: [{len(fa_cobranzas)} items]")
+            for idx, fa in enumerate(fa_cobranzas):
+                print(f"    [{idx}]: {json.dumps(fa, indent=6, ensure_ascii=False)}")
+            
+            # Mostrar Resumen de Facturación
+            resumen_data = cleaned_camino_a.get("resumen_facturacion", [])
+            print(f"  resumen_facturacion: [{len(resumen_data)} niveles]")
+            for resumen in resumen_data:
+                print(f"    nivel_{resumen.get('nivel', 0)}: {len(resumen.get('items', []))} items")
+                for idx, item in enumerate(resumen.get('items', [])):
+                    print(f"      [{idx}]: {json.dumps(item, indent=8, ensure_ascii=False)}")
         else:
-            logger.warning(f"[WORKER] No se encontró imagen para DNI {dni}")
-            # Intentar usar imagen del JSON si existe
-            stages = data.get("stages", [])
-            if stages and isinstance(stages, list) and stages[0].get("image"):
-                screenshot_b64 = stages[0].get("image")
-                logger.info(f"[WORKER] Usando captura del script como fallback")
+            # Solo score, sin deudas
+            final_data = {
+                "dni": dni,
+                "score": score_val,
+                "etapa": "solo_score",
+                "info": f"Score {score_val} - No requiere análisis de deudas",
+                "success": True,
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            print(f"[RESULTADO FINAL] SOLO_SCORE:")
+            print(f"  score: {score_val}")
+            print(f"  info: Score fuera del rango 80-89")
         
-        # Enviar update final
-        partial = {
-            "dni": dni,
-            "success": True,
-            "score": score_val,
-            "image": screenshot_b64,
-        }
+        # Enviar resultado final
+        send_result = send_partial_update(task_id, final_data, status="completed")
+        print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
         
-        if not screenshot_b64:
-            logger.warning(f"[WORKER] ADVERTENCIA: No se pudo obtener imagen")
-        
-        send_partial_update(task_id, partial, status="completed")
-        logger.info(f"[OK] Procesamiento deudas de {task_id} completado | Score: {score_val}")
+        print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
         return True
+
         
     except Exception as e:
+        print(f"[ERROR] DNI {dni}: {e}")
         logger.error(f"[ERROR] Error procesando deudas: {e}", exc_info=True)
         return False
 

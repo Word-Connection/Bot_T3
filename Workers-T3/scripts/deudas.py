@@ -175,6 +175,9 @@ def main():
                 score = line.replace('Score obtenido:', '').strip()
                 break
 
+        # ENVIAR SCORE A STDOUT PARA QUE EL WORKER LO DETECTE EN TIEMPO REAL
+        print(f"Score: {score}")
+        sys.stdout.flush()  # FORZAR FLUSH INMEDIATO
         print(f"INFO: Score obtenido: {score}", file=sys.stderr)
 
         # Buscar captura más reciente
@@ -206,6 +209,18 @@ def main():
             score_num = None
 
         if score_num is not None and 80 <= score_num <= 89:
+            # Agregar stage intermedio para informar que se está buscando deudas
+            stages.append({
+                "info": f"Score {score_num} elegible. Buscando deudas del cliente...",
+                "image": "",
+                "timestamp": int(time.time()),
+                "etapa": "buscando_deudas"
+            })
+            
+            # ENVIAR MENSAJE AL WORKER EN TIEMPO REAL
+            print(f"Ejecutando Camino A para score {score_num}")
+            sys.stdout.flush()
+            
             try:
                 print(f"INFO: Score {score_num} entre 80-89: iniciando Camino A para DNI {dni}", file=sys.stderr)
                 script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
@@ -220,6 +235,8 @@ def main():
                         timeout=1200
                     )
                     if a_proc.returncode == 0:
+                        print(f"Camino A completado exitosamente")
+                        sys.stdout.flush()
                         print(f"INFO: Camino A finalizado OK para DNI {dni}", file=sys.stderr)
                         # Intentar parsear JSON de Camino A
                         camino_a_data = None
