@@ -15,6 +15,12 @@
     "x": 44,
     "y": 272
   },
+  "actividad_right_moves": {
+    "steps": 2,
+    "delay": 0.8,
+    "methods": ["pynput_right"],
+    "test_mode": true
+  },
   "filtro_btn": {
    "x": 832,
     "y": 318

@@ -10,9 +10,9 @@ Nuevo orden por ID (según especificación actual):
  1) (Sólo para primer ID ya se llenó DNI antes) Click en campo Service ID y LIMPIAR con Ctrl+A y Backspace (igual que Document ID)
  2) Escribir Service ID
  3) Enter (esperar POST_ENTER_DELAY)
- 4) Click Actividad (1)
- 5) Click primera fila (DOBLE CLICK)
- 6) Click Actividad (2)
+ 4) Click primera fila (DOBLE CLICK)
+ 5) Click Actividad (DOBLE CLICK - sin mover mouse después)
+ 6) Ctrl+Tab 2 veces (navegación a pestaña derecha SIN MOVER MOUSE)
  7) Click Filtro (primer click)  
  8) Click Filtro (segundo click, 1s después para ordenar/actualizar fechas)
  9) Click área a copiar (copy_area) y luego Ctrl+C
@@ -190,7 +190,8 @@ DEFAULT_COORDS_TEMPLATE = {
     'filtro_btn': {'x': 0, 'y': 0},
     'close_tab_btn': {'x': 0, 'y': 0},
     'copy_area': {'x': 0, 'y': 0},
-    'final_copy_area': {'x': 0, 'y': 0}
+    'final_copy_area': {'x': 0, 'y': 0},
+    'actividad_right_moves': {'steps': 3, 'delay': 0.28}
 }
 
 def _load_coords(path: Path) -> Dict[str, Any]:
@@ -361,6 +362,142 @@ def _send_right_presses(count: int, interval: float, use_pynput: bool = False):
             pg.press('right')
             time.sleep(interval)
     print(f"[MultiB] {count} flechas derecha ejecutadas")
+
+def _try_multiple_navigation_methods(ax: int, ay: int, config: dict):
+    """Prueba múltiples métodos de navegación hasta encontrar uno que funcione."""
+    steps = config.get('steps', 3)
+    delay = config.get('delay', 0.28)
+    methods = config.get('methods', ['tab', 'ctrl_tab', 'right_arrow', 'click_offset'])
+    click_offset_px = config.get('click_offset_px', 200)
+    test_mode = config.get('test_mode', False)
+    
+    print(f"[MultiB] Probando {len(methods)} métodos de navegación...")
+    if test_mode:
+        print("[MultiB] MODO TEST ACTIVADO - pausas largas entre métodos")
+    
+    for i, method in enumerate(methods):
+        print(f"[MultiB] ========================================")
+        print(f"[MultiB] Método {i+1}/{len(methods)}: {method}")
+        print(f"[MultiB] ========================================")
+        
+        try:
+            if method == 'tab':
+                print(f"[MultiB] - Enviando {steps} TABs")
+                if _HAS_WIN_SENDINPUT:
+                    _win_tap_key(VK_TAB, steps, delay)
+                else:
+                    try:
+                        pg.press('tab', presses=steps, interval=delay)
+                    except TypeError:
+                        for _ in range(steps):
+                            pg.press('tab')
+                            time.sleep(delay)
+                            
+            elif method == 'ctrl_tab':
+                print(f"[MultiB] - Enviando {steps} Ctrl+TABs")
+                for _ in range(steps):
+                    if _HAS_WIN_SENDINPUT:
+                        _win_press_combo_hold_release(VK_CONTROL, VK_TAB)
+                    else:
+                        pg.hotkey('ctrl', 'tab')
+                    time.sleep(delay)
+                    
+            elif method == 'right_arrow':
+                print(f"[MultiB] - Enviando {steps} flechas derecha")
+                _send_right_presses(steps, delay)
+                
+            elif method == 'pynput_right':
+                print(f"[MultiB] - Enviando {steps} flechas derecha con pynput")
+                if _HAS_PYNPUT:
+                    kb = KBController()
+                    for _ in range(steps):
+                        kb.press(KBKey.right)
+                        kb.release(KBKey.right)
+                        time.sleep(delay)
+                else:
+                    print(f"[MultiB] - pynput no disponible, usando pyautogui")
+                    _send_right_presses(steps, delay)
+                
+            elif method == 'click_offset':
+                print(f"[MultiB] - Click con offset de {click_offset_px}px a la derecha")
+                new_x = ax + click_offset_px
+                _click(new_x, ay, f'Actividad (offset +{click_offset_px}px)', delay)
+                
+            # Pausa entre métodos
+            pause_time = 3.0 if test_mode else 0.8
+            print(f"[MultiB] Método {method} ejecutado")
+            print(f"[MultiB] Esperando {pause_time} segundos antes del siguiente método...")
+            time.sleep(pause_time)
+            
+        except Exception as e:
+            print(f"[MultiB] Error en método {method}: {e}")
+            continue
+
+def _try_multiple_navigation_methods_no_mouse(config: dict):
+    """Prueba métodos de navegación SIN MOVER EL MOUSE - solo teclado."""
+    steps = config.get('steps', 2)
+    delay = config.get('delay', 0.8)
+    methods = config.get('methods', ['ctrl_tab'])
+    test_mode = config.get('test_mode', False)
+    
+    print(f"[MultiB] Ejecutando navegación SIN MOVER MOUSE")
+    if test_mode:
+        print("[MultiB] MODO TEST ACTIVADO - pausas largas entre métodos")
+    
+    for i, method in enumerate(methods):
+        print(f"[MultiB] ========================================")
+        print(f"[MultiB] Método {i+1}/{len(methods)}: {method}")
+        print(f"[MultiB] ========================================")
+        
+        try:
+            if method == 'tab':
+                print(f"[MultiB] - Enviando {steps} TABs (SIN MOVER MOUSE)")
+                if _HAS_WIN_SENDINPUT:
+                    _win_tap_key(VK_TAB, steps, delay)
+                else:
+                    try:
+                        pg.press('tab', presses=steps, interval=delay)
+                    except TypeError:
+                        for _ in range(steps):
+                            pg.press('tab')
+                            time.sleep(delay)
+                            
+            elif method == 'ctrl_tab':
+                print(f"[MultiB] - Enviando {steps} Ctrl+TABs (SIN MOVER MOUSE)")
+                for _ in range(steps):
+                    if _HAS_WIN_SENDINPUT:
+                        _win_press_combo_hold_release(VK_CONTROL, VK_TAB)
+                    else:
+                        pg.hotkey('ctrl', 'tab')
+                    time.sleep(delay)
+                    
+            elif method == 'right_arrow':
+                print(f"[MultiB] - Enviando {steps} flechas derecha (SIN MOVER MOUSE)")
+                _send_right_presses(steps, delay)
+                
+            elif method == 'pynput_right':
+                print(f"[MultiB] - Enviando {steps} flechas derecha con pynput (SIN MOVER MOUSE)")
+                if _HAS_PYNPUT:
+                    kb = KBController()
+                    for _ in range(steps):
+                        kb.press(KBKey.right)
+                        kb.release(KBKey.right)
+                        time.sleep(delay)
+                else:
+                    print(f"[MultiB] - pynput no disponible, usando pyautogui")
+                    _send_right_presses(steps, delay)
+                
+            # NO incluimos click_offset porque requiere mover el mouse
+                
+            # Pausa entre métodos
+            pause_time = 3.0 if test_mode else 0.8
+            print(f"[MultiB] Método {method} ejecutado (SIN MOVER MOUSE)")
+            print(f"[MultiB] Esperando {pause_time} segundos antes del siguiente método...")
+            time.sleep(pause_time)
+            
+        except Exception as e:
+            print(f"[MultiB] Error en método {method}: {e}")
+            continue
 
 def _move_to_tab_right(ax: int, ay: int, steps: int = 2, delay_between: float = 0.2,
                        use_ctrl_tab: bool = False, offset_px: int = 0,
@@ -700,15 +837,32 @@ def run(
         _type(service_id, _step_delay(step_delays,1,0.5))
         # Paso 3 Enter
         _press_enter(_step_delay(step_delays,2,0.5))
-        # Paso 4 Actividad (1)
+        # Paso 4 Primera fila (doble click con intervalo configurable)
+        fx, fy = _xy(conf,'first_row')
+        dbl_int = float(os.getenv('FIRST_ROW_DBLCLICK_INTERVAL','0.5'))
+        _double_click(fx, fy, 'Primera fila', dbl_int, _step_delay(step_delays,3,base_step_delay))
+        # Paso 5 Actividad (1) - DOBLE CLICK
         ax, ay = _xy(conf,'actividad_btn')
-        _click(ax, ay, 'Actividad (1)', _step_delay(step_delays,4,base_step_delay))
+        dbl_int_actividad = float(os.getenv('ACTIVIDAD_DBLCLICK_INTERVAL','0.5'))
+        _double_click(ax, ay, 'Actividad (1)', dbl_int_actividad, _step_delay(step_delays,4,base_step_delay))
         
-        # DESPUÉS DE ACTIVIDAD (1): presionar flecha derecha 2 veces
-        print("[MultiB] Presionando flecha derecha 2 veces después de Actividad (1)")
-        time.sleep(0.3)  # Pausa breve para estabilizar
-        _send_right_presses(2, 0.28)  # 2 flechas con ~0.28s entre cada una (según tu registro)
-        time.sleep(0.2)  # Pausa adicional antes de continuar
+        # DESPUÉS DE ACTIVIDAD: probar múltiples métodos de navegación SIN MOVER MOUSE
+        # Obtener configuración de movimientos desde el JSON
+        right_moves_config = conf.get('actividad_right_moves', {})
+        
+        if right_moves_config:
+            print("[MultiB] Usando configuración avanzada de navegación - SIN MOVER MOUSE")
+            _try_multiple_navigation_methods_no_mouse(right_moves_config)
+        else:
+            # Fallback al método original
+            right_steps = 2
+            right_delay = 0.8
+            print(f"[MultiB] Usando método fallback: {right_steps} Ctrl+Tab - SIN MOVER MOUSE")
+            time.sleep(0.3)
+            for _ in range(right_steps):
+                pg.hotkey('ctrl', 'tab')
+                time.sleep(right_delay)
+            time.sleep(0.2)
         
         # Mover a la pestaña derecha para llegar a Actividad (OPCIONAL - ya no necesario si las flechas funcionan)
         atx, aty = _xy(conf, 'actividad_tab')
@@ -718,13 +872,7 @@ def run(
         # Las flechas ya se enviaron arriba
         
         # Continuar directo con el siguiente paso
-        # Paso 5 primera fila (doble click con intervalo configurable)
-        fx, fy = _xy(conf,'first_row')
-        dbl_int = float(os.getenv('FIRST_ROW_DBLCLICK_INTERVAL','0.5'))
-        _double_click(fx, fy, 'Primera fila', dbl_int, _step_delay(step_delays,3,base_step_delay))
-        # Paso 6 Actividad (2)
-        _click(ax, ay, 'Actividad (2)', _step_delay(step_delays,4,base_step_delay))
-        # Paso 7 y 8 Filtro doble click separado
+        # Paso 6 Filtro doble click separado
         fx2, fy2 = _xy(conf,'filtro_btn')
         _click(fx2, fy2, 'Filtro (1)', _step_delay(step_delays,5,base_step_delay))
         time.sleep(filter_second_delay)
