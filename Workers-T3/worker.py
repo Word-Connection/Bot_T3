@@ -400,7 +400,7 @@ def process_task(task: dict) -> bool:
 
 
 def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
-    """Limpia y formatea los datos del Camino A para el frontend SIN FILTROS."""
+    """Limpia y formatea los datos del Camino A para el frontend PRESERVANDO TODOS LOS CAMPOS."""
     if not camino_a_data:
         return {}
     
@@ -427,6 +427,24 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
             return "Sin Descripción"
         return apartado.strip()
     
+    def preserve_all_fields(item_dict):
+        """Preserva TODOS los campos del item original."""
+        if not isinstance(item_dict, dict):
+            return {}
+        
+        preserved = {}
+        for key, value in item_dict.items():
+            if key in ["saldo", "importe", "monto", "valor"]:  # Campos monetarios
+                preserved[key] = format_amount(value)
+            elif key in ["apartado", "descripcion", "concepto", "detalle"]:  # Campos de texto
+                preserved[key] = clean_apartado(str(value)) if value is not None else ""
+            else:
+                # Preservar todos los demás campos tal como vienen
+                preserved[key] = str(value) if value is not None else ""
+        
+        return preserved
+    
+    # Estructura base
     cleaned = {
         "dni": camino_a_data.get("dni"),
         "success": camino_a_data.get("success", True),
@@ -435,19 +453,22 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
         "resumen_facturacion": []  # Cuenta Financiera = Resumen de Facturación
     }
     
-    # FA Cobranzas (fa_actual) - SIN FILTROS, mantener todo
+    # Preservar campos adicionales que puedan existir
+    for key, value in camino_a_data.items():
+        if key not in ["dni", "success", "records", "fa_actual", "cuenta_financiera"]:
+            cleaned[key] = value
+    
+    # FA Cobranzas (fa_actual) - PRESERVAR TODOS LOS CAMPOS
     fa_actual = camino_a_data.get("fa_actual", [])
     for item in fa_actual:
         if not isinstance(item, dict):
             continue
         
-        cleaned["fa_cobranzas"].append({
-            "apartado": clean_apartado(item.get("apartado")),
-            "saldo": format_amount(item.get("saldo")),
-            "id": str(item.get("id", ""))
-        })
+        # Usar función que preserva todos los campos
+        preserved_item = preserve_all_fields(item)
+        cleaned["fa_cobranzas"].append(preserved_item)
     
-    # Resumen de Facturación (cuenta_financiera) - SIN FILTROS, mantener todo
+    # Resumen de Facturación (cuenta_financiera) - PRESERVAR TODOS LOS CAMPOS
     cf_list = camino_a_data.get("cuenta_financiera", [])
     for cf in cf_list:
         if not isinstance(cf, dict):
@@ -458,16 +479,22 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
             if not isinstance(cf_item, dict):
                 continue
             
-            cf_items.append({
-                "saldo": format_amount(cf_item.get("saldo")),
-                "id": str(cf_item.get("id", ""))
-            })
+            # Preservar todos los campos del item
+            preserved_item = preserve_all_fields(cf_item)
+            cf_items.append(preserved_item)
         
-        # Agregar TODOS los niveles, incluso si están vacíos
-        cleaned["resumen_facturacion"].append({
+        # Preservar todos los campos del nivel, no solo 'n'
+        nivel_data = {
             "nivel": cf.get("n", 0),
             "items": cf_items
-        })
+        }
+        
+        # Agregar campos adicionales del nivel si existen
+        for key, value in cf.items():
+            if key not in ["n", "items"]:
+                nivel_data[key] = value
+        
+        cleaned["resumen_facturacion"].append(nivel_data)
     
     return cleaned
 
@@ -479,6 +506,41 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
         camino_a_data = data.get("camino_a")
         
         print(f"\n[DEUDAS] DNI {dni} - Procesando resultado final")
+        
+        # DEBUG: Mostrar estructura completa de datos RAW del scraping
+        print(f"[DEBUG] DATOS RAW DEL SCRAPING:")
+        print(f"[DEBUG] Score: {score_val}")
+        print(f"[DEBUG] Camino A existe: {camino_a_data is not None}")
+        
+        if camino_a_data:
+            print(f"[DEBUG] Estructura de camino_a:")
+            print(f"[DEBUG]   - dni: {camino_a_data.get('dni')}")
+            print(f"[DEBUG]   - success: {camino_a_data.get('success')}")
+            print(f"[DEBUG]   - records: {camino_a_data.get('records')}")
+            
+            fa_actual = camino_a_data.get("fa_actual", [])
+            print(f"[DEBUG]   - fa_actual: {len(fa_actual)} items")
+            for i, item in enumerate(fa_actual):
+                print(f"[DEBUG]     [{i}]: {json.dumps(item, ensure_ascii=False)}")
+            
+            cf_data = camino_a_data.get("cuenta_financiera", [])
+            print(f"[DEBUG]   - cuenta_financiera: {len(cf_data)} niveles")
+            for cf in cf_data:
+                items = cf.get("items", [])
+                print(f"[DEBUG]     nivel_{cf.get('n', 0)}: {len(items)} items")
+                for i, item in enumerate(items):
+                    print(f"[DEBUG]       [{i}]: {json.dumps(item, ensure_ascii=False)}")
+            
+            # Verificar si hay campos adicionales que no estamos procesando
+            all_keys = set(camino_a_data.keys())
+            processed_keys = {"dni", "success", "records", "fa_actual", "cuenta_financiera"}
+            missing_keys = all_keys - processed_keys
+            if missing_keys:
+                print(f"[WARNING] CAMPOS NO PROCESADOS: {missing_keys}")
+                for key in missing_keys:
+                    print(f"[WARNING]   {key}: {camino_a_data.get(key)}")
+        
+        print(f"[DEBUG] =========================================")
         
         # Solo enviar el resultado final
         if camino_a_data:
@@ -513,6 +575,15 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
                 print(f"    nivel_{resumen.get('nivel', 0)}: {len(resumen.get('items', []))} items")
                 for idx, item in enumerate(resumen.get('items', [])):
                     print(f"      [{idx}]: {json.dumps(item, indent=8, ensure_ascii=False)}")
+            
+            # Mostrar campos adicionales si existen
+            additional_fields = {k: v for k, v in cleaned_camino_a.items() 
+                               if k not in ["dni", "success", "records", "fa_cobranzas", "resumen_facturacion"]}
+            if additional_fields:
+                print(f"  campos_adicionales: {json.dumps(additional_fields, indent=2, ensure_ascii=False)}")
+            
+            print(f"\n[JSON COMPLETO ENVIADO AL FRONTEND]:")
+            print(json.dumps(final_data, indent=2, ensure_ascii=False))
         else:
             # Solo score, sin deudas
             final_data = {

@@ -263,10 +263,17 @@ def main():
                                 "image": "",
                                 "timestamp": int(time.time())
                             })
-                        # Incluir en resultado top-level también (facilita consumo)
+                        # DEBUG: Mostrar estructura de datos RAW de Camino A
                         if camino_a_data:
-                            # Se añadirá más abajo al dict final 'result' como 'camino_a'
-                            pass
+                            print(f"DEBUG: Camino A datos RAW - FA Actual: {len(camino_a_data.get('fa_actual', []))} items", file=sys.stderr)
+                            print(f"DEBUG: Camino A datos RAW - Cuenta Financiera: {len(camino_a_data.get('cuenta_financiera', []))} niveles", file=sys.stderr)
+                            
+                            # Mostrar estructura detallada
+                            for key, value in camino_a_data.items():
+                                if isinstance(value, list):
+                                    print(f"DEBUG: {key}: {len(value)} items", file=sys.stderr)
+                                else:
+                                    print(f"DEBUG: {key}: {type(value)} = {str(value)[:100]}", file=sys.stderr)
                     else:
                         print(f"WARNING: Camino A retorno codigo {a_proc.returncode} para DNI {dni}", file=sys.stderr)
                         if a_proc.stderr:
