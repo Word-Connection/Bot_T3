@@ -82,21 +82,22 @@ def main():
     log_path = Path(__file__).parent / '../../multi_copias.log'
 
     try:
-        # Usar el Python del sistema disponible
-        system_python = r"C:\Users\Usuario\AppData\Local\Programs\Python\Python313\python.exe"
+        # Usar el Python del entorno virtual del proyecto
+        project_root = Path(__file__).parent / '../..'
+        venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
         
-        if not Path(system_python).exists():
+        if not venv_python.exists():
             stages.append({
-                "info": f"Error: No se encuentra Python en {system_python}"
+                "info": f"Error: No se encuentra Python del venv en {venv_python}"
             })
             result = {"dni": dni, "stages": stages}
             print(json.dumps(result))
             return
             
-        python_exe = system_python
+        python_exe = str(venv_python)
         
         # Log para debugging
-        print(f"DEBUG: Usando Python del sistema: {python_exe}", file=sys.stderr)
+        print(f"DEBUG: Usando Python del venv: {python_exe}", file=sys.stderr)
         
         result_proc = subprocess.run([
             python_exe, str(script_path),
@@ -108,7 +109,7 @@ def main():
 
         if result_proc.returncode != 0:
             stages.append({
-                "info": f"Error ejecutando camino b: {result_proc.stderr}"
+                "info": f"Error ejecutando camino b: {result_proc.stderr[:200]}"
             })
             result = {"dni": dni, "stages": stages}
             print(json.dumps(result))
@@ -130,48 +131,90 @@ def main():
 
     # Leer el log y parsear movimientos
     movimientos_por_linea = {}
+    total_movimientos = 0
+    
     if log_path.exists():
         with log_path.open('r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if '  ' in line:
-                    service_id, content = line.split('  ', 1)
-                    service_id = service_id.strip()
-                    content = content.strip()
-                    if service_id and content:
-                        if service_id not in movimientos_por_linea:
-                            movimientos_por_linea[service_id] = []
-                        # Parsear movimientos, asumir que content tiene líneas con fechas
-                        for mov in content.split('\n'):
-                            mov = mov.strip()
-                            if mov:
-                                movimientos_por_linea[service_id].append(mov)
+                    parts = line.split('  ', 1)
+                    if len(parts) == 2:
+                        service_id = parts[0].strip()
+                        content = parts[1].strip()
+                        
+                        if service_id and content:
+                            if service_id not in movimientos_por_linea:
+                                movimientos_por_linea[service_id] = []
+                            
+                            # Si el contenido no es "No Tiene Pedido", procesarlo
+                            if content != "No Tiene Pedido" and content != ".":
+                                # Dividir por líneas si hay múltiples movimientos
+                                lines = content.replace('\\n', '\n').split('\n')
+                                for mov_line in lines:
+                                    mov_line = mov_line.strip()
+                                    if mov_line and mov_line != "No Tiene Pedido":
+                                        movimientos_por_linea[service_id].append(mov_line)
+                                        total_movimientos += 1
+                            else:
+                                # Registrar que no tiene pedidos
+                                movimientos_por_linea[service_id].append("No Tiene Pedido")
 
-    # Etapa 2: Cantidad de líneas
-    num_lineas = len(ids)
-    stages.append({
-        "info": f"DNI {dni} tiene {num_lineas} líneas: {', '.join(ids)}"
-    })
+    # Etapa 2: Información de procesamiento
+    if total_movimientos > 0:
+        stages.append({
+            "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados"
+        })
+    else:
+        stages.append({
+            "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos"
+        })
 
-    # Etapa 3+: Movimientos reales por línea
-    for idx, service_id in enumerate(ids, start=3):
+    # Etapa 3+: Resumen de movimientos por línea
+    stage_count = 3
+    movimientos_activos = 0
+    
+    for service_id in ids[:5]:  # Mostrar máximo 5 líneas para no saturar
         if service_id in movimientos_por_linea and movimientos_por_linea[service_id]:
-            # Enviar el primer movimiento real
-            movimiento = f"{service_id} {movimientos_por_linea[service_id][0]}"
-            stages.append({
-                "info": movimiento
-            })
+            movimientos = movimientos_por_linea[service_id]
+            if movimientos and movimientos[0] != "No Tiene Pedido":
+                # Mostrar el primer movimiento real
+                primer_mov = movimientos[0]
+                count_movs = len([m for m in movimientos if m != "No Tiene Pedido"])
+                stages.append({
+                    "info": f"Línea {service_id}: {count_movs} movimiento(s) - Último: {primer_mov[:50]}..."
+                })
+                movimientos_activos += count_movs
+            else:
+                stages.append({
+                    "info": f"Línea {service_id}: Sin movimientos activos"
+                })
         else:
-            # Si no hay movimientos, simular uno
-            movimiento = f"{service_id} 11/10/2023 14:45"
             stages.append({
-                "info": movimiento
-            })
+                "info": f"Línea {service_id}: No procesada o sin datos"
+        })
+        stage_count += 1
+        
+        # Limitar a 5 líneas para no saturar el frontend
+        if stage_count >= 8:
+            break
+    
+    # Si hay más líneas, mostrar resumen
+    if len(ids) > 5:
+        restantes = len(ids) - 5
+        stages.append({
+            "info": f"+ {restantes} líneas adicionales procesadas"
+        })
 
-    # Etapa final: No hay más pedidos
-    stages.append({
-        "info": "No hay mas Pedidos"
-    })
+    # Etapa final: Resumen total
+    if movimientos_activos > 0:
+        stages.append({
+            "info": f"COMPLETADO: {movimientos_activos} movimientos totales encontrados para DNI {dni}"
+        })
+    else:
+        stages.append({
+            "info": f"COMPLETADO: No hay movimientos activos para DNI {dni}"
+        })
 
     result = {"dni": dni, "stages": stages}
     print(json.dumps(result))

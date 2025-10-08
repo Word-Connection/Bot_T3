@@ -25,7 +25,7 @@ parser.add_argument("--pc_id", default=os.getenv("PC_ID"), help="ID de la PC (ej
 parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE"), help="Tipo de automatización (deudas/movimientos)")
 parser.add_argument("--backend", default=os.getenv("BACKEND_URL", "http://192.168.9.160:8000"), help="URL del backend")
 parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", "30")), help="Tiempo de procesamiento simulado (segundos)")
-parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "5")), help="Intervalo entre polls (segundos)")
+parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "3")), help="Intervalo entre polls (segundos)")
 parser.add_argument("--log_level", default=os.getenv("LOG_LEVEL", "INFO"), help="Nivel de log (DEBUG, INFO, WARNING, ERROR)")
 parser.add_argument("--api_key", default=os.getenv("API_KEY"), help="API key para autenticación")
 
@@ -181,10 +181,22 @@ def process_task(task: dict) -> bool:
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script no encontrado: {script_path}")
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": "Script no encontrado"}, status="error")
+            send_partial_update(task_id, {"info": f"Script no encontrado: {TIPO}.py"}, status="error")
             return False
         
-        logger.info(f"[WORKER] Ejecutando script de automatización: {script_path}")
+        logger.info(f"[WORKER] Ejecutando script: {script_path}")
+        
+        # Usar el Python del entorno virtual del proyecto si existe
+        project_venv = os.path.join(base_dir, '..', 'venv', 'Scripts', 'python.exe')
+        if os.path.exists(project_venv):
+            python_executable = project_venv
+            logger.info(f"[WORKER] Usando Python del venv: {python_executable}")
+        else:
+            python_executable = sys.executable
+            logger.info(f"[WORKER] Usando Python actual: {python_executable}")
+        
+        # Enviar actualización inicial
+        send_partial_update(task_id, {"info": f"Iniciando automatización para DNI {dni}"}, status="running")
         
         # Archivos temporales para stdout/stderr
         import tempfile
@@ -195,11 +207,11 @@ def process_task(task: dict) -> bool:
         
         try:
             # Ejecutar script con timeout según tipo
-            timeout = 360 if TIPO == "deudas" else 600  # 6 min para deudas, 10 min para movimientos
+            timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
             
             with open(out_file, 'wb') as f_out, open(err_file, 'wb') as f_err:
                 process = subprocess.run(
-                    [sys.executable, script_path, dni],
+                    [python_executable, script_path, dni],
                     stdout=f_out,
                     stderr=f_err,
                     cwd=os.path.dirname(script_path),
@@ -220,6 +232,10 @@ def process_task(task: dict) -> bool:
             except UnicodeDecodeError:
                 with open(err_file, 'r', encoding='cp1252', errors='replace') as f:
                     stderr_output = f.read().strip()
+                    
+            # Log del debug output si existe
+            if stderr_output:
+                logger.info(f"[DEBUG] Script stderr: {stderr_output[:200]}...")
         finally:
             # Limpiar archivos temporales
             try:
@@ -232,17 +248,19 @@ def process_task(task: dict) -> bool:
                 pass
         
         if process.returncode != 0:
-            logger.error(f"[ERROR] Fallo en scraping (code {process.returncode})")
-            logger.error(f"[STDOUT]:\n{output}")
-            logger.error(f"[STDERR]:\n{stderr_output}")
+            error_msg = f"Script falló (código {process.returncode})"
+            if stderr_output:
+                error_msg += f": {stderr_output[:100]}"
+            logger.error(f"[ERROR] {error_msg}")
+            logger.error(f"[STDOUT]: {output[:200]}...")
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": "Error en script"}, status="error")
+            send_partial_update(task_id, {"info": error_msg}, status="error")
             return False
         
         if not output:
-            logger.error(f"[ERROR] Sin output del script")
+            logger.error(f"[ERROR] Script no produjo output")
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": "Sin output"}, status="error")
+            send_partial_update(task_id, {"info": "Script no produjo resultados"}, status="error")
             return False
         
         # Parsear JSON del output
@@ -340,13 +358,19 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
         stages = data.get("stages", [])
         
         if not stages:
-            logger.warning(f"[WARN] No hay stages en el resultado")
-            send_partial_update(task_id, {"info": "Sin resultados"}, status="error")
+            logger.warning(f"[WARN] No hay stages en el resultado para {dni}")
+            send_partial_update(task_id, {"info": "Sin resultados encontrados"}, status="error")
             return False
+        
+        logger.info(f"[WORKER] Procesando {len(stages)} stages para {dni}")
         
         # Enviar cada stage como actualización parcial
         for i, stage_data in enumerate(stages, 1):
             info = stage_data.get("info", "")
+            
+            # Truncar mensajes muy largos
+            if len(info) > 200:
+                info = info[:197] + "..."
             
             partial_data = {
                 "dni": dni,
@@ -358,17 +382,18 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
             # Último stage marca como completed
             status = "completed" if i == len(stages) else "running"
             send_partial_update(task_id, partial_data, status=status)
-            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info}")
+            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info[:50]}...")
             
-            # Pequeña pausa entre stages
+            # Pequeña pausa entre stages para no saturar el backend
             if i < len(stages):
-                time.sleep(random.uniform(0.5, 1.5))
+                time.sleep(random.uniform(0.1, 0.3))  # Más rápido: 0.1-0.3s
         
         logger.info(f"[OK] Procesamiento movimientos de {task_id} completado | {len(stages)} etapas")
         return True
         
     except Exception as e:
-        logger.error(f"[ERROR] Error procesando movimientos: {e}", exc_info=True)
+        logger.error(f"[ERROR] Error procesando movimientos para {dni}: {e}", exc_info=True)
+        send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}"}, status="error")
         return False
 
 

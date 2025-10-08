@@ -17,9 +17,9 @@
   },
   "actividad_right_moves": {
     "steps": 2,
-    "delay": 0.8,
+    "delay": 0.3,
     "methods": ["pynput_right"],
-    "test_mode": true
+    "test_mode": false
   },
   "filtro_btn": {
    "x": 832,

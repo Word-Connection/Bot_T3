@@ -289,26 +289,26 @@ def _double_click(x: int, y: int, label: str, interval: float, delay_after: floa
 def _ctrl_a_delete(delay: float):
     print("[MultiB] Limpieza con 2 clicks + Delete...")
     pg.click()
-    time.sleep(0.2)
+    time.sleep(0.1)
     pg.click()
-    time.sleep(0.3)
+    time.sleep(0.2)
     pg.press('delete')
     print("[MultiB] Esperando punto automático y eliminándolo...")
-    time.sleep(1.0)  # Esperar el punto
+    time.sleep(0.6)  # Esperar el punto (reducido)
     pg.press('backspace')  # Eliminar el punto
-    time.sleep(0.3)
+    time.sleep(0.2)
     
     # Segundo pase: re-seleccionar campo y borrar 3 veces
     print("[MultiB] Aplicando segundo pase de limpieza...")
     print("[MultiB] Re-seleccionando campo...")
     current_pos = pg.position()
     pg.click(current_pos.x, current_pos.y)  # Click en la posición actual del cursor
-    time.sleep(0.3)
+    time.sleep(0.2)
     
     print("[MultiB] Borrando 3 veces...")
     for i in range(3):
         pg.press('backspace')
-        time.sleep(0.15)
+        time.sleep(0.1)
     time.sleep(delay)
 
 
@@ -331,8 +331,8 @@ def _type(text: str, delay: float):
 
 def _press_enter(delay_after: float):
     pg.press('enter')
-    print("[MultiB] Enter presionado - esperando 3.5 segundos...")
-    time.sleep(3.5)  # Espera fija de 3.5 segundos después de cada enter
+    print("[MultiB] Enter presionado - esperando 2 segundos...")
+    time.sleep(2.0)  # Espera reducida de 2 segundos después de cada enter
     time.sleep(delay_after)  # Espera adicional si se especifica
 
 def _move_cursor_right(times: int = 1, delay_between: float = 0.2):
@@ -490,9 +490,10 @@ def _try_multiple_navigation_methods_no_mouse(config: dict):
             # NO incluimos click_offset porque requiere mover el mouse
                 
             # Pausa entre métodos
-            pause_time = 3.0 if test_mode else 0.8
+            pause_time = 3.0 if test_mode else 0.3
             print(f"[MultiB] Método {method} ejecutado (SIN MOVER MOUSE)")
-            print(f"[MultiB] Esperando {pause_time} segundos antes del siguiente método...")
+            if test_mode:
+                print(f"[MultiB] Esperando {pause_time} segundos antes del siguiente método...")
             time.sleep(pause_time)
             
         except Exception as e:
@@ -707,11 +708,11 @@ def run(
     single_id: Optional[str] = None,
 ):
     pg.FAILSAFE = True
-    start_delay = float(os.getenv('COORDS_START_DELAY','1.5'))
-    base_step_delay = float(os.getenv('STEP_DELAY','2.0'))
-    post_enter_delay = float(os.getenv('POST_ENTER_DELAY','4.0'))
-    filter_second_delay = float(os.getenv('FILTER_SECOND_DELAY','1.0'))
-    clear_hold_seconds = float(os.getenv('CLEAR_HOLD_SECONDS','2.0'))
+    start_delay = float(os.getenv('COORDS_START_DELAY','0.8'))
+    base_step_delay = float(os.getenv('STEP_DELAY','0.8'))
+    post_enter_delay = float(os.getenv('POST_ENTER_DELAY','2.5'))
+    filter_second_delay = float(os.getenv('FILTER_SECOND_DELAY','0.5'))
+    clear_hold_seconds = float(os.getenv('CLEAR_HOLD_SECONDS','1.5'))
     log_path = log_file or Path('multi_copias.log')
     # Reiniciar log en cada ejecución
     try:
@@ -758,20 +759,20 @@ def run(
     print(f"[MultiB] Preparando para escribir DNI: '{dni}'")
     
     # Espera antes de cualquier acción
-    time.sleep(0.5)
+    time.sleep(0.3)
     
     # 2 clicks simples + delete + esperar punto + backspace
     print("[MultiB] Limpiando DNI con 2 clicks + Delete...")
     pg.click()
-    time.sleep(0.2)
+    time.sleep(0.1)
     pg.click()
-    time.sleep(0.3)
+    time.sleep(0.2)
     pg.press('delete')
     print("[MultiB] Esperando aparición del punto automático...")
-    time.sleep(1.0)  # Esperar 1 segundo para que aparezca el punto
+    time.sleep(0.6)  # Esperar 0.6 segundos para que aparezca el punto
     print("[MultiB] Eliminando punto con backspace...")
     pg.press('backspace')  # Eliminar el punto que aparece automáticamente
-    time.sleep(0.3)
+    time.sleep(0.2)
     
     # Segundo pase: re-seleccionar campo y borrar 3 veces
     print("[MultiB] Aplicando segundo pase de limpieza...")
@@ -780,14 +781,14 @@ def run(
     print("[MultiB] Re-seleccionando campo DNI...")
     dni_x, dni_y = _xy(conf, 'dni_field')
     pg.click(dni_x, dni_y)
-    time.sleep(0.3)
+    time.sleep(0.2)
     
     print("[MultiB] Borrando 3 veces...")
     for i in range(3):
         pg.press('backspace')
         print(f"[MultiB] Backspace {i+1}/3")
-        time.sleep(0.15)
-    time.sleep(0.3)
+        time.sleep(0.1)
+    time.sleep(0.2)
     
     print("[MultiB] === LIMPIEZA DNI COMPLETADA ===")
     
@@ -803,33 +804,33 @@ def run(
         print(f"[MultiB] Preparando para escribir: '{service_id}'")
         
         # Espera antes de cualquier acción
-        time.sleep(0.5)
+        time.sleep(0.3)
         
         # Limpieza idéntica al DNI: 2 clicks simples + Delete + backspace
         print("[MultiB] Limpiando Service ID con 2 clicks + Delete...")
         pg.click()
-        time.sleep(0.2)
+        time.sleep(0.1)
         pg.click()
-        time.sleep(0.3)
+        time.sleep(0.2)
         pg.press('delete')
         print("[MultiB] Esperando aparición del punto automático...")
-        time.sleep(1.0)  # Esperar 1 segundo para que aparezca el punto
+        time.sleep(0.6)  # Esperar 0.6 segundos para que aparezca el punto
         print("[MultiB] Eliminando punto con backspace...")
         pg.press('backspace')  # Eliminar el punto que aparece automáticamente
-        time.sleep(0.3)
+        time.sleep(0.2)
         
         # Segundo pase: re-seleccionar campo y borrar 3 veces
         print("[MultiB] Aplicando segundo pase de limpieza...")
         print("[MultiB] Re-seleccionando campo Service ID...")
         pg.click(svc_x, svc_y)
-        time.sleep(0.3)
+        time.sleep(0.2)
         
         print("[MultiB] Borrando 3 veces...")
         for i in range(3):
             pg.press('backspace')
             print(f"[MultiB] Backspace {i+1}/3")
-            time.sleep(0.15)
-        time.sleep(0.3)
+            time.sleep(0.1)
+        time.sleep(0.2)
         
         print("[MultiB] === LIMPIEZA Service ID COMPLETADA ===")
         
