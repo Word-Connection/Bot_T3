@@ -23,6 +23,7 @@ Sólo se copia en copy_area. El resto son clics/teclas sin copiar.
 from __future__ import annotations
 import os, sys, json, time, re
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Dict, Any, Optional, List
 
 import pyautogui as pg
@@ -76,11 +77,28 @@ def _xy(conf: Dict[str, Any], key: str) -> tuple[int,int]:
         return 0,0
 
 
+@contextmanager
+def _suppress_failsafe():
+    """Desactiva temporalmente el FAILSAFE de PyAutoGUI para evitar abortos cuando el mouse toque una esquina.
+    Restaura el valor original al salir.
+    """
+    try:
+        old = getattr(pg, 'FAILSAFE', True)
+        pg.FAILSAFE = False
+        yield
+    finally:
+        try:
+            pg.FAILSAFE = old
+        except Exception:
+            pass
+
+
 def _click(x: int, y: int, label: str, delay: float):
     print(f"[CaminoA] Click {label} ({x},{y})")
     if x and y:
-        pg.moveTo(x, y, duration=0.12)
-        pg.click()
+        with _suppress_failsafe():
+            pg.moveTo(x, y, duration=0.12)
+            pg.click()
     else:
         print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
     time.sleep(delay)
@@ -151,11 +169,26 @@ def _extract_first_number(txt: str) -> str:
 def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA] Doble click {label} ({x},{y})")
     if x and y:
-        pg.moveTo(x, y, duration=0.12)
-        try:
-            pg.doubleClick()
-        except Exception:
-            pg.click(); time.sleep(0.1); pg.click()
+        with _suppress_failsafe():
+            pg.moveTo(x, y, duration=0.12)
+            try:
+                pg.doubleClick()
+            except Exception:
+                pg.click(); time.sleep(0.05); pg.click()
+    else:
+        print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
+    time.sleep(delay_after)
+
+def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
+    print(f"[CaminoA] Right click {label} ({x},{y})")
+    if x and y:
+        with _suppress_failsafe():
+            pg.moveTo(x, y, duration=0.12)
+            try:
+                pg.click(button='right')
+            except Exception:
+                # Fallback: click izquierdo para enfocar y luego derecho
+                pg.click(); time.sleep(0.05); pg.click(button='right')
     else:
         print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
     time.sleep(delay_after)
@@ -163,7 +196,9 @@ def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
 def _looks_current(txt: str) -> bool:
     if not txt:
         return False
-    return 'current' in txt.strip().lower()
+    s = (txt or '').strip().lower()
+    # Aceptar indicadores en español e inglés
+    return ('current' in s) or ('actual' in s) or ('activo' in s) or ('seleccionado' in s)
 
 
 def _get_clipboard_text() -> str:
@@ -184,6 +219,232 @@ def _get_clipboard_text() -> str:
         return ''
 
 
+def _clear_clipboard():
+    """No-op: solicitado no limpiar más el portapapeles."""
+    return
+
+def _stable_read_clipboard_only(max_attempts: int = 8, consecutive: int = 2, read_delay: float = 0.1) -> str:
+    """Lee el portapapeles repetidamente SIN enviar Ctrl+C, hasta lograr lecturas estables.
+    Útil cuando acabamos de usar un menú contextual "Copiar" que ya puso el texto en el clipboard.
+    """
+    last = None
+    stable = 0
+    result = ''
+    for _ in range(max_attempts):
+        txt = _get_clipboard_text() or ''
+        if txt == last and txt:
+            stable += 1
+            if stable >= (consecutive - 1):
+                result = txt
+                break
+        else:
+            last = txt
+            stable = 0
+        time.sleep(read_delay)
+    return result or (last or '')
+
+
+def _currency_like(txt: str) -> bool:
+    """Heurística: valores tipo 0,00 - 1.234,56 - 1234.56
+    Acepta distintos separadores; requisito mínimo: dígitos + separador decimal.
+    """
+    if not txt:
+        return False
+    s = (txt or '').strip().replace(' ', '')
+    # Tiene dígitos y algún separador decimal
+    if not re.search(r"\d", s):
+        return False
+    return ("," in s or "." in s)
+
+
+def _stable_copy_text(max_attempts: int = 10, consecutive: int = 2, read_delay: float = 0.12,
+                      require_non_empty: bool = True, validator: Optional[Any] = None,
+                      clear_first: bool = False, require_changed: bool = False) -> str:
+    """Copia con Ctrl+C varias veces hasta obtener lecturas consecutivas idénticas.
+    - max_attempts: cantidad total de intentos.
+    - consecutive: cantidad de lecturas iguales consecutivas necesarias (>=2 recomendado).
+    - read_delay: espera entre Ctrl+C y lectura del portapapeles.
+    - require_non_empty: si True, ignora lecturas vacías.
+    - validator: callable opcional que recibe el string y devuelve True si es aceptable.
+    Devuelve el último texto estable o el último disponible si no se logra estabilidad.
+    """
+    # Por solicitud, no se limpia el portapapeles antes de copiar
+    baseline = _get_clipboard_text() if require_changed else None
+    last = None
+    stable_count = 0
+    result = ''
+    for _ in range(max_attempts):
+        # Doble Ctrl+C para forzar actualización del portapapeles
+        pg.hotkey('ctrl','c'); time.sleep(read_delay)
+        pg.hotkey('ctrl','c'); time.sleep(read_delay)
+        txt = _get_clipboard_text() or ''
+        if require_changed and baseline is not None and txt == baseline:
+            time.sleep(0.06)
+            continue
+        if require_non_empty and not txt:
+            time.sleep(0.06)
+            continue
+        if validator is not None and txt and not validator(txt):
+            # No válido según validador; no cuenta como estable
+            last = txt
+            stable_count = 0
+            time.sleep(0.06)
+            continue
+        if txt == last and txt:
+            stable_count += 1
+            if stable_count >= (consecutive - 1):
+                result = txt
+                break
+        else:
+            last = txt
+            stable_count = 0
+        time.sleep(0.06)
+    return result or (last or '')
+
+
+def _looks_like_apartado(txt: str) -> bool:
+    """Aparte de no ser monto, debe tener alguna letra o separadores típicos de títulos/fechas.
+    Acepta p.ej. 'Actual', 'Plan X', '28/01/2025'. Rechaza '0,00', '1234', etc.
+    """
+    if not txt:
+        return False
+    s = (txt or '').strip()
+    if not s:
+        return False
+    if _currency_like(s):
+        return False
+    # Alguna pista de texto no puramente numérico
+    return bool(re.search(r"[A-Za-z/:-]", s))
+
+
+def _is_cuenta_financiera_label(txt: str) -> bool:
+    """Detecta si el texto corresponde a 'Cuenta Financiera'.
+    Permite variaciones de mayúsculas/minúsculas y espacios.
+    """
+    if not txt:
+        return False
+    s = (txt or '').strip().lower()
+    # Simplificado: requiere que contenga ambas palabras
+    return ('cuenta' in s) and ('financiera' in s)
+
+
+def _parse_amount_value(txt: str) -> Optional[float]:
+    """Intenta parsear un monto localizado como float.
+    Reglas simples:
+    - Mantiene solo dígitos, '.' y ','
+    - Si hay ',' y '.', asume '.' miles y ',' decimales (ej: 113.180,72)
+    - Si solo ',', asume coma decimal
+    - Si solo '.', asume punto decimal
+    Devuelve None si no se puede parsear a número.
+    """
+    if not txt:
+        return None
+    s = re.sub(r"[^0-9.,]", "", txt)
+    if not s or not re.search(r"\d", s):
+        return None
+    try:
+        if "," in s and "." in s:
+            # quitar puntos de miles y usar coma como decimal
+            s2 = s.replace('.', '').replace(',', '.')
+            return float(s2)
+        if "," in s:
+            return float(s.replace(',', '.'))
+        return float(s)
+    except Exception:
+        return None
+
+
+def _copy_apartado_with_retries() -> str:
+    """Copia el 'apartado' del foco actual evitando valores tipo monto.
+    1) Intento con clear_first=True
+    2) Si no luce válido, doble click + reintento
+    3) Si no, Tab + reintento
+    4) Si no, Shift+Tab + reintento
+    Devuelve el mejor texto disponible (válido si se logró, o último si no).
+    """
+    # 1) Primer intento sin limpieza para evitar bloquear o spamear limpiezas
+    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False, require_changed=True)
+    if _looks_like_apartado(txt):
+        return txt
+
+    # 2) Doble click
+    with _suppress_failsafe():
+        try:
+            pg.doubleClick()
+        except Exception:
+            pg.click(); time.sleep(0.05); pg.click()
+    time.sleep(0.12)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False, require_changed=True)
+    if _looks_like_apartado(txt):
+        return txt
+
+    # 3) Tab
+    pg.press('tab'); time.sleep(0.12)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False, require_changed=True)
+    if _looks_like_apartado(txt):
+        return txt
+
+    # 4) Shift+Tab (volver)
+    try:
+        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
+    except Exception:
+        pass
+    time.sleep(0.12)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False, require_changed=True)
+    return txt
+
+
+def _copy_id_with_retries() -> str:
+    """Copia el ID de la columna actual con reintentos de foco.
+    Valida que tenga un bloque de dígitos (>=5) y evita aceptar formatos tipo monto.
+    """
+    def _valid_id(s: str) -> bool:
+        if not s:
+            return False
+        if _currency_like(s):
+            return False
+        return re.search(r"\b\d{5,}\b", s or '') is not None
+
+    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False,
+                            validator=_valid_id)
+    if _valid_id(txt):
+        return txt
+    # Doble click
+    with _suppress_failsafe():
+        try:
+            pg.doubleClick()
+        except Exception:
+            pg.click(); time.sleep(0.05); pg.click()
+    time.sleep(0.1)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False,
+                            validator=_valid_id)
+    if _valid_id(txt):
+        return txt
+    # Tab
+    pg.press('tab'); time.sleep(0.1)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False,
+                            validator=_valid_id)
+    if _valid_id(txt):
+        return txt
+    # Shift+Tab
+    try:
+        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
+    except Exception:
+        pass
+    time.sleep(0.1)
+    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
+                            require_non_empty=False, clear_first=False,
+                            validator=_valid_id)
+    return txt
+
+
 def _append_log(log_path: Path, dni: str, content: str):
     one = (content or '').replace('\r',' ').replace('\n',' ').strip()
     if len(one) > 400:
@@ -202,19 +463,400 @@ def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float)
         return step_delays[index]
     return fallback
 
+def _robust_copy_number_at(x: int, y: int) -> str:
+    """Intenta copiar texto en (x,y) y extraer el primer número de forma robusta.
+    Estrategia por intentos: click+Ctrl+C, doble click+Ctrl+C, drag select+Ctrl+C.
+    Devuelve el texto copiado (no solo el número) para que el llamador decida el parseo.
+    """
+    def has_digits(t: str) -> bool:
+        return bool(re.search(r"\d+", t or ''))
+
+    # Por solicitud, no limpiar el portapapeles antes de copiar
+
+    # Intento 1: click y copiar
+    if x and y:
+        with _suppress_failsafe():
+            pg.moveTo(x, y, duration=0.08)
+            pg.click(); time.sleep(0.12)
+        pg.hotkey('ctrl','c'); time.sleep(0.08)
+        txt = _get_clipboard_text()
+        if has_digits(txt):
+            return txt or ''
+
+    # Intento 2: doble click
+    if x and y:
+        with _suppress_failsafe():
+            pg.moveTo(x, y, duration=0.08)
+            try:
+                pg.doubleClick()
+            except Exception:
+                pg.click(); time.sleep(0.05); pg.click()
+            time.sleep(0.12)
+        pg.hotkey('ctrl','c'); time.sleep(0.08)
+        txt = _get_clipboard_text()
+        if has_digits(txt):
+            return txt or ''
+
+    # Intento 3: selección por arrastre
+    if x and y:
+        try:
+            with _suppress_failsafe():
+                pg.moveTo(max(0, x-25), y, duration=0.06)
+                pg.mouseDown(); time.sleep(0.06)
+                pg.moveTo(x+140, y, duration=0.12)
+                pg.mouseUp(); time.sleep(0.1)
+        except Exception:
+            pass
+        pg.hotkey('ctrl','c'); time.sleep(0.1)
+        txt = _get_clipboard_text()
+        if has_digits(txt):
+            return txt or ''
+
+    # Último recurso: devolver lo que haya
+    return _get_clipboard_text() or ''
+
+
+def _copy_records_count_via_button(conf: Dict[str, Any], button_key: str,
+                                   step_delays: Optional[List[float]], base_delay: float,
+                                   attempts: int = 3) -> str:
+    """Clickea un botón de 'records' (por ej. 'fa_records_btn' o 'records_N'),
+    cierra el panel y luego intenta copiar el texto que contiene la cantidad de registros.
+    Repite hasta 'attempts' veces si no detecta dígitos.
+    Devuelve el texto crudo copiado (p.ej. '9 Registros' o sólo '9'), sin limpiar portapapeles.
+    """
+    consensus_val = None
+    consensus_hits = 0
+    last_return_txt = ''
+    for i in range(max(1, attempts)):
+        prev = _get_clipboard_text() or ''
+        bx, by = _xy(conf, button_key)
+        if bx or by:
+            _click(bx, by, button_key, base_delay)
+        cx, cy = _xy(conf, 'close_records')
+        if cx or cy:
+            _click(cx, cy, 'close_records', base_delay)
+        time.sleep(1.0)
+        txt = _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False, require_changed=True)
+        if txt and txt != prev and re.search(r"\d+", txt or ''):
+            last_return_txt = txt or ''
+            # Comparar por número para consenso entre textos diferentes (ej. '4 Registros' vs '4')
+            m = re.search(r"\d+", txt)
+            val = int(m.group(0)) if m else None
+            if val is not None:
+                if consensus_val is None:
+                    consensus_val = val
+                    consensus_hits = 1
+                elif val == consensus_val:
+                    consensus_hits += 1
+                else:
+                    consensus_val = val
+                    consensus_hits = 1
+                # Si pedimos más de 1 intento, confirmar al menos 2 coincidencias
+                if attempts <= 1 or consensus_hits >= 2:
+                    return last_return_txt
+        # Si falló, reintentar una vez más re-abriendo/cerrando
+    return last_return_txt or _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False)
+
+
+def _parse_count_with_cap(txt: str, cap_env: str, default_cap: int) -> int:
+    """Extrae el primer entero de txt y aplica un tope (cap). Si supera el tope, devuelve 0 (inválido).
+    cap_env permite configurar por entorno (por ejemplo 'MAX_FA_ACTUALES').
+    """
+    try:
+        cap = int(os.getenv(cap_env, str(default_cap)))
+    except Exception:
+        cap = default_cap
+    m = re.search(r"\d+", txt or '')
+    if not m:
+        return 0
+    try:
+        n = int(m.group(0))
+    except Exception:
+        return 0
+    return n if 0 < n <= cap else 0
+
+
+def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
+                                     arrow_nav_delay: float, log_path: Path, dni: str,
+                                     results: Optional[Dict[str, Any]] = None):
+    """Cuenta Financiera (flujo exacto solicitado):
+    - Primera CF: resumen_facturacion_btn -> cuenta_financiera_btn.
+    - Validar que el apartado sea 'Cuenta Financiera'.
+    - Mover 5 a la derecha y leer N (cantidad de ítems de la lista).
+    - mostrar_lista_btn -> copy_area.
+    - Para cada ítem (N veces): copiar saldo; 4 a la izquierda copiar ID; volver 4 a la derecha; registrar.
+    - Para siguientes CFs: volver a cuenta_financiera_btn y bajar 1; repetir SOLO la parte de lista.
+    - Si el primer ID de saldo coincide con el de la CF anterior, abortar esa CF y finalizar.
+    - Al terminar, cerrar la pestaña.
+    """
+    use_pynput_nav = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+    max_cf_accounts = int(os.getenv('MAX_CF_ACCOUNTS', '5'))
+    prev_first_item_id: Optional[str] = None
+
+    for cf_index in range(max_cf_accounts):
+        # Navegación hasta la CF
+        if cf_index == 0:
+            x, y = _xy(conf, 'resumen_facturacion_btn')
+            _click(x, y, 'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
+            x, y = _xy(conf, 'cuenta_financiera_btn')
+            _click(x, y, 'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
+            time.sleep(1.0)
+        else:
+            x, y = _xy(conf, 'cuenta_financiera_btn')
+            _click(x, y, 'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
+            # Segunda CF: bajar 1; tercera: bajar 2; etc.
+            _send_down_presses(cf_index, arrow_nav_delay, use_pynput_nav)
+            time.sleep(0.6)
+
+        # Validar apartado (debe ser Cuenta Financiera)
+        apartado_cf = _copy_apartado_with_retries()
+        if not _is_cuenta_financiera_label(apartado_cf or ''):
+            if cf_index == 0:
+                print("[CaminoA] Apartado distinto de 'Cuenta Financiera'; se cierra pestaña.")
+                x_close, y_close = _xy(conf, 'close_tab_btn')
+                _click(x_close, y_close, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+            break
+        if apartado_cf:
+            _append_log(log_path, dni, f"apartado {apartado_cf}")
+
+    # 4 a la derecha para leer el apartado crudo (raw) y derivar N
+        _send_right_presses(4, arrow_nav_delay, use_pynput_nav)
+
+        # Validador estricto: debe devolver un número entre 1 y 100
+        def _valid_cf_count(s: str) -> bool:
+            if not s:
+                return False
+            mloc = re.search(r"\d+", s)
+            if not mloc:
+                return False
+            try:
+                val = int(mloc.group(0))
+            except Exception:
+                return False
+            return 1 <= val <= 100
+
+        # Reintentar copiar hasta obtener un número válido (1..100)
+        num_txt = ''
+        for _ in range(3):
+            num_txt = _stable_copy_text(
+                max_attempts=20, consecutive=2, read_delay=0.12,
+                require_non_empty=True, validator=_valid_cf_count, require_changed=False
+            )
+            if _valid_cf_count(num_txt):
+                break
+            # Si no es válido, volver a presionar para copiar (nuevos intentos en el próximo ciclo)
+            time.sleep(0.12)
+
+        # Derivar N sólo si el texto cumple el validador; si no, insistir con un último intento directo
+        m = re.search(r"\d+", num_txt or '')
+        if not m:
+            # último intento: forzar unas copias extra rápidas
+            for _ in range(6):
+                pg.hotkey('ctrl','c'); time.sleep(0.12)
+                num_txt = _get_clipboard_text() or ''
+                m = re.search(r"\d+", num_txt or '')
+                if m:
+                    try:
+                        if 1 <= int(m.group(0)) <= 100:
+                            break
+                    except Exception:
+                        pass
+            # si aún no se logró, dejar m como esté; n_to_copy caerá a 1 (fallback seguro)
+
+        n_to_copy = 1
+        if m:
+            try:
+                n_candidate = int(m.group(0))
+                if 1 <= n_candidate <= 100:
+                    n_to_copy = n_candidate
+            except Exception:
+                n_to_copy = 1
+
+        print(f"[CaminoA] Items a copiar tras cuenta_financiera: {n_to_copy} (raw='{(num_txt or '')[:40]}')")
+
+        # Inicializar entrada para esta Cuenta Financiera en resultados estructurados
+        if results is not None:
+            cf_entry = {"raw": num_txt or "", "n": n_to_copy, "items": []}
+            results.setdefault("cuenta_financiera", []).append(cf_entry)
+        else:
+            cf_entry = None
+
+        # Mostrar lista y enfocar área de copia
+        x, y = _xy(conf, 'mostrar_lista_btn')
+        _click(x, y, 'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
+        time.sleep(0.6)
+        x_copy, y_copy = _xy(conf, 'copy_area')
+        _click(x_copy, y_copy, 'copy_area', 0.2)
+
+        # Copiar primer saldo + ID y comparar con CF previa
+        first_saldo = _stable_copy_text(consecutive=2, read_delay=0.1)
+        _send_left_presses(4, arrow_nav_delay, use_pynput_nav)
+        time.sleep(0.12)
+        first_id_txt = _stable_copy_text(consecutive=2, read_delay=0.1)
+        first_id_extracted = _extract_first_number(first_id_txt or '') or (first_id_txt or '').strip()
+        _send_right_presses(4, arrow_nav_delay, use_pynput_nav)
+        time.sleep(0.08)
+
+        # Agregar primer ítem a resultados
+        if cf_entry is not None:
+            cf_entry["items"].append({
+                "saldo_raw": first_saldo or "",
+                "saldo": _parse_amount_value(first_saldo or ""),
+                "id_raw": first_id_txt or "",
+                "id": (_extract_first_number(first_id_txt or "") or None)
+            })
+
+        if cf_index > 0 and prev_first_item_id and first_id_extracted and first_id_extracted == prev_first_item_id:
+            print("[CaminoA] Primer ID de saldo coincide con la CF anterior; se aborta esta CF sin loguear.")
+            break
+        prev_first_item_id = first_id_extracted
+
+        # Log primer ítem
+        val_first = _parse_amount_value(first_saldo or '')
+        content = first_saldo if first_saldo else 'No Tiene Pedido'
+        if val_first is not None and abs(val_first) > 0.0005:
+            content = f"{first_saldo} | ID: {first_id_txt}"
+        _append_log(log_path, dni, content)
+
+    # Resto de los ítems
+        for _ in range(max(0, n_to_copy - 1)):
+            _send_down_presses(1, arrow_nav_delay, use_pynput_nav)
+            time.sleep(0.15)
+            saldo_txt = _stable_copy_text(consecutive=2, read_delay=0.1)
+            _send_left_presses(4, arrow_nav_delay, use_pynput_nav)
+            time.sleep(0.12)
+            id_txt = _stable_copy_text(consecutive=2, read_delay=0.1)
+            _send_right_presses(4, arrow_nav_delay, use_pynput_nav)
+            time.sleep(0.08)
+            # Agregar a resultados
+            if cf_entry is not None:
+                cf_entry["items"].append({
+                    "saldo_raw": saldo_txt or "",
+                    "saldo": _parse_amount_value(saldo_txt or ""),
+                    "id_raw": id_txt or "",
+                    "id": (_extract_first_number(id_txt or "") or None)
+                })
+            val = _parse_amount_value(saldo_txt or '')
+            to_log = saldo_txt if saldo_txt else 'No Tiene Pedido'
+            if val is not None and abs(val) > 0.0005:
+                to_log = f"{saldo_txt} | ID: {id_txt}"
+            _append_log(log_path, dni, to_log)
+
+    # No es necesario actualizar offset manualmente; se usa cf_index
+
+    # Cerrar pestaña al terminar CFs (o si se abortó por coincidencia de ID)
+    x, y = _xy(conf, 'close_tab_btn')
+    _click(x, y, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+
+
+def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
+                         arrow_nav_delay: float, log_path: Path, dni: str,
+                         results: Optional[Dict[str, Any]] = None) -> int:
+    """Procesa la sección 'FA Cobranza -> Actual' recorriendo N elementos.
+    Devuelve N (cantidad procesada) o 0 si no hay 'Actual'.
+    """
+    # Siempre al entrar en FA: Buscar -> Records -> Cerrar panel (copiando N con el mismo mecanismo robusto)
+    bx, by = _xy(conf, 'fa_cobranza_buscar')
+    if bx or by:
+        _click(bx, by, 'fa_cobranza_buscar', _step_delay(step_delays,10,base_delay))
+    fx, fy = _xy(conf, 'fa_records_btn')
+    if not (fx or fy):
+        print('[CaminoA] fa_records_btn no definido en coords; se salta procesamiento de Actual')
+        return 0
+
+    fa_attempts = 1
+    try:
+        fa_attempts = max(1, int(os.getenv('FA_RECORDS_ATTEMPTS', '1')))
+    except Exception:
+        fa_attempts = 1
+    rec_txt = _copy_records_count_via_button(conf, 'fa_records_btn', step_delays, base_delay, attempts=fa_attempts)
+    n = _parse_count_with_cap(rec_txt or '', 'MAX_FA_ACTUALES', 50)
+    if n <= 0:
+        print('[CaminoA] No hay "Actual" para procesar (N=0)')
+        return 0
+
+    print(f"[CaminoA] Actual(es) a procesar: N={n}")
+    use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+    for i in range(n):
+        # Seleccionar siempre la primera, luego bajar i filas
+        x, y = _xy(conf, 'fa_seleccion')
+        _click(x, y, 'fa_seleccion', 0.2)
+        if i > 0:
+            _send_down_presses(i, arrow_nav_delay, use_pynput)
+
+        # Abrir y copiar
+        _press_enter(0.3)
+        dx, dy = _xy(conf, 'fa_deuda')
+        _double_click_xy(dx, dy, 'fa_deuda', 0.25)
+        time.sleep(1.0)
+
+        apartado_txt = _copy_apartado_with_retries()
+        if apartado_txt and (not _currency_like(apartado_txt)) and (not re.search(r"\bregistros?\b", (apartado_txt or '').strip().lower())):
+            _append_log(log_path, dni, f"apartado {apartado_txt}")
+
+        # Paso 1: copiar saldo desde el área de fa_deuda (Ctrl+C estable)
+        deuda_txt = _stable_copy_text(max_attempts=6, consecutive=2, read_delay=0.1,
+                                      require_non_empty=False, clear_first=False)
+        _append_log(log_path, dni, f"saldo {deuda_txt}" if deuda_txt else 'saldo No Tiene Pedido')
+
+        # Paso 2: copiar ID usando fa_area_copy (click derecho) + fa_copy (click izquierdo)
+        rax, ray = _xy(conf, 'fa_area_copy')
+        cpx, cpy = _xy(conf, 'fa_copy')
+        id_txt = ''
+        if rax or ray:
+            _right_click(rax, ray, 'fa_area_copy', 0.2)
+            if cpx or cpy:
+                _click(cpx, cpy, 'fa_copy', 0.15)
+            time.sleep(0.1)
+            id_txt = _stable_read_clipboard_only(max_attempts=8, consecutive=2, read_delay=0.1)
+        else:
+            # Fallback si no hay coords: intentar Ctrl+C directo
+            id_txt = _stable_copy_text(max_attempts=6, consecutive=2, read_delay=0.1,
+                                       require_non_empty=False, clear_first=False)
+        _append_log(log_path, dni, f"id {id_txt}" if id_txt else 'id No Data')
+
+        # Registrar FA en resultados estructurados (con valores parseados)
+        if results is not None:
+            results.setdefault("fa_actual", []).append({
+                "apartado": apartado_txt or "",
+                "saldo_raw": deuda_txt or "",
+                "saldo": _parse_amount_value(deuda_txt or ""),
+                "id_raw": id_txt or "",
+                "id": (_extract_first_number(id_txt or "") or None)
+            })
+
+        # Cerrar detalle
+        cx, cy = _xy(conf, 'close_tab_btn')
+        _click(cx, cy, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+
+    return n
+
 
 def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None):
     pg.FAILSAFE = True
-    start_delay = float(os.getenv('COORDS_START_DELAY','1.5'))
+    start_delay = float(os.getenv('COORDS_START_DELAY','0.75'))
     base_delay = float(os.getenv('STEP_DELAY','1.0'))
-    post_enter = float(os.getenv('POST_ENTER_DELAY','4.0'))
+    post_enter = float(os.getenv('POST_ENTER_DELAY','2.0'))
     arrow_nav_delay = float(os.getenv('ARROW_NAV_DELAY','0.15'))
     log_path = log_file or Path('camino_a_copias.log')
+    jumped_to_client_field = False
 
     print(f"Iniciando en {start_delay}s...")
     time.sleep(start_delay)
 
     conf = _load_coords(coords_path)
+
+    # Estructura de resultados a emitir por stdout (similar a worker: un JSON final)
+    results: Dict[str, Any] = {
+        "dni": dni,
+        "success": True,
+        "records": {
+            "inicio_total": None,
+            "procesados": None
+        },
+        "fa_actual": [],
+        "cuenta_financiera": []
+    }
 
     # 0) cliente_section
     x,y = _xy(conf,'cliente_section')
@@ -235,110 +877,57 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     rx, ry = _xy(conf,'records_N')
     records_total = 1
     if rx or ry:
-        _click(rx, ry, 'records_N', base_delay)
-        cx, cy = _xy(conf,'close_records')
-        if cx or cy:
-            _click(cx, cy, 'close_records', base_delay)
-        # Copiar lo seleccionado y extraer el número
-        pg.hotkey('ctrl','c')
-        time.sleep(0.4)
-        rec_txt = _get_clipboard_text()
-        n = None
-        if rec_txt:
-            m = re.search(r"\d+", rec_txt)
-            if m:
-                n = m.group(0)
-        if n:
+        # Usar el mismo mecanismo robusto de copia que fa_records_btn (intentos configurables)
+        rec_attempts = 1
+        try:
+            rec_attempts = max(1, int(os.getenv('RECORDS_ATTEMPTS', '1')))
+        except Exception:
+            rec_attempts = 1
+        rec_txt = _copy_records_count_via_button(conf, 'records_N', step_delays, base_delay, attempts=rec_attempts)
+        n_int = _parse_count_with_cap(rec_txt or '', 'MAX_RECORDS_INICIO', 50)
+        if n_int:
             # Registrar sólo el número asociado al DNI
-            _append_log(log_path, dni, n)
-            try:
-                records_total = max(1, int(n))
-            except Exception:
-                records_total = 1
+            _append_log(log_path, dni, str(n_int))
+            # Ajuste solicitado: procesar N-1 (saltear el último)
+            records_total = max(1, n_int - 1)
+            print(f"[CaminoA] Records detectados={n_int}. Procesando={records_total} (saltando el último)")
+            # Guardar en resultados
+            results["records"]["inicio_total"] = n_int
+            results["records"]["procesados"] = records_total
         else:
             print('[CaminoA] ADVERTENCIA: No se detectó número en Records')
+        # Ir directamente a client_id_field tras manejar Records
+        xci, yci = _xy(conf,'client_id_field')
+        _click(xci, yci, 'client_id_field', _step_delay(step_delays,5,base_delay))
+        jumped_to_client_field = True
     # 5) client_id_field (solo click, sin Enter)
-    x,y = _xy(conf,'client_id_field')
-    _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
+    if not jumped_to_client_field:
+        x,y = _xy(conf,'client_id_field')
+        _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
     # 6) seleccionar_btn
     x,y = _xy(conf,'seleccionar_btn')
     _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
+    # Espera extra después de seleccionar_btn para que cargue la página
+    time.sleep(2.0)
     # Insertar fa_cobranza_* antes de iniciar fa_seleccion
     x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
     x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
     x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
-    x,y = _xy(conf,'fa_cobranza_buscar'); _click(x,y,'fa_cobranza_buscar', _step_delay(step_delays,10,base_delay))
 
-    # Nuevo flujo solicitado: fa_seleccion -> (verificación Current) -> 3 derecha -> copiar ID base -> 3 izquierda -> Enter -> doble click fa_deuda -> copiar "deuda X" -> cerrar pestaña (una vez)
+    # Nuevo flujo solicitado (actualizado): Tras fa_cobranza_buscar usar fa_records_btn para contar 'Actual' y procesarlos
+    # Asegurar variable de referencia inicializada para evitar UnboundLocalError en ramas donde no se obtenga ID de referencia
+    id_ref = None
     use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-    # fa_seleccion
-    x,y = _xy(conf,'fa_seleccion')
-    _click(x,y,'fa_seleccion', _step_delay(step_delays,7,base_delay))
-    # Verificar si la opción está disponible: copiar antes de moverse a la derecha
-    pg.hotkey('ctrl','c'); time.sleep(0.35)
-    first_sel_txt = _get_clipboard_text()
-    if not _looks_current(first_sel_txt):
-        print(f"[CaminoA] fa_seleccion no disponible (='{(first_sel_txt or '').strip()[:40]}'), saltando a resumen_facturacion")
-        x,y = _xy(conf,'resumen_facturacion_btn'); _click(x,y,'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
-        x,y = _xy(conf,'cuenta_financiera_btn'); _click(x,y,'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
-        x,y = _xy(conf,'mostrar_lista_btn'); _click(x,y,'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-        x,y = _xy(conf,'copy_area'); _click(x,y,'copy_area', 0.2); pg.hotkey('ctrl','c'); time.sleep(0.4); copied = _get_clipboard_text(); _append_log(log_path, dni, copied)
-        x,y = _xy(conf,'close_tab_btn'); _click(x,y,'close_tab_btn', _step_delay(step_delays,15,base_delay))
-        # Ir directo al loop de apartados restantes
-        goto_loop = True
+    # Nuevo camino: contar y procesar 'Actual' por fa_records_btn
+    n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+    if n_actual <= 0:
+        # Si no hay Actual, continuar con resumen/cuenta/lista como fallback
+        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
     else:
-        goto_loop = False
-    if not goto_loop:
-        # 3 flechas a la derecha y copiar ID referencia
-        _send_right_presses(3, arrow_nav_delay, use_pynput)
-        pg.hotkey('ctrl','c'); time.sleep(0.35)
-        id_ref_txt = _get_clipboard_text()
-        id_ref = _extract_first_number(id_ref_txt)
-        print(f"[CaminoA] ID referencia (derecha x3): {id_ref} (raw='{(id_ref_txt or '')[:60]}')")
-        # 3 izquierda y Enter
-        _send_left_presses(3, arrow_nav_delay, use_pynput)
-        _press_enter(0.3)
-        # Doble click fa_deuda y copiar
-        dx, dy = _xy(conf,'fa_deuda')
-        _double_click_xy(dx, dy, 'fa_deuda', 0.25)
-        pg.hotkey('ctrl', 'c'); time.sleep(0.4)
-        deuda_txt = _get_clipboard_text(); deuda_num = _extract_first_number(deuda_txt)
-        _append_log(log_path, dni, f"deuda {deuda_num or deuda_txt}")
-        # Cerrar pestaña una vez
-        cx, cy = _xy(conf,'close_tab_btn')
-        _click(cx, cy, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+        # Si hubo Actual(es), mantener el camino original: continuar con resumen/cuenta/lista
+        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
 
-        # Reingresar a fa_seleccion y buscar la fila cuyo ID coincide con referencia, bajando 1, luego 2, ... hasta coincidir
-        max_intentos = int(os.getenv('ID_MATCH_MAX_ATTEMPTS','20'))
-        intentos = 1
-        matched = False
-        while intentos <= max_intentos and not matched:
-            x,y = _xy(conf,'fa_seleccion'); _click(x,y,'fa_seleccion', 0.2)
-            # bajar intentos veces y moverse 3 a la derecha
-            if intentos > 0:
-                _send_down_presses(intentos, arrow_nav_delay, use_pynput)
-            _send_right_presses(3, arrow_nav_delay, use_pynput)
-            # copiar y comparar
-            pg.hotkey('ctrl','c'); time.sleep(0.35)
-            cur_txt = _get_clipboard_text(); cur_id = _extract_first_number(cur_txt)
-            print(f"[CaminoA] Intento {intentos}: cur_id={cur_id} vs ref={id_ref}")
-            if id_ref and cur_id == id_ref:
-                matched = True
-                # volver 3 a la izquierda para quedar en la columna inicial antes del resto del camino
-                _send_left_presses(3, arrow_nav_delay, use_pynput)
-                break
-            # si no coincide, volver 3 a la izquierda para regresar a columna base antes del próximo intento
-            _send_left_presses(3, arrow_nav_delay, use_pynput)
-            intentos += 1
-        if not matched:
-            print(f"[CaminoA] ADVERTENCIA: No se encontró coincidencia de ID tras {max_intentos} intentos; se continúa igualmente.")
-
-        # Continuar camino normal: resumen -> cuenta -> mostrar lista -> copiar -> cerrar pestaña
-        x,y = _xy(conf,'resumen_facturacion_btn'); _click(x,y,'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
-        x,y = _xy(conf,'cuenta_financiera_btn'); _click(x,y,'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
-        x,y = _xy(conf,'mostrar_lista_btn'); _click(x,y,'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-        x,y = _xy(conf,'copy_area'); _click(x,y,'copy_area', 0.2); pg.hotkey('ctrl','c'); time.sleep(0.4); copied = _get_clipboard_text(); _append_log(log_path, dni, copied)
-        x,y = _xy(conf,'close_tab_btn'); _click(x,y,'close_tab_btn', _step_delay(step_delays,15,base_delay))
+    # Nota: Si hubo Actual (n_actual > 0), no ejecutamos resumen/cuenta/lista aquí.
 
     # Repetir para los apartados restantes, navegando con flecha abajo
     # El primero ya se hizo; procesar desde el 2 hasta records_total
@@ -349,6 +938,8 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         if not (hx2 or hy2):
             hx2, hy2 = _xy(conf,'home_area')
         if hx2 or hy2:
+            # Espera previa solicitada antes de ir a house_area
+            time.sleep(2.0)
             _click(hx2, hy2, 'house_area', base_delay)
         # Volver a client_id_field, moverse N veces con flecha abajo
         x,y = _xy(conf,'client_id_field'); _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
@@ -361,95 +952,37 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         _send_down_presses(offset, arrow_nav_delay, use_pynput)
         # Re-ejecutar subcamino con el nuevo flujo
         x,y = _xy(conf,'seleccionar_btn'); _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
-        # fa_cobranza_* antes de fa_seleccion
+        # Espera extra después de seleccionar_btn para que cargue la página
+        time.sleep(2.0)
+        # fa_cobranza_* antes de procesar Actual
         x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
         x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
         x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
-        x,y = _xy(conf,'fa_cobranza_buscar'); _click(x,y,'fa_cobranza_buscar', _step_delay(step_delays,10,base_delay))
-        # fa_seleccion -> verificación Current
-        use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-        x,y = _xy(conf,'fa_seleccion'); _click(x,y,'fa_seleccion', _step_delay(step_delays,7,base_delay))
-        pg.hotkey('ctrl','c'); time.sleep(0.35)
-        first_sel_txt = _get_clipboard_text()
-        if not _looks_current(first_sel_txt):
-            print(f"[CaminoA] fa_seleccion no disponible (='{(first_sel_txt or '').strip()[:40]}'), saltando a resumen_facturacion")
-            x,y = _xy(conf,'resumen_facturacion_btn'); _click(x,y,'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
-            x,y = _xy(conf,'cuenta_financiera_btn'); _click(x,y,'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
-            x,y = _xy(conf,'mostrar_lista_btn'); _click(x,y,'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-            x,y = _xy(conf,'copy_area'); _click(x,y,'copy_area', 0.2); pg.hotkey('ctrl','c'); time.sleep(0.4); copied = _get_clipboard_text(); _append_log(log_path, dni, copied)
-            x,y = _xy(conf,'close_tab_btn'); _click(x,y,'close_tab_btn', _step_delay(step_delays,15,base_delay))
-        else:
-            # derecha x3 -> copiar ID base -> izquierda x3 -> Enter -> deuda -> cerrar pestaña
-            _send_right_presses(3, arrow_nav_delay, use_pynput)
-            pg.hotkey('ctrl','c'); time.sleep(0.35)
-            id_ref_txt = _get_clipboard_text(); id_ref = _extract_first_number(id_ref_txt)
-            print(f"[CaminoA] ID referencia (derecha x3): {id_ref} (raw='{(id_ref_txt or '')[:60]}')")
-            _send_left_presses(3, arrow_nav_delay, use_pynput)
-            _press_enter(0.3)
-            dx, dy = _xy(conf,'fa_deuda'); _double_click_xy(dx, dy, 'fa_deuda', 0.25)
-            pg.hotkey('ctrl','c'); time.sleep(0.4)
-            deuda_txt = _get_clipboard_text(); deuda_num = _extract_first_number(deuda_txt)
-            _append_log(log_path, dni, f"deuda {deuda_num or deuda_txt}")
-            cx, cy = _xy(conf,'close_tab_btn'); _click(cx, cy, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+        # Procesar Actual(es) de forma consistente: buscar -> records -> cerrar -> iterar N
+        n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        # Mantener el flujo original: siempre continuar con resumen/cuenta/lista
+        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
 
-            # Buscar coincidencia bajando 1, 2, ...
-            max_intentos = int(os.getenv('ID_MATCH_MAX_ATTEMPTS','20'))
-            intentos = 1; matched = False
-            while intentos <= max_intentos and not matched:
-                x,y = _xy(conf,'fa_seleccion'); _click(x,y,'fa_seleccion', 0.2)
-                _send_down_presses(intentos, arrow_nav_delay, use_pynput)
-                _send_right_presses(3, arrow_nav_delay, use_pynput)
-                pg.hotkey('ctrl','c'); time.sleep(0.35)
-                cur_txt = _get_clipboard_text(); cur_id = _extract_first_number(cur_txt)
-                print(f"[CaminoA] Intento {intentos}: cur_id={cur_id} vs ref={id_ref}")
-                if id_ref and cur_id == id_ref:
-                    matched = True
-                    _send_left_presses(3, arrow_nav_delay, use_pynput)
-                    break
-                _send_left_presses(3, arrow_nav_delay, use_pynput)
-                intentos += 1
-            if not matched:
-                print(f"[CaminoA] ADVERTENCIA: No se encontró coincidencia de ID tras {max_intentos} intentos; se continúa igualmente.")
-
-            # Continuar camino normal tras coincidencia
-            x,y = _xy(conf,'resumen_facturacion_btn'); _click(x,y,'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
-            x,y = _xy(conf,'cuenta_financiera_btn'); _click(x,y,'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
-            x,y = _xy(conf,'mostrar_lista_btn'); _click(x,y,'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-            x,y = _xy(conf,'copy_area'); _click(x,y,'copy_area', 0.2); pg.hotkey('ctrl','c'); time.sleep(0.4); copied = _get_clipboard_text(); _append_log(log_path, dni, copied)
-            x,y = _xy(conf,'close_tab_btn'); _click(x,y,'close_tab_btn', _step_delay(step_delays,15,base_delay))
-
-        # Buscar coincidencia bajando 1, 2, ...
-        max_intentos = int(os.getenv('ID_MATCH_MAX_ATTEMPTS','20'))
-        intentos = 1; matched = False
-        while intentos <= max_intentos and not matched:
-            x,y = _xy(conf,'fa_seleccion'); _click(x,y,'fa_seleccion', 0.2)
-            _send_down_presses(intentos, arrow_nav_delay, use_pynput)
-            _send_right_presses(3, arrow_nav_delay, use_pynput)
-            pg.hotkey('ctrl','c'); time.sleep(0.35)
-            cur_txt = _get_clipboard_text(); cur_id = _extract_first_number(cur_txt)
-            print(f"[CaminoA] Intento {intentos}: cur_id={cur_id} vs ref={id_ref}")
-            if id_ref and cur_id == id_ref:
-                matched = True
-                _send_left_presses(3, arrow_nav_delay, use_pynput)
-                break
-            _send_left_presses(3, arrow_nav_delay, use_pynput)
-            intentos += 1
-        if not matched:
-            print(f"[CaminoA] ADVERTENCIA: No se encontró coincidencia de ID tras {max_intentos} intentos; se continúa igualmente.")
-
-        # Continuar camino normal tras coincidencia
-        x,y = _xy(conf,'resumen_facturacion_btn'); _click(x,y,'resumen_facturacion_btn', _step_delay(step_delays,11,base_delay))
-        x,y = _xy(conf,'cuenta_financiera_btn'); _click(x,y,'cuenta_financiera_btn', _step_delay(step_delays,12,base_delay))
-        x,y = _xy(conf,'mostrar_lista_btn'); _click(x,y,'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-        x,y = _xy(conf,'copy_area'); _click(x,y,'copy_area', 0.2); pg.hotkey('ctrl','c'); time.sleep(0.4); copied = _get_clipboard_text(); _append_log(log_path, dni, copied)
-        x,y = _xy(conf,'close_tab_btn'); _click(x,y,'close_tab_btn', _step_delay(step_delays,15,base_delay))
+        # Nota: Se eliminó un bloque duplicado de coincidencia y resumen para evitar repetir acciones
 
     # 13) home_area final (opcional) tras completar todos los apartados
     hx, hy = _xy(conf,'home_area')
     if hx or hy:
+        # Espera previa solicitada antes de ir a home_area
+        time.sleep(2.0)
         _click(hx, hy, 'home_area', _step_delay(step_delays,16,base_delay))
 
+    # Por solicitud, no limpiar el portapapeles al final
+
     print('[CaminoA] Finalizado.')
+
+    # Emitir JSON final con resultados estructurados (el consumidor puede buscar el primer '{' y parsear)
+    try:
+        import json as _json
+        print(_json.dumps(results, ensure_ascii=False))
+        sys.stdout.flush()
+    except Exception as _ejson:
+        print(f"[CaminoA] ADVERTENCIA: No se pudo emitir JSON de resultados: {_ejson}")
 
 
 def _parse_args():

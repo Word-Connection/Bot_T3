@@ -1,25 +1,103 @@
 {
-  "cliente_section": {"x": 2055, "y": 168},
-  "tipo_doc_btn": {"x": 2164, "y": 237},
-  "dni_option": {"x": 2060, "y": 276},
-  "dni_field": {"x": 2833, "y": 240},
-  "records_N": {"x": 3790, "y": 162},
-  "close_records": {"x": 3030, "y": 465},
-  "client_id_field": {"x": 2017, "y": 237},
-  "seleccionar_btn": {"x": 1957, "y": 981},
-  "fa_cobranza_btn": {"x": 2407, "y": 330},
-  "fa_cobranza_etapa": {"x": 2493, "y": 414},
-  "fa_cobranza_actual": {"x": 2467, "y": 449},
-  "fa_cobranza_buscar": {"x": 1976, "y": 354},
-  "fa_seleccion": {"x": 2506, "y": 436},
-  "fa_deuda": {"x": 1936, "y": 211},
-  "resumen_facturacion_btn": {"x": 2507, "y": 331},
-  "cuenta_financiera_btn": {"x": 1946, "y": 439},
-  "mostrar_lista_btn": {"x": 1977, "y": 504},
-  "copy_area": {"x": 2476, "y": 590},
-  "close_tab_btn": {"x": 3816, "y": 138},
-  "home_area": {"x": 2808, "y": 110},
-  "house_area": {"x": 2874, "y": 112},
+  "cliente_section": {
+    "x": 135,
+    "y": 167
+  },
+  "tipo_doc_btn": {
+    "x": 244,
+    "y": 237
+  },
+  "dni_option": {
+    "x": 140,
+    "y": 276
+  },
+  "dni_field": {
+    "x": 913,
+    "y": 240
+  },
+  "records_N": {
+    "x": 1870,
+    "y": 162
+  },
+  "close_records": {
+    "x": 1110,
+    "y": 465
+  },
+  "client_id_field": {
+    "x": 97,
+    "y": 237
+  },
+  "seleccionar_btn": {
+    "x": 37,
+    "y": 981
+  },
+  "fa_cobranza_btn": {
+    "x": 575,
+    "y": 328
+  },
+  "fa_cobranza_etapa": {
+    "x": 573,
+    "y": 414
+  },
+  "fa_cobranza_actual": {
+    "x": 547,
+    "y": 449
+  },
+  "fa_cobranza_buscar": {
+    "x": 56,
+    "y": 354
+  },
+  "fa_records_btn": {
+    "x": 1876,
+    "y": 351
+  },
+  "fa_seleccion": {
+    "x": 586,
+    "y": 436
+  },
+  "fa_deuda": {
+    "x": 16,
+    "y": 211
+  },
+  "fa_area_copy": {
+    "x": 28,
+    "y": 172
+  },
+  "fa_copy": {
+    "x": 63,
+    "y": 183
+  },
+  "resumen_facturacion_btn": {
+    "x": 700,
+    "y": 329
+  },
+  "cuenta_financiera_btn": {
+    "x": 67,
+    "y": 437
+  },
+  "mostrar_lista_btn": {
+    "x": 57,
+    "y": 504
+  },
+  "copy_area": {
+    "x": 556,
+    "y": 590
+  },
+  "close_tab_btn": {
+    "x": 1896,
+    "y": 138
+  },
+  "home_area": {
+    "x": 888,
+    "y": 110
+  },
+  "house_area": {
+    "x": 954,
+    "y": 112
+  },
+  "clear_clipboard": {
+    "action": "clear_clipboard"
+  },
   "steps": [
     "cliente_section",
     "tipo_doc_btn",
@@ -36,6 +114,7 @@
     "mostrar_lista_btn",
     "copy_area",
     "close_tab_btn",
-    "home_area"
+    "home_area",
+    "clear_clipboard"
   ]
 }

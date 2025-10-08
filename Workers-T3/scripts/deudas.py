@@ -9,6 +9,7 @@ import glob
 import subprocess
 from PIL import Image
 import io
+import time
 
 
 def get_image_base64(image_path: str) -> str:
@@ -42,6 +43,76 @@ def clean_captures_dir(captures_dir: str):
                 print(f"WARNING: No se pudo borrar {file_path}: {e}", file=sys.stderr)
     except Exception as e:
         print(f"WARNING: Error limpiando capturas_dir {captures_dir}: {e}", file=sys.stderr)
+
+
+def _format_camino_a_for_front(camino_a: dict) -> dict:
+    """Devuelve una versión compacta de Camino A para el front.
+    - Mantiene: dni, records (inicio_total, procesados)
+    - fa_actual: lista con items {apartado, saldo, id} (sin *_raw)
+    - cuenta_financiera: lista con {n, items: [{saldo, id}]}
+    """
+    if not isinstance(camino_a, dict):
+        return {}
+
+    out = {
+        "dni": camino_a.get("dni"),
+        "success": bool(camino_a.get("success", True)),
+        "records": {
+            "inicio_total": None,
+            "procesados": None,
+        },
+        "fa_actual": [],
+        "cuenta_financiera": [],
+    }
+
+    # records
+    try:
+        rec = camino_a.get("records") or {}
+        out["records"]["inicio_total"] = rec.get("inicio_total")
+        out["records"]["procesados"] = rec.get("procesados")
+    except Exception:
+        pass
+
+    # fa_actual
+    try:
+        fa_list = camino_a.get("fa_actual") or []
+        cleaned_fa = []
+        for it in fa_list:
+            if not isinstance(it, dict):
+                continue
+            cleaned_fa.append({
+                "apartado": it.get("apartado"),
+                "saldo": it.get("saldo"),
+                "id": it.get("id"),
+            })
+        out["fa_actual"] = cleaned_fa
+    except Exception:
+        pass
+
+    # cuenta_financiera
+    try:
+        cf_list = camino_a.get("cuenta_financiera") or []
+        cleaned_cf = []
+        for cf in cf_list:
+            if not isinstance(cf, dict):
+                continue
+            items = []
+            for it in (cf.get("items") or []):
+                if not isinstance(it, dict):
+                    continue
+                items.append({
+                    "saldo": it.get("saldo"),
+                    "id": it.get("id"),
+                })
+            cleaned_cf.append({
+                "n": cf.get("n"),
+                "items": items
+            })
+        out["cuenta_financiera"] = cleaned_cf
+    except Exception:
+        pass
+
+    return out
 
 
 def main():
@@ -126,11 +197,87 @@ def main():
             "timestamp": int(os.path.getctime(latest_file)) if latest_file else 0
         })
 
+        # Si el score está entre 80 y 89, ejecutar Camino A con el mismo DNI
+        try:
+            import re as _re
+            m = _re.search(r"\d+", str(score))
+            score_num = int(m.group(0)) if m else None
+        except Exception:
+            score_num = None
+
+        if score_num is not None and 80 <= score_num <= 89:
+            try:
+                print(f"INFO: Score {score_num} entre 80-89: iniciando Camino A para DNI {dni}", file=sys.stderr)
+                script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
+                coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
+                if os.path.exists(script_a):
+                    cmd_a = [sys.executable, script_a, '--dni', dni, '--coords', coords_a]
+                    a_proc = subprocess.run(
+                        cmd_a,
+                        capture_output=True,
+                        text=True,
+                        cwd=os.path.dirname(script_a),
+                        timeout=1200
+                    )
+                    if a_proc.returncode == 0:
+                        print(f"INFO: Camino A finalizado OK para DNI {dni}", file=sys.stderr)
+                        # Intentar parsear JSON de Camino A
+                        camino_a_data = None
+                        try:
+                            a_out = a_proc.stdout or ""
+                            pos = a_out.find('{')
+                            if pos != -1:
+                                camino_a_data = json.loads(a_out[pos:])
+                        except Exception as e:
+                            print(f"WARNING: No se pudo parsear salida de Camino A: {e}", file=sys.stderr)
+                            camino_a_data = None
+
+                        # Agregar etapa y adjuntar datos estructurados (versión compacta para front)
+                        if camino_a_data:
+                            stages.append({
+                                "info": "Camino A ejecutado",
+                                "image": "",
+                                "timestamp": int(time.time()),
+                                "camino_a": _format_camino_a_for_front(camino_a_data)
+                            })
+                        else:
+                            stages.append({
+                                "info": "Camino A ejecutado (sin datos parseados)",
+                                "image": "",
+                                "timestamp": int(time.time())
+                            })
+                        # Incluir en resultado top-level también (facilita consumo)
+                        if camino_a_data:
+                            # Se añadirá más abajo al dict final 'result' como 'camino_a'
+                            pass
+                    else:
+                        print(f"WARNING: Camino A retorno codigo {a_proc.returncode} para DNI {dni}", file=sys.stderr)
+                        if a_proc.stderr:
+                            print(f"STDERR Camino A:\n{a_proc.stderr[:500]}", file=sys.stderr)
+                else:
+                    print(f"WARNING: Script Camino A no encontrado en {script_a}", file=sys.stderr)
+            except subprocess.TimeoutExpired:
+                print(f"WARNING: Timeout ejecutando Camino A para DNI {dni}", file=sys.stderr)
+            except Exception as e:
+                print(f"WARNING: Error ejecutando Camino A para DNI {dni}: {e}", file=sys.stderr)
+
+        # Preparar respuesta final (incluyendo, si existe, datos de Camino A)
+        final_camino_a = None
+        try:
+            # Buscar en stages
+            for st in reversed(stages):
+                if isinstance(st, dict) and 'camino_a' in st:
+                    final_camino_a = st['camino_a']
+                    break
+        except Exception:
+            final_camino_a = None
+
         result = {
             "dni": dni,
             "score": score,
             "stages": stages,
-            "success": True
+            "success": True,
+            "camino_a": final_camino_a if final_camino_a else None
         }
 
         # Output JSON limpio
