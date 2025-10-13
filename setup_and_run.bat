@@ -5,6 +5,52 @@ echo =====================================
 echo   Setup y Ejecutor Bot T3
 echo =====================================
 
+REM --- Verificar dependencias requeridas ---
+echo Verificando dependencias del sistema...
+
+REM --- Verificar Python ---
+python --version >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Python no esta instalado o no esta en el PATH
+    echo.
+    echo Instala Python desde: https://www.python.org/downloads/
+    echo Asegurate de marcar "Add Python to PATH" durante la instalacion
+    echo.
+    pause
+    exit /b 1
+) else (
+    for /f "tokens=2" %%i in ('python --version 2^>^&1') do set "PYTHON_VERSION=%%i"
+    echo Python !PYTHON_VERSION! detectado
+)
+
+REM --- Verificar Git ---
+git --version >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Git no esta instalado o no esta en el PATH
+    echo.
+    echo Instala Git desde: https://git-scm.com/downloads
+    echo.
+    pause
+    exit /b 1
+) else (
+    for /f "tokens=3" %%i in ('git --version') do set "GIT_VERSION=%%i"
+    echo Git !GIT_VERSION! detectado
+)
+
+echo Todas las dependencias estan disponibles
+echo.
+
+REM --- Configurar politica de ejecucion de PowerShell ---
+echo Configurando permisos de ejecucion de scripts...
+powershell -Command "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser -Force" >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo Permisos de PowerShell configurados correctamente
+) else (
+    echo ADVERTENCIA: No se pudieron configurar los permisos de PowerShell
+    echo El script continuara, pero podrian haber problemas con algunos comandos
+)
+echo.
+
 REM --- Hacer pull del repositorio ---
 echo Actualizando repositorio desde GitHub...
 git pull https://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@github.com/Word-Connection/Bot_T3.git
