@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Bot T3 - Scrapping</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            padding: 40px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-left: 5px solid #28a745;
+            transition: all 0.3s ease;
+        }
+        
+        .status-card.waiting {
+            border-left-color: #ffc107;
+        }
+        
+        .status-card.running {
+            border-left-color: #28a745;
+        }
+        
+        .status-card.stopped {
+            border-left-color: #dc3545;
+        }
+        
+        .status-card.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .status-label {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        .status-value {
+            font-size: 1.3em;
+            padding: 8px 15px;
+            border-radius: 20px;
+            color: white;
+            background: #6c757d;
+        }
+        
+        .status-value.running {
+            background: #28a745;
+        }
+        
+        .status-value.waiting {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .status-value.stopped {
+            background: #dc3545;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+        
+        .btn {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            font-weight: bold;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 150px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .btn-start {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-stop {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .logs-section {
+            background: #1e1e1e;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+        
+        .logs-header {
+            color: white;
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logs-container {
+            background: #000;
+            border-radius: 10px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #00ff00;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            line-height: 1.4;
+        }
+        
+        .countdown {
+            font-size: 2em;
+            font-weight: bold;
+            text-align: center;
+            color: #ffc107;
+            margin: 20px 0;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .instructions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .instructions h3 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        
+        .instructions p {
+            color: #856404;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        
+        .auto-refresh {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="auto-refresh">
+        🔄 Actualización automática
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Control ALPHA-3</h1>
+            <p>Sistema de Control de Scrapping</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="status-card" id="statusCard">
+                <div class="status-row">
+                    <span class="status-label">Estado del Bot:</span>
+                    <span class="status-value" id="botStatus">Detenido</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Tiempo activo:</span>
+                    <span class="status-value" id="uptime">00:00:00</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Última actualización:</span>
+                    <span class="status-value" id="lastUpdate">--:--:--</span>
+                </div>
+            </div>
+            
+            <div id="countdownSection" class="instructions" style="display: none;">
+                <h3>⏰ Preparando sistema...</h3>
+                <div class="countdown" id="countdown">50</div>
+                <p>🖥️ ABRE EL SISTEMA T3 AHORA y déjalo maximizado</p>
+            </div>
+            
+            <div class="controls">
+                <button class="btn btn-start" id="startBtn" onclick="startBot()">
+                    🚀 INICIAR BOT
+                </button>
+                <button class="btn btn-stop" id="stopBtn" onclick="stopBot()" disabled>
+                    🛑 DETENER BOT
+                </button>
+            </div>
+            
+            <div class="instructions">
+                <h3>📋 Instrucciones</h3>
+                <p>1. Presiona "INICIAR BOT"</p>
+                <p>2. Tienes 50 segundos para abrir el sistema T3</p>
+                <p>3. Deja el sistema T3 maximizado y visible</p>
+                <p>4. El bot comenzará automáticamente</p>
+            </div>
+            
+            <div class="logs-section">
+                <div class="logs-header">
+                    <span>📄 Registro de Actividad</span>
+                    <button class="btn" style="padding: 5px 15px; font-size: 0.9em;" onclick="clearLogs()">
+                        🗑️ Limpiar
+                    </button>
+                </div>
+                <div class="logs-container" id="logsContainer">
+                    <div class="log-entry">Sistema listo para iniciar...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let countdownInterval = null;
+        let countdownValue = 50;
+        
+        // Actualizar estado cada 2 segundos
+        setInterval(updateStatus, 2000);
+        updateStatus(); // Llamada inicial
+        
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                updateStatusDisplay(data.status);
+                document.getElementById('uptime').textContent = data.uptime || '00:00:00';
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+                
+                // Actualizar logs
+                const logsContainer = document.getElementById('logsContainer');
+                logsContainer.innerHTML = '';
+                
+                data.logs.forEach(log => {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+                    logEntry.textContent = log;
+                    logsContainer.appendChild(logEntry);
+                });
+                
+                // Scroll al final
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+                
+            } catch (error) {
+                console.error('Error actualizando estado:', error);
+            }
+        }
+        
+        function updateStatusDisplay(status) {
+            const statusCard = document.getElementById('statusCard');
+            const botStatus = document.getElementById('botStatus');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const countdownSection = document.getElementById('countdownSection');
+            
+            // Limpiar clases
+            statusCard.className = 'status-card';
+            botStatus.className = 'status-value';
+            
+            switch(status) {
+                case 'ejecutando':
+                    statusCard.classList.add('running');
+                    botStatus.classList.add('running');
+                    botStatus.textContent = '🟢 Ejecutando';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    countdownSection.style.display = 'none';
+                    clearInterval(countdownInterval);
+                    break;
+                    
+                case 'esperando':
+                    statusCard.classList.add('waiting');
+                    botStatus.classList.add('waiting');
+                    botStatus.textContent = '⏳ Preparando...';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    countdownSection.style.display = 'block';
+                    startCountdown();
+                    break;
+                    
+                case 'error':
+                    statusCard.classList.add('error');
+                    botStatus.classList.add('stopped');
+                    botStatus.textContent = '❌ Error';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    countdownSection.style.display = 'none';
+                    clearInterval(countdownInterval);
+                    break;
+                    
+                default: // detenido
+                    statusCard.classList.add('stopped');
+                    botStatus.classList.add('stopped');
+                    botStatus.textContent = '🔴 Detenido';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    countdownSection.style.display = 'none';
+                    clearInterval(countdownInterval);
+                    break;
+            }
+        }
+        
+        function startCountdown() {
+            if (countdownInterval) return; // Ya está corriendo
+            
+            countdownValue = 50;
+            countdownInterval = setInterval(() => {
+                document.getElementById('countdown').textContent = countdownValue;
+                countdownValue--;
+                
+                if (countdownValue < 0) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
+            }, 1000);
+        }
+        
+        async function startBot() {
+            try {
+                const response = await fetch('/api/start', { method: 'POST' });
+                const data = await response.json();
+                
+                if (!data.success) {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error iniciando bot: ' + error.message);
+            }
+        }
+        
+        async function stopBot() {
+            if (confirm('¿Estás seguro de que quieres detener el bot?')) {
+                try {
+                    const response = await fetch('/api/stop', { method: 'POST' });
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        alert('Error: ' + data.message);
+                    }
+                } catch (error) {
+                    alert('Error deteniendo bot: ' + error.message);
+                }
+            }
+        }
+        
+        function clearLogs() {
+            document.getElementById('logsContainer').innerHTML = 
+                '<div class="log-entry">Logs limpiados...</div>';
+        }
+    </script>
+</body>
+</html>

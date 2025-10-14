@@ -53,20 +53,46 @@ echo.
 
 REM --- Hacer pull del repositorio ---
 echo Actualizando repositorio desde GitHub...
-git pull https://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@github.com/Word-Connection/Bot_T3.git
+
+REM --- Verificar si estamos en un repositorio git ---
+git status >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: No se pudo hacer pull del repositorio
-    echo Verificando si git esta configurado...
-    git status
+    echo Inicializando repositorio git...
+    git init
+    git remote add origin https://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@github.com/Word-Connection/Bot_T3.git
+    git pull origin main
+) else (
+    REM --- Hacer stash si hay cambios locales ---
+    git diff --quiet
     if %ERRORLEVEL% neq 0 (
-        echo Inicializando repositorio git...
-        git init
-        git remote add origin https://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@github.com/Word-Connection/Bot_T3.git
-        git pull origin main
+        echo Guardando cambios locales temporalmente...
+        git stash push -m "Cambios automaticos antes de pull"
+        set "STASH_CREATED=true"
     )
-    echo.
-    echo Si el error persiste, verifica tu conexion a internet
+    
+    REM --- Configurar remote temporal con token para el pull ---
+    git remote set-url origin https://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@github.com/Word-Connection/Bot_T3.git
+    
+    REM --- Hacer pull ---
+    git pull origin main
+    
+    REM --- Restaurar URL del remote sin token ---
+    git remote set-url origin https://github.com/Word-Connection/Bot_T3.git
+    
+    REM --- Restaurar cambios si se hizo stash ---
+    if "!STASH_CREATED!"=="true" (
+        echo Restaurando cambios locales...
+        git stash pop
+    )
+)
+
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: No se pudo actualizar el repositorio
+    echo Verifica tu conexion a internet
     pause
+    exit /b 1
+) else (
+    echo Repositorio actualizado exitosamente
 )
 
 echo =====================================
