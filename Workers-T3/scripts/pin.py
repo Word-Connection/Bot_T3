@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script para envío de PIN via Camino D
-Recibe DNI como parámetro y ejecuta el scraping para enviar PIN
+Recibe número de teléfono como parámetro y ejecuta el scraping para enviar PIN
 """
 
 import sys
@@ -26,7 +26,7 @@ def get_project_root():
             return parent
     raise FileNotFoundError("No se pudo encontrar la raíz del proyecto")
 
-def execute_camino_d(dni, project_root):
+def execute_camino_d(telefono, project_root):
     """
     Ejecuta el script de Camino D para envío de PIN
     """
@@ -60,11 +60,11 @@ def execute_camino_d(dni, project_root):
     command = [
         venv_python,
         str(run_script),
-        "--dni", dni,
+        "--dni", telefono,  # El script original usa --dni pero enviamos teléfono
         "--coords", str(coords_file)
     ]
     
-    logging.info(f"Ejecutando Camino D para envío de PIN - DNI {dni}")
+    logging.info(f"Ejecutando Camino D para envío de PIN - Teléfono {telefono}")
     logging.info(f"Comando: {' '.join(command)}")
     
     try:
@@ -112,30 +112,35 @@ def analyze_pin_result(process):
 def main():
     """Función principal"""
     if len(sys.argv) != 2:
-        print("ERROR: Se requiere el DNI como parámetro")
-        print("Uso: python pin.py <dni>")
+        print("ERROR: Se requiere el número de teléfono como parámetro")
+        print("Uso: python pin.py <telefono>")
         sys.exit(1)
     
-    dni = sys.argv[1]
+    telefono = sys.argv[1]
+    
+    # Validación básica de teléfono (10 dígitos)
+    if not telefono.isdigit() or len(telefono) != 10:
+        print("ERROR: El teléfono debe tener exactamente 10 dígitos")
+        sys.exit(1)
     
     logging.info("Iniciando pin.py")
-    logging.info(f"Procesando envío de PIN para DNI {dni}")
+    logging.info(f"Procesando envío de PIN para teléfono {telefono}")
     
     try:
         # Configurar directorios
         project_root = get_project_root()
         
-        print(f"Iniciando envío de PIN para DNI {dni}")
+        print(f"Iniciando envío de PIN para teléfono {telefono}")
         
         # Ejecutar Camino D
-        process = execute_camino_d(dni, project_root)
+        process = execute_camino_d(telefono, project_root)
         
         # Analizar resultado
         resultado_analisis = analyze_pin_result(process)
         
         # Construir resultado final
         resultado_final = {
-            "dni": dni,
+            "telefono": telefono,
             "estado": resultado_analisis["estado"],
             "mensaje": resultado_analisis["mensaje"],
             "timestamp": __import__('datetime').datetime.now().isoformat()
@@ -143,11 +148,11 @@ def main():
         
         # Log del resultado
         if resultado_analisis["estado"] == "exitoso":
-            logging.info(f"✅ PIN enviado exitosamente para DNI {dni}")
-            print(f"✅ PIN enviado correctamente para DNI {dni}")
+            logging.info(f"✅ PIN enviado exitosamente para teléfono {telefono}")
+            print(f"✅ PIN enviado correctamente para teléfono {telefono}")
         else:
-            logging.error(f"❌ Error enviando PIN para DNI {dni}")
-            print(f"❌ Error enviando PIN para DNI {dni}")
+            logging.error(f"❌ Error enviando PIN para teléfono {telefono}")
+            print(f"❌ Error enviando PIN para teléfono {telefono}")
         
         # Imprimir resultado como JSON para que el worker lo pueda procesar
         print("RESULTADO_JSON:" + json.dumps(resultado_final))
@@ -162,7 +167,7 @@ def main():
         
         # Resultado de error
         resultado_error = {
-            "dni": dni,
+            "telefono": telefono,
             "estado": "error",
             "mensaje": "error en script",
             "timestamp": __import__('datetime').datetime.now().isoformat()

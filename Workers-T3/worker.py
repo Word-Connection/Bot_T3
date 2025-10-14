@@ -158,13 +158,21 @@ def get_task() -> Optional[dict]:
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=5, max=15))
 def process_task(task: dict) -> bool:
     task_id = task["task_id"]
-    dni = task["datos"]
     
     # Detectar si es operación de PIN
     is_pin_operation = "operacion" in task and task.get("operacion") == "pin"
+    
+    # Para PIN usamos 'telefono', para otros usamos 'datos' (DNI)
+    if is_pin_operation:
+        input_data = task.get("telefono", task.get("datos", ""))
+        data_label = "teléfono"
+    else:
+        input_data = task["datos"]
+        data_label = "DNI"
+    
     operation_type = "PIN" if is_pin_operation else TIPO
     
-    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id} | Tipo: {operation_type}")
+    logger.info(f"[SCRAPING] Iniciando scraping {data_label} {input_data} | Task: {task_id} | Tipo: {operation_type}")
    
     try:
         # Resolver el script de forma absoluta
@@ -193,7 +201,7 @@ def process_task(task: dict) -> bool:
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
         
         # Enviar actualización inicial
-        operation_msg = f"Iniciando {'envío de PIN' if is_pin_operation else 'automatización'} para DNI {dni}"
+        operation_msg = f"Iniciando {'envío de PIN' if is_pin_operation else 'automatización'} para {data_label} {input_data}"
         send_partial_update(task_id, {"info": operation_msg}, status="running")
         
         # Ejecutar script con lectura en tiempo real para updates progresivos
@@ -207,7 +215,7 @@ def process_task(task: dict) -> bool:
         env['PYTHONUNBUFFERED'] = '1'  # Forzar unbuffered output
         
         process = subprocess.Popen(
-            [python_executable, '-u', script_path, dni],  # -u para unbuffered
+            [python_executable, '-u', script_path, input_data],  # -u para unbuffered
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=os.path.dirname(script_path),
@@ -231,7 +239,6 @@ def process_task(task: dict) -> bool:
             while True:
                 # Intentar leer línea con timeout corto
                 import select
-                import sys
                 
                 if sys.platform == 'win32':
                     # En Windows, usar polling directo
@@ -382,11 +389,11 @@ def process_task(task: dict) -> bool:
         # Procesar según el tipo de tarea o operación especial
         # Verificar si es una tarea de PIN (puede ser manejada por cualquier worker)
         if "operacion" in task and task.get("operacion") == "pin":
-            return process_pin_operation(task_id, dni, data)
+            return process_pin_operation(task_id, input_data, data)
         elif TIPO == "deudas":
-            return process_deudas_result(task_id, dni, data)
+            return process_deudas_result(task_id, input_data, data)
         elif TIPO == "movimientos":
-            return process_movimientos_result(task_id, dni, data)
+            return process_movimientos_result(task_id, input_data, data)
         else:
             logger.error(f"[ERROR] Tipo desconocido: {TIPO}")
             return False
@@ -662,7 +669,7 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
         return False
 
 
-def process_pin_operation(task_id: str, dni: str, data: dict) -> bool:
+def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
     """Procesa resultado del script de envío de PIN."""
     try:
         estado = data.get("estado", "error")
@@ -670,11 +677,11 @@ def process_pin_operation(task_id: str, dni: str, data: dict) -> bool:
         
         pin_enviado = estado == "exitoso"
         
-        logger.info(f"[PIN] DNI {dni} - Estado: {estado}, Mensaje: {mensaje}")
+        logger.info(f"[PIN] Teléfono {telefono} - Estado: {estado}, Mensaje: {mensaje}")
         
         # Enviar resultado final
         final_data = {
-            "dni": dni,
+            "telefono": telefono,
             "tipo": "pin",
             "pin_enviado": pin_enviado,
             "mensaje": mensaje,
@@ -689,7 +696,7 @@ def process_pin_operation(task_id: str, dni: str, data: dict) -> bool:
         return pin_enviado  # Retorna True solo si el PIN fue enviado exitosamente
         
     except Exception as e:
-        logger.error(f"[ERROR] Error procesando PIN para {dni}: {e}", exc_info=True)
+        logger.error(f"[ERROR] Error procesando PIN para {telefono}: {e}", exc_info=True)
         send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}", "tipo": "pin"}, status="error")
         return False
 
