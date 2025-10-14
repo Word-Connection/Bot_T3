@@ -193,6 +193,118 @@ def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
         print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
     time.sleep(delay_after)
 
+def _maybe_close_ok_popup(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float):
+    """Intenta cerrar el popup de OK de manera rápida:
+    1) Si existen coords 'ok_btn', hace click ahí.
+    2) Si existe imagen (OK_POPUP_IMAGE), intenta localizarla y clickea el centro.
+    3) (Opcional) Si OK_POPUP_PRESS_ENTER=1, envía Enter como fallback.
+    """
+    # 1) Coords directas
+    ox, oy = _xy(conf, 'ok_btn')
+    if ox or oy:
+        _click(ox, oy, 'ok_btn', min(0.1, base_delay))
+        time.sleep(0.2)
+        return
+    # 2) Imagen opcional
+    img_path = os.getenv('OK_POPUP_IMAGE', '').strip()
+    if img_path:
+        try:
+            max_wait = float(os.getenv('OK_POPUP_MAX_WAIT', '2.0'))
+        except Exception:
+            max_wait = 2.0
+        try:
+            confd = float(os.getenv('OK_POPUP_CONFIDENCE', '0.9'))
+        except Exception:
+            confd = 0.9
+        t0 = time.time()
+        while time.time() - t0 < max_wait:
+            try:
+                box = pg.locateOnScreen(img_path, confidence=confd)
+            except Exception:
+                box = None
+            if box:
+                try:
+                    cx, cy = pg.center(box)
+                except Exception:
+                    cx = getattr(box, 'left', 0) + getattr(box, 'width', 0)//2
+                    cy = getattr(box, 'top', 0) + getattr(box, 'height', 0)//2
+                _click(cx, cy, 'ok_popup_img', 0.1)
+                time.sleep(0.2)
+                return
+            time.sleep(0.15)
+    # 3) Fallback: Enter
+    if os.getenv('OK_POPUP_PRESS_ENTER','0') in ('1','true','True'):
+        _press_enter(0.1)
+
+
+def _scan_popup_regions_and_handle_ok(base_delay: float, log_dir: str = 'capturas_popup') -> bool:
+    """Escanea 4 regiones alrededor del área indicada para encontrar el popup por imagen
+    y, si se encuentra, hace click en el botón OK (centro del match). Además guarda las capturas.
+
+    Requiere que la variable de entorno OK_POPUP_IMAGE apunte a la imagen del botón/ventana a detectar.
+
+    Regresa True si detectó y pulsó OK, False en caso contrario.
+    """
+    img_path = os.getenv('OK_POPUP_IMAGE', '').strip()
+    if not img_path:
+        # Sin imagen de referencia no podemos identificar, pero igualmente capturamos para depurar
+        img_path = ''
+
+    # Coordenadas de sonda (arriba-derecha, abajo-derecha, abajo-izquierda, arriba-izquierda)
+    probes = [
+        (int(os.getenv('POPUP_P1_X', '1179')), int(os.getenv('POPUP_P1_Y', '461'))),
+        (int(os.getenv('POPUP_P2_X', '1180')), int(os.getenv('POPUP_P2_Y', '575'))),
+        (int(os.getenv('POPUP_P3_X', '740')),  int(os.getenv('POPUP_P3_Y', '572'))),
+        (int(os.getenv('POPUP_P4_X', '740')),  int(os.getenv('POPUP_P4_Y', '462'))),
+    ]
+    try:
+        scan_w = int(os.getenv('POPUP_SCAN_W', '260'))
+        scan_h = int(os.getenv('POPUP_SCAN_H', '120'))
+    except Exception:
+        scan_w, scan_h = 260, 120
+    try:
+        confd = float(os.getenv('OK_POPUP_CONFIDENCE', '0.9'))
+    except Exception:
+        confd = 0.9
+
+    # Crear carpeta de capturas
+    try:
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    ts = time.strftime('%Y%m%d_%H%M%S')
+    detected = False
+    for idx, (px, py) in enumerate(probes, start=1):
+        region = (max(0, px), max(0, py), max(10, scan_w), max(10, scan_h))
+        try:
+            snap = pg.screenshot(region=region)
+            out = Path(log_dir) / f'popup_probe_{idx}_{ts}.png'
+            try:
+                snap.save(out)
+            except Exception:
+                pass
+        except Exception:
+            snap = None
+        
+        if img_path:
+            try:
+                box = pg.locateOnScreen(img_path, region=region, confidence=confd)
+            except Exception:
+                box = None
+            if box:
+                try:
+                    cx, cy = pg.center(box)
+                except Exception:
+                    cx = getattr(box, 'left', 0) + getattr(box, 'width', 0)//2
+                    cy = getattr(box, 'top', 0) + getattr(box, 'height', 0)//2
+                _click(cx, cy, 'ok_popup_img_region', 0.1)
+                detected = True
+                break
+
+    time.sleep(min(0.2, base_delay))
+    return detected
+
 def _looks_current(txt: str) -> bool:
     if not txt:
         return False
@@ -716,8 +828,8 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
         if apartado_cf:
             _append_log(log_path, dni, f"apartado {apartado_cf}")
 
-    # 4 a la derecha para leer el apartado crudo (raw) y derivar N
-        _send_right_presses(4, arrow_nav_delay, use_pynput_nav)
+        # 5 a la derecha para leer el apartado crudo (raw) y derivar N
+        _send_right_presses(5, arrow_nav_delay, use_pynput_nav)
 
         # Validador estricto: debe devolver un número entre 1 y 100
         def _valid_cf_count(s: str) -> bool:
@@ -999,9 +1111,16 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     if not jumped_to_client_field:
         x,y = _xy(conf,'client_id_field')
         _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
-    # 6) seleccionar_btn
+    # 6) seleccionar_btn + cerrar posible popup OK
     x,y = _xy(conf,'seleccionar_btn')
     _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
+    _maybe_close_ok_popup(conf, step_delays, base_delay)
+    # Detección por captura de pantalla en 4 regiones; si aparece el popup, clic OK y bajar uno
+    if _scan_popup_regions_and_handle_ok(base_delay):
+        print('[CaminoA] Popup OK detectado por captura; se avanza al registro siguiente')
+        x,y = _xy(conf,'client_id_field'); _click(x,y,'client_id_field', 0.2)
+        use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+        _send_down_presses(1, float(os.getenv('ARROW_NAV_DELAY','0.15')), use_pynput)
     # Espera extra después de seleccionar_btn para que cargue la página
     time.sleep(2.0)
     # Insertar fa_cobranza_* antes de iniciar fa_seleccion
@@ -1046,7 +1165,15 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
         _send_down_presses(offset, arrow_nav_delay, use_pynput)
         # Re-ejecutar subcamino con el nuevo flujo
+        # Seleccionar y cerrar popup OK si aparece
         x,y = _xy(conf,'seleccionar_btn'); _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
+        _maybe_close_ok_popup(conf, step_delays, base_delay)
+        if _scan_popup_regions_and_handle_ok(base_delay):
+            print('[CaminoA] Popup OK detectado por captura; se avanza al registro siguiente')
+            x,y = _xy(conf,'client_id_field'); _click(x,y,'client_id_field', 0.2)
+            use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+            # Si no es el último, bajamos 1; si es el último, no bajamos (controlaremos fuera con offset)
+            _send_down_presses(1, float(os.getenv('ARROW_NAV_DELAY','0.15')), use_pynput)
         # Espera extra después de seleccionar_btn para que cargue la página
         time.sleep(2.0)
         # fa_cobranza_* antes de procesar Actual
