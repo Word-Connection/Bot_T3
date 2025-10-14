@@ -159,17 +159,26 @@ def get_task() -> Optional[dict]:
 def process_task(task: dict) -> bool:
     task_id = task["task_id"]
     dni = task["datos"]
-    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id} | Tipo: {TIPO}")
+    
+    # Detectar si es operación de PIN
+    is_pin_operation = "operacion" in task and task.get("operacion") == "pin"
+    operation_type = "PIN" if is_pin_operation else TIPO
+    
+    logger.info(f"[SCRAPING] Iniciando scraping DNI {dni} | Task: {task_id} | Tipo: {operation_type}")
    
     try:
         # Resolver el script de forma absoluta
         base_dir = os.path.dirname(__file__)
-        script_path = os.path.join(base_dir, 'scripts', f"{TIPO}.py")
+        
+        if is_pin_operation:
+            script_path = os.path.join(base_dir, 'scripts', 'pin.py')
+        else:
+            script_path = os.path.join(base_dir, 'scripts', f"{TIPO}.py")
         
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script no encontrado: {script_path}")
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": f"Script no encontrado: {TIPO}.py"}, status="error")
+            send_partial_update(task_id, {"info": f"Script no encontrado: {os.path.basename(script_path)}"}, status="error")
             return False
         
         logger.info(f"[WORKER] Ejecutando script: {script_path}")
@@ -184,10 +193,14 @@ def process_task(task: dict) -> bool:
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
         
         # Enviar actualización inicial
-        send_partial_update(task_id, {"info": f"Iniciando automatización para DNI {dni}"}, status="running")
+        operation_msg = f"Iniciando {'envío de PIN' if is_pin_operation else 'automatización'} para DNI {dni}"
+        send_partial_update(task_id, {"info": operation_msg}, status="running")
         
         # Ejecutar script con lectura en tiempo real para updates progresivos
-        timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
+        if is_pin_operation:
+            timeout = 120  # 2 minutos para PIN
+        else:
+            timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
         
         # Usar Popen para leer output en tiempo real con unbuffered
         env = os.environ.copy()
@@ -366,8 +379,11 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": "Datos inválidos"}, status="error")
             return False
 
-        # Procesar según el tipo de tarea
-        if TIPO == "deudas":
+        # Procesar según el tipo de tarea o operación especial
+        # Verificar si es una tarea de PIN (puede ser manejada por cualquier worker)
+        if "operacion" in task and task.get("operacion") == "pin":
+            return process_pin_operation(task_id, dni, data)
+        elif TIPO == "deudas":
             return process_deudas_result(task_id, dni, data)
         elif TIPO == "movimientos":
             return process_movimientos_result(task_id, dni, data)
@@ -643,6 +659,38 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
     except Exception as e:
         logger.error(f"[ERROR] Error procesando movimientos para {dni}: {e}", exc_info=True)
         send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}"}, status="error")
+        return False
+
+
+def process_pin_operation(task_id: str, dni: str, data: dict) -> bool:
+    """Procesa resultado del script de envío de PIN."""
+    try:
+        estado = data.get("estado", "error")
+        mensaje = data.get("mensaje", "Estado desconocido")
+        
+        pin_enviado = estado == "exitoso"
+        
+        logger.info(f"[PIN] DNI {dni} - Estado: {estado}, Mensaje: {mensaje}")
+        
+        # Enviar resultado final
+        final_data = {
+            "dni": dni,
+            "tipo": "pin",
+            "pin_enviado": pin_enviado,
+            "mensaje": mensaje,
+            "info": mensaje,
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        status = "completed" if pin_enviado else "error"
+        send_partial_update(task_id, final_data, status=status)
+        
+        logger.info(f"[OK] Envío PIN de {task_id} completado | Enviado: {pin_enviado}")
+        return pin_enviado  # Retorna True solo si el PIN fue enviado exitosamente
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error procesando PIN para {dni}: {e}", exc_info=True)
+        send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}", "tipo": "pin"}, status="error")
         return False
 
 
