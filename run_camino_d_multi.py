@@ -8,11 +8,11 @@ Flujo:
  5) Click 'area_pin'
  6) Esperar 3s
  7) Escribir DNI (--dni)
- 8) Presionar Enter N veces (ENTER_TIMES, default 5) con ENTER_REPEAT_DELAY (default 1s)
+ 8) Presionar Enter N veces (ENTER_TIMES, default 2) con ENTER_REPEAT_DELAY (default 1s)
 
 Env vars:
   D_STEP_DELAY (default 3.0)
-  ENTER_TIMES (default 5)
+    ENTER_TIMES (default 2)
   ENTER_REPEAT_DELAY (default 1.0)
   START_DELAY (default 1.0)
 
@@ -92,16 +92,16 @@ def _press_enter(delay_after: float):
 def run(dni: str, coords_path: Path, enter_times_override: int | None = None):
     start_delay = float(os.getenv('START_DELAY', '1.0'))
     step_delay = float(os.getenv('D_STEP_DELAY', '3.0'))
-    # Obtenemos valor base (env o default 5) y luego permitimos override por CLI.
+    # Obtenemos valor base (env o default 2) y luego permitimos override por CLI.
     base_env = os.getenv('ENTER_TIMES')
     if base_env is not None:
         try:
             enter_times = int(base_env)
         except ValueError:
-            print(f"[CaminoD] ENTER_TIMES env inválido='{base_env}', usando 5")
-            enter_times = 5
+            print(f"[CaminoD] ENTER_TIMES env inválido='{base_env}', usando 2")
+            enter_times = 2
     else:
-        enter_times = 5
+        enter_times = 2
 
     source = 'default'
     if base_env is not None:
@@ -166,7 +166,7 @@ def _parse_args():
     ap = argparse.ArgumentParser(description='Camino D (simple by coordinates)')
     ap.add_argument('--dni', required=True, help='DNI a procesar')
     ap.add_argument('--coords', default=DEFAULT_COORDS_FILE, help='JSON de coordenadas Camino D')
-    ap.add_argument('--enter-times', type=int, help='Override cantidad de Enter (default env ENTER_TIMES o 5)')
+    ap.add_argument('--enter-times', type=int, help='Override cantidad de Enter (prioridad: CLI > env ENTER_TIMES > default=2)')
     return ap.parse_args()
 
 if __name__ == '__main__':
