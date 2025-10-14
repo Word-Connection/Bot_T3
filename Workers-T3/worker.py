@@ -118,6 +118,9 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
 def validate_dni(dni: str) -> bool:
     return bool(re.match(r'^\d{8}$', dni))
 
+def validate_telefono(telefono: str) -> bool:
+    return bool(re.match(r'^\d{10}$', telefono))
+
 # -----------------------------
 # Funciones principales
 # -----------------------------
@@ -141,11 +144,27 @@ def get_task() -> Optional[dict]:
         return None
     if result.get("status") == "ok":
         task = result.get("task")
-        if not validate_dni(task["datos"]):
-            logger.error(f"[ERROR] DNI inválido: {task['datos']}")
-            return None
-        logger.info("===== NUEVA TAREA =====")
-        logger.info(f"[TAREA] ID={task['task_id']} DNI={task['datos']} Tipo={TIPO}")
+        
+        # Determinar si es tarea PIN o normal
+        is_pin_task = "operacion" in task and task.get("operacion") == "pin"
+        
+        if is_pin_task:
+            # Para PIN, validar teléfono
+            telefono = task.get("telefono", "")
+            if not validate_telefono(telefono):
+                logger.error(f"[ERROR] Teléfono inválido: {telefono}")
+                return None
+            logger.info("===== NUEVA TAREA =====")
+            logger.info(f"[TAREA] ID={task['task_id']} Teléfono={telefono} Tipo=PIN")
+        else:
+            # Para tareas normales, validar DNI
+            dni = task.get("datos", "")
+            if not validate_dni(dni):
+                logger.error(f"[ERROR] DNI inválido: {dni}")
+                return None
+            logger.info("===== NUEVA TAREA =====")
+            logger.info(f"[TAREA] ID={task['task_id']} DNI={dni} Tipo={TIPO}")
+        
         return task
     elif result.get("status") == "empty":
         logger.info("[VACÍO] No hay tareas disponibles")
@@ -228,6 +247,7 @@ def process_task(task: dict) -> bool:
         )
         
         output_lines = []
+        
         stderr_lines = []
         
         # Variables para tracking de updates progresivos
