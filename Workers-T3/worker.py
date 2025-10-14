@@ -74,8 +74,6 @@ PROCESS_DELAY = args.delay
 POLL_INTERVAL = args.poll_interval
 API_KEY = args.api_key
 TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
-OPERATING_START = os.getenv("OPERATING_START", "09:00")
-OPERATING_END = os.getenv("OPERATING_END", "21:00")
 VALID_TASK_TYPES = ["deudas", "movimientos"]
 
 stats = {
@@ -95,13 +93,6 @@ def log_stats():
     logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
                 f"Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | "
                 f"Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
-
-def is_within_operating_hours():
-    tz = pytz.timezone(TIMEZONE)
-    now = datetime.now(tz)
-    start_time = datetime.strptime(OPERATING_START, "%H:%M").replace(tzinfo=tz, year=now.year, month=now.month, day=now.day)
-    end_time = datetime.strptime(OPERATING_END, "%H:%M").replace(tzinfo=tz, year=now.year, month=now.month, day=now.day)
-    return start_time <= now <= end_time
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -144,9 +135,6 @@ def register_pc() -> bool:
 
 def get_task() -> Optional[dict]:
     logger.info("[POLL] Intentando obtener tarea...")
-    if not is_within_operating_hours():
-        logger.info("[HORARIO] Fuera de horario operativo, esperando...")
-        return None
     payload = {"pc_id": PC_ID, "tipo": TIPO}
     result = make_request("POST", "/workers/get_task", payload)
     if not result:
