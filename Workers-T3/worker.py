@@ -54,7 +54,7 @@ console_formatter = logging.Formatter(
 )
 console_handler.setFormatter(console_formatter)
 
-file_handler = logging.FileHandler(f"logs/worker_{args.pc_id}.log")
+file_handler = logging.FileHandler(f"logs/worker_{args.pc_id}.log", encoding='utf-8')
 file_handler.setLevel(log_level)
 file_formatter = logging.Formatter(
     '{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}'
@@ -88,6 +88,17 @@ stats = {
 # -----------------------------
 # Funciones auxiliares
 # -----------------------------
+def safe_str(text: str, max_length: int = None) -> str:
+    """Convierte texto a string seguro para logging en Windows"""
+    try:
+        # Reemplazar caracteres problemáticos
+        safe_text = text.encode('ascii', errors='replace').decode('ascii')
+        if max_length:
+            return safe_text[:max_length]
+        return safe_text
+    except Exception:
+        return "[texto no decodificable]"
+
 def log_stats():
     uptime = time.time() - stats["started_at"]
     logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
@@ -266,7 +277,7 @@ def process_task(task: dict) -> bool:
                     if output_line:
                         output_lines.append(output_line.strip())
                         line = output_line.strip()
-                        logger.info(f"[REALTIME] Línea detectada: {line[:50]}...")
+                        logger.info(f"[REALTIME] Línea detectada: {safe_str(line, 50)}...")
                         
                         # Buscar patrones para enviar updates progresivos
                         if not score_sent and ("score" in line.lower()):
@@ -352,7 +363,7 @@ def process_task(task: dict) -> bool:
             stderr_output = process.stderr.read()
             if stderr_output:
                 stderr_lines = stderr_output.split('\n')
-                logger.info(f"[DEBUG] Script stderr: {stderr_output[:200]}...")
+                logger.info(f"[DEBUG] Script stderr: {safe_str(stderr_output, 200)}...")
             
             # Esperar a que termine el proceso
             process.wait(timeout=timeout)
@@ -379,7 +390,7 @@ def process_task(task: dict) -> bool:
             if stderr_output:
                 error_msg += f": {stderr_output[:100]}"
             logger.error(f"[ERROR] {error_msg}")
-            logger.error(f"[STDOUT]: {output[:200]}...")
+            logger.error(f"[STDOUT]: {safe_str(output, 200)}...")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": error_msg}, status="error")
             return False
@@ -733,19 +744,31 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     return False
 
 
-def task_done(task_id: str, execution_time: int) -> bool:
+def task_done(task_id: str, execution_time: int, success: bool = True) -> bool:
     """Reporta tarea completada al backend."""
     payload = {
         "pc_id": PC_ID, 
         "task_id": task_id,
-        "execution_time": execution_time
+        "execution_time": execution_time,
+        "status": "completed" if success else "failed"
     }
-    result = make_request("POST", "/workers/task_done", payload)
-    if result and result.get("status") == "ok":
-        logger.info(f"[ENVIADO] Tarea {task_id} completada en {execution_time}s")
-        return True
-    logger.error(f"[ERROR] Fallo reportando tarea {task_id}")
-    return False
+    
+    try:
+        result = make_request("POST", "/workers/task_done", payload)
+        if result and result.get("status") == "ok":
+            status_text = "exitosamente" if success else "con errores"
+            logger.info(f"[ENVIADO] Tarea {task_id} completada {status_text} en {execution_time}s")
+            return True
+        logger.error(f"[ERROR] Fallo reportando tarea {task_id}")
+        return False
+    except Exception as e:
+        # Manejar casos especiales como tareas PIN que no tienen lock en el backend
+        if "404" in str(e) or "Not Found" in str(e):
+            logger.warning(f"[WARNING] Tarea {task_id} no encontrada en backend (posiblemente PIN) - continuando")
+            return True  # Consideramos exitoso para no bloquear el worker
+        else:
+            logger.error(f"[ERROR] Error reportando tarea {task_id}: {e}")
+            return False
 
 
 # -----------------------------
@@ -782,13 +805,13 @@ def main_loop():
                 execution_time = int(time.time() - start_time)
                 
                 if success:
-                    if task_done(task["task_id"], execution_time):
+                    if task_done(task["task_id"], execution_time, success=True):
                         stats["tasks_completed"] += 1
                     else:
                         stats["tasks_failed"] += 1
                 else:
                     stats["tasks_failed"] += 1
-                    task_done(task["task_id"], execution_time)
+                    task_done(task["task_id"], execution_time, success=False)
             
             time.sleep(POLL_INTERVAL)
         
