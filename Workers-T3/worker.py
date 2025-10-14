@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import random
 import subprocess
 import json
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from datetime import datetime
 import pytz
 import re
@@ -763,7 +763,9 @@ def task_done(task_id: str, execution_time: int, success: bool = True) -> bool:
         return False
     except Exception as e:
         # Manejar casos especiales como tareas PIN que no tienen lock en el backend
-        if "404" in str(e) or "Not Found" in str(e):
+        error_str = str(e)
+        if ("404" in error_str or "Not Found" in error_str or 
+            isinstance(e, RetryError) and "404" in str(e.last_attempt.exception())):
             logger.warning(f"[WARNING] Tarea {task_id} no encontrada en backend (posiblemente PIN) - continuando")
             return True  # Consideramos exitoso para no bloquear el worker
         else:
