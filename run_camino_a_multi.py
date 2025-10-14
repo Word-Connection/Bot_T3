@@ -458,6 +458,103 @@ def _append_log(log_path: Path, dni: str, content: str):
     print(f"[CaminoA] Log: {line.strip()}")
 
 
+def _is_valid_saldo_text(txt: str, compare_n: Optional[int] = None) -> bool:
+    if not txt:
+        return False
+    s = (txt or '').strip()
+    # No debe coincidir con N puro
+    if compare_n is not None and s.strip() == str(compare_n):
+        return False
+    # Debe lucir como monto: parseable o con separadores y al menos 3 dígitos
+    digits = re.sub(r"\D", "", s)
+    if len(digits) < 3:
+        return False
+    if _parse_amount_value(s) is not None:
+        return True
+    return _currency_like(s)
+
+
+def _copy_saldo_fa_with_retries(dx: int, dy: int, compare_n: Optional[int] = None) -> str:
+    # 1) Ctrl+C estable con validador
+    txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
+                            require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
+    if _is_valid_saldo_text(txt, compare_n):
+        return txt
+    # 2) Click foco y reintento
+    if dx or dy:
+        with _suppress_failsafe():
+            pg.moveTo(dx, dy, duration=0.1)
+            pg.click()
+        time.sleep(0.15)
+        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
+                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
+        if _is_valid_saldo_text(txt, compare_n):
+            return txt
+    # 3) Doble click y reintento
+    if dx or dy:
+        _double_click_xy(dx, dy, 'fa_deuda', 0.2)
+        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
+                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
+        if _is_valid_saldo_text(txt, compare_n):
+            return txt
+    # 4) Arrastre y reintento
+    if dx or dy:
+        try:
+            with _suppress_failsafe():
+                pg.moveTo(max(0, dx-25), dy, duration=0.06)
+                pg.mouseDown(); time.sleep(0.06)
+                pg.moveTo(dx+180, dy, duration=0.12)
+                pg.mouseUp(); time.sleep(0.1)
+        except Exception:
+            pass
+        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
+                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
+        if _is_valid_saldo_text(txt, compare_n):
+            return txt
+    return txt or ''
+
+
+def _is_valid_fa_id(txt: str, compare_saldo_txt: str = '', compare_n: Optional[int] = None) -> bool:
+    if not txt:
+        return False
+    if _currency_like(txt):
+        return False
+    num = _extract_first_number(txt)
+    if not num:
+        return False
+    # largo mínimo configurable
+    try:
+        min_len = max(5, int(os.getenv('MIN_FA_ID_LEN', '8')))
+    except Exception:
+        min_len = 8
+    if len(num) < min_len:
+        return False
+    # No debe coincidir con N ni con los dígitos del saldo
+    if compare_n is not None and num == str(compare_n):
+        return False
+    saldo_num = _extract_first_number(compare_saldo_txt or '')
+    if saldo_num and num == saldo_num:
+        return False
+    return True
+
+
+def _copy_fa_id_via_context_with_retries(rax: int, ray: int, cpx: int, cpy: int,
+                                         compare_saldo_txt: str = '', compare_n: Optional[int] = None,
+                                         max_rounds: int = 4) -> str:
+    last_txt = ''
+    for _ in range(max(1, max_rounds)):
+        if rax or ray:
+            _right_click(rax, ray, 'fa_area_copy', 0.2)
+            if cpx or cpy:
+                _click(cpx, cpy, 'fa_copy', 0.15)
+            time.sleep(0.1)
+        txt = _stable_read_clipboard_only(max_attempts=8, consecutive=2, read_delay=0.1)
+        last_txt = txt or last_txt
+        if _is_valid_fa_id(txt, compare_saldo_txt, compare_n):
+            return txt
+    return last_txt
+
+
 def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float) -> float:
     if step_delays and index < len(step_delays):
         return step_delays[index]
@@ -794,9 +891,8 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
         if apartado_txt and (not _currency_like(apartado_txt)) and (not re.search(r"\bregistros?\b", (apartado_txt or '').strip().lower())):
             _append_log(log_path, dni, f"apartado {apartado_txt}")
 
-        # Paso 1: copiar saldo desde el área de fa_deuda (Ctrl+C estable)
-        deuda_txt = _stable_copy_text(max_attempts=6, consecutive=2, read_delay=0.1,
-                                      require_non_empty=False, clear_first=False)
+        # Paso 1: copiar saldo desde el área de fa_deuda con validación (distinto de N, aspecto de monto)
+        deuda_txt = _copy_saldo_fa_with_retries(dx, dy, compare_n=n)
         _append_log(log_path, dni, f"saldo {deuda_txt}" if deuda_txt else 'saldo No Tiene Pedido')
 
         # Paso 2: copiar ID usando fa_area_copy (click derecho) + fa_copy (click izquierdo)
@@ -804,15 +900,14 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
         cpx, cpy = _xy(conf, 'fa_copy')
         id_txt = ''
         if rax or ray:
-            _right_click(rax, ray, 'fa_area_copy', 0.2)
-            if cpx or cpy:
-                _click(cpx, cpy, 'fa_copy', 0.15)
-            time.sleep(0.1)
-            id_txt = _stable_read_clipboard_only(max_attempts=8, consecutive=2, read_delay=0.1)
+            id_txt = _copy_fa_id_via_context_with_retries(rax, ray, cpx, cpy,
+                                                          compare_saldo_txt=deuda_txt, compare_n=n,
+                                                          max_rounds=4)
         else:
-            # Fallback si no hay coords: intentar Ctrl+C directo
-            id_txt = _stable_copy_text(max_attempts=6, consecutive=2, read_delay=0.1,
-                                       require_non_empty=False, clear_first=False)
+            # Fallback si no hay coords: intentar Ctrl+C directo con validación
+            id_txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
+                                       require_non_empty=True,
+                                       validator=lambda t: _is_valid_fa_id(t, compare_saldo_txt=deuda_txt, compare_n=n))
         _append_log(log_path, dni, f"id {id_txt}" if id_txt else 'id No Data')
 
         # Registrar FA en resultados estructurados (con valores parseados)
