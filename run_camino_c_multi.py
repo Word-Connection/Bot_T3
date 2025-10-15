@@ -366,11 +366,24 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
 
     conf = _load_coords(coords_path)
 
-    # Camino inicial: igual a A hasta seleccionar_btn
+    # Determinar si es CUIT (11 dígitos)
+    is_cuit = isinstance(dni, str) and dni.isdigit() and len(dni) == 11
+    # Camino inicial: igual a A hasta seleccionar_btn (con soporte a CUIT)
     x,y = _xy(conf,'cliente_section'); _click(x,y,'cliente_section', _step_delay(step_delays,0,base_delay))
-    x,y = _xy(conf,'tipo_doc_btn'); _click(x,y,'tipo_doc_btn', _step_delay(step_delays,1,base_delay))
-    x,y = _xy(conf,'dni_option'); _click(x,y,'dni_option', _step_delay(step_delays,2,base_delay))
-    x,y = _xy(conf,'dni_field'); _click(x,y,'dni_field', 0.2); _type(dni, _step_delay(step_delays,3,base_delay))
+    if is_cuit:
+        x,y = _xy(conf,'cuit_tipo_doc_btn'); _click(x,y,'cuit_tipo_doc_btn', _step_delay(step_delays,1,base_delay))
+        x,y = _xy(conf,'cuit_option'); _click(x,y,'cuit_option', _step_delay(step_delays,2,base_delay))
+    else:
+        x,y = _xy(conf,'tipo_doc_btn'); _click(x,y,'tipo_doc_btn', _step_delay(step_delays,1,base_delay))
+        x,y = _xy(conf,'dni_option'); _click(x,y,'dni_option', _step_delay(step_delays,2,base_delay))
+    # El paso es el mismo (clic en campo y escribir), cambia solo la coordenada
+    if is_cuit:
+        x,y = _xy(conf,'cuit_field')
+        if not (x or y):
+            x,y = _xy(conf,'dni_field')  # fallback
+        _click(x,y,'cuit_field' if (x or y) else 'dni_field', 0.2); _type(dni, _step_delay(step_delays,3,base_delay))
+    else:
+        x,y = _xy(conf,'dni_field'); _click(x,y,'dni_field', 0.2); _type(dni, _step_delay(step_delays,3,base_delay))
     _press_enter(_step_delay(step_delays,4,post_enter))
     x,y = _xy(conf,'client_id_field'); time.sleep(2.5); _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
     x,y = _xy(conf,'seleccionar_btn'); _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
