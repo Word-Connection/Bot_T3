@@ -267,23 +267,27 @@ def _scan_popup_regions_and_handle_ok(base_delay: float, log_dir: str = 'captura
     except Exception:
         confd = 0.9
 
-    # Crear carpeta de capturas
-    try:
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    # Flag para deshabilitar guardado de capturas de popup
+    disable_popup_captures = os.getenv('DISABLE_POPUP_CAPTURES', '1') in ('1','true','True')
+    if not disable_popup_captures:
+        try:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
     ts = time.strftime('%Y%m%d_%H%M%S')
     detected = False
     for idx, (px, py) in enumerate(probes, start=1):
         region = (max(0, px), max(0, py), max(10, scan_w), max(10, scan_h))
+        snap = None
         try:
             snap = pg.screenshot(region=region)
-            out = Path(log_dir) / f'popup_probe_{idx}_{ts}.png'
-            try:
-                snap.save(out)
-            except Exception:
-                pass
+            if not disable_popup_captures:
+                out = Path(log_dir) / f'popup_probe_{idx}_{ts}.png'
+                try:
+                    snap.save(out)
+                except Exception:
+                    pass
         except Exception:
             snap = None
         

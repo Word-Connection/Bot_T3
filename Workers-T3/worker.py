@@ -294,12 +294,16 @@ def process_task(task: dict) -> bool:
                                     import glob
                                     base_dir = os.path.dirname(__file__)
                                     capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
-                                    
+                                    capturas_dir = os.path.abspath(capturas_dir)
+
                                     screenshot_b64 = None
-                                    pattern = os.path.join(capturas_dir, f'score_{dni}_*.png')
-                                    
+                                    # Usar el DNI de la tarea (input_data) para el patrón
+                                    dni_for_pattern = str(input_data)
+                                    pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
+
                                     # Retry para encontrar imagen (puede tardar unos segundos)
-                                    for attempt in range(10):  # 10 intentos, 0.5s cada uno = 5s máximo
+                                    # Aumentamos a 24 intentos (12s) y luego fallback a la última imagen del directorio
+                                    for attempt in range(24):
                                         matching_files = glob.glob(pattern)
                                         if matching_files:
                                             latest_image = max(matching_files, key=os.path.getctime)
@@ -311,11 +315,25 @@ def process_task(task: dict) -> bool:
                                                 break
                                             except Exception as img_e:
                                                 logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
-                                        time.sleep(0.5)  # Esperar 0.5s antes del siguiente intento
+                                        time.sleep(0.5)
+
+                                    # Fallback: tomar la última imagen score_*.png aunque no coincida el DNI
+                                    if not screenshot_b64:
+                                        any_pattern = os.path.join(capturas_dir, 'score_*.png')
+                                        any_files = glob.glob(any_pattern)
+                                        if any_files:
+                                            latest_any = max(any_files, key=os.path.getctime)
+                                            try:
+                                                with open(latest_any, 'rb') as img_file:
+                                                    img_data = img_file.read()
+                                                    screenshot_b64 = base64.b64encode(img_data).decode()
+                                                    logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
+                                            except Exception as img_e:
+                                                logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
                                     
                                     # Enviar update del score con imagen inmediatamente
                                     score_update = {
-                                        "dni": dni,
+                                        "dni": input_data,
                                         "score": score_val,
                                         "etapa": "score_obtenido",
                                         "info": f"Score obtenido: {score_val}",
@@ -327,7 +345,7 @@ def process_task(task: dict) -> bool:
                                         score_update["image"] = screenshot_b64
                                     
                                     send_partial_update(task_id, score_update, status="running")
-                                    logger.info(f"[SCORE] Enviado score {score_val} para DNI {dni} {'con imagen' if screenshot_b64 else 'sin imagen'}")
+                                    logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
                                     score_sent = True
                                     
                                     # Si el score está entre 80-89, preparar mensaje de búsqueda
@@ -335,7 +353,7 @@ def process_task(task: dict) -> bool:
                                         time.sleep(2)  # Pausa antes del siguiente update
                                         
                                         search_update = {
-                                            "dni": dni,
+                                            "dni": input_data,
                                             "score": score_val,
                                             "etapa": "buscando_deudas",
                                             "info": "Buscando deudas...",
@@ -343,7 +361,7 @@ def process_task(task: dict) -> bool:
                                         }
                                         
                                         send_partial_update(task_id, search_update, status="running")
-                                        logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {dni}")
+                                        logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {input_data}")
                                         searching_sent = True
                             except Exception as e:
                                 logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
