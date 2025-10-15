@@ -127,7 +127,8 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
         raise
 
 def validate_dni(dni: str) -> bool:
-    return bool(re.match(r'^\d{8}$', dni))
+    """Acepta DNI (8 dígitos) o CUIT (11 dígitos)."""
+    return bool(re.match(r'^\d{8}$', dni)) or bool(re.match(r'^\d{11}$', dni))
 
 def validate_telefono(telefono: str) -> bool:
     return bool(re.match(r'^\d{10}$', telefono))
@@ -209,7 +210,9 @@ def process_task(task: dict) -> bool:
         base_dir = os.path.dirname(__file__)
         
         if is_pin_operation:
-            script_path = os.path.join(base_dir, 'scripts', 'pin.py')
+            # Para PIN: ejecutar directamente Camino D y no enviar updates parciales
+            script_path = os.path.abspath(os.path.join(base_dir, '..', 'run_camino_d_multi.py'))
+            coords_path = os.path.abspath(os.path.join(base_dir, '..', 'camino_d_coords_multi.json'))
         else:
             script_path = os.path.join(base_dir, 'scripts', f"{TIPO}.py")
         
@@ -230,9 +233,10 @@ def process_task(task: dict) -> bool:
             python_executable = sys.executable
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
         
-        # Enviar actualización inicial
-        operation_msg = f"Iniciando {'envío de PIN' if is_pin_operation else 'automatización'} para {data_label} {input_data}"
-        send_partial_update(task_id, {"info": operation_msg}, status="running")
+        # No enviar updates parciales para PIN
+        if not is_pin_operation:
+            operation_msg = f"Iniciando automatización para {data_label} {input_data}"
+            send_partial_update(task_id, {"info": operation_msg}, status="running")
         
         # Ejecutar script con lectura en tiempo real para updates progresivos
         if is_pin_operation:
@@ -240,69 +244,80 @@ def process_task(task: dict) -> bool:
         else:
             timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
         
+        if is_pin_operation:
+            # Ejecutar Camino D sencillo y esperar a que termine
+            try:
+                cmd = [python_executable, script_path, '--dni', input_data, '--coords', coords_path]
+                run_res = subprocess.run(
+                    cmd,
+                    cwd=os.path.dirname(script_path),
+                    text=True,
+                    capture_output=True,
+                    timeout=timeout
+                )
+            except subprocess.TimeoutExpired:
+                logger.error(f"[TIMEOUT] Camino D (PIN) excedió tiempo límite de {timeout}s")
+                stats["scraping_errors"] += 1
+                return False
+            except Exception as e:
+                logger.error(f"[ERROR] Camino D (PIN) fallo: {e}")
+                stats["scraping_errors"] += 1
+                return False
+
+            if run_res.returncode != 0:
+                logger.error(f"[ERROR] Camino D (PIN) terminó con código {run_res.returncode}")
+                logger.debug(f"[PIN][STDOUT]: {safe_str(run_res.stdout,200)}")
+                logger.debug(f"[PIN][STDERR]: {safe_str(run_res.stderr,200)}")
+                stats["scraping_errors"] += 1
+                return False
+
+            # Éxito sin enviar ningún update parcial
+            return True
+
+        # En el caso normal (no PIN), continuar con Popen y lectura en tiempo real
         # Usar Popen para leer output en tiempo real con unbuffered
         env = os.environ.copy()
-        env['PYTHONUNBUFFERED'] = '1'  # Forzar unbuffered output
-        
+        env['PYTHONUNBUFFERED'] = '1'
+
         process = subprocess.Popen(
-            [python_executable, '-u', script_path, input_data],  # -u para unbuffered
+            [python_executable, '-u', script_path, input_data],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=os.path.dirname(script_path),
             text=True,
             encoding='utf-8',
             errors='replace',
-            bufsize=0,  # Unbuffered
+            bufsize=0,
             universal_newlines=True,
             env=env
         )
-        
+
         output_lines = []
-        
         stderr_lines = []
-        
-        # Variables para tracking de updates progresivos
         score_sent = False
         searching_sent = False
-        
+
         try:
-            # Leer output línea por línea en tiempo real con polling agresivo
             while True:
-                # Intentar leer línea con timeout corto
-                import select
-                
                 if sys.platform == 'win32':
-                    # En Windows, usar polling directo
                     output_line = process.stdout.readline()
                     if output_line:
                         output_lines.append(output_line.strip())
                         line = output_line.strip()
                         logger.info(f"[REALTIME] Línea detectada: {safe_str(line, 50)}...")
-                        
-                        # Buscar patrones para enviar updates progresivos
                         if not score_sent and ("score" in line.lower()):
-                            # Intentar extraer el score y enviarlo inmediatamente
                             try:
                                 import re
                                 score_match = re.search(r'score[:\s]*(\d+)', line, re.IGNORECASE)
                                 if score_match:
                                     score_val = int(score_match.group(1))
                                     logger.info(f"[REALTIME] Score {score_val} detectado INMEDIATAMENTE")
-                                    
-                                    # Buscar imagen de score con retry
-                                    import base64
-                                    import glob
+                                    import base64, glob
                                     base_dir = os.path.dirname(__file__)
-                                    capturas_dir = os.path.join(base_dir, '..', 'capturas_camino_c')
-                                    capturas_dir = os.path.abspath(capturas_dir)
-
+                                    capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
                                     screenshot_b64 = None
-                                    # Usar el DNI de la tarea (input_data) para el patrón
                                     dni_for_pattern = str(input_data)
                                     pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
-
-                                    # Retry para encontrar imagen (puede tardar unos segundos)
-                                    # Aumentamos a 24 intentos (12s) y luego fallback a la última imagen del directorio
                                     for attempt in range(24):
                                         matching_files = glob.glob(pattern)
                                         if matching_files:
@@ -316,8 +331,6 @@ def process_task(task: dict) -> bool:
                                             except Exception as img_e:
                                                 logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
                                         time.sleep(0.5)
-
-                                    # Fallback: tomar la última imagen score_*.png aunque no coincida el DNI
                                     if not screenshot_b64:
                                         any_pattern = os.path.join(capturas_dir, 'score_*.png')
                                         any_files = glob.glob(any_pattern)
@@ -330,8 +343,6 @@ def process_task(task: dict) -> bool:
                                                     logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
                                             except Exception as img_e:
                                                 logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
-                                    
-                                    # Enviar update del score con imagen inmediatamente
                                     score_update = {
                                         "dni": input_data,
                                         "score": score_val,
@@ -339,19 +350,13 @@ def process_task(task: dict) -> bool:
                                         "info": f"Score obtenido: {score_val}",
                                         "timestamp": int(time.time() * 1000)
                                     }
-                                    
-                                    # Incluir imagen si existe
                                     if screenshot_b64:
                                         score_update["image"] = screenshot_b64
-                                    
                                     send_partial_update(task_id, score_update, status="running")
                                     logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
                                     score_sent = True
-                                    
-                                    # Si el score está entre 80-89, preparar mensaje de búsqueda
                                     if 80 <= score_val <= 89:
-                                        time.sleep(2)  # Pausa antes del siguiente update
-                                        
+                                        time.sleep(2)
                                         search_update = {
                                             "dni": input_data,
                                             "score": score_val,
@@ -359,33 +364,22 @@ def process_task(task: dict) -> bool:
                                             "info": "Buscando deudas...",
                                             "timestamp": int(time.time() * 1000)
                                         }
-                                        
                                         send_partial_update(task_id, search_update, status="running")
                                         logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {input_data}")
                                         searching_sent = True
                             except Exception as e:
                                 logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
-                
-                # Verificar si el proceso terminó
                 if process.poll() is not None:
-                    # Leer cualquier output restante
                     remaining_out = process.stdout.read()
                     if remaining_out:
                         output_lines.extend(remaining_out.split('\n'))
                     break
-                
-                # Pequeña pausa para no saturar CPU
                 time.sleep(0.1)
-            
-            # Leer stderr al final
             stderr_output = process.stderr.read()
             if stderr_output:
                 stderr_lines = stderr_output.split('\n')
                 logger.info(f"[DEBUG] Script stderr: {safe_str(stderr_output, 200)}...")
-            
-            # Esperar a que termine el proceso
             process.wait(timeout=timeout)
-            
         except subprocess.TimeoutExpired:
             process.kill()
             logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
@@ -398,8 +392,7 @@ def process_task(task: dict) -> bool:
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": f"Error durante procesamiento: {str(e)}"}, status="error")
             return False
-        
-        # Combinar todas las líneas para el procesamiento final
+
         output = '\n'.join([line for line in output_lines if line])
         stderr_output = '\n'.join([line for line in stderr_lines if line])
         
@@ -435,10 +428,10 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": "Datos inválidos"}, status="error")
             return False
 
-        # Procesar según el tipo de tarea o operación especial
-        # Verificar si es una tarea de PIN (puede ser manejada por cualquier worker)
+        # Procesar según el tipo de tarea (no PIN aquí, PIN ya retornó)
         if "operacion" in task and task.get("operacion") == "pin":
-            return process_pin_operation(task_id, input_data, data)
+            # No debería llegar aquí
+            return True
         elif TIPO == "deudas":
             return process_deudas_result(task_id, input_data, data)
         elif TIPO == "movimientos":
@@ -481,6 +474,28 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
         except:
             return str(val) if val else "0,00"
     
+    def _parse_amount_to_float(val) -> float | None:
+        """Convierte montos como '3.984,79' o '-3,00' a float. Devuelve None si no se puede."""
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            try:
+                return float(val)
+            except Exception:
+                return None
+        if isinstance(val, str):
+            s = val.strip()
+            if not s:
+                return None
+            # Normalizar: quitar separador de miles '.' y reemplazar coma decimal por punto
+            s = s.replace('.', '').replace(',', '.')
+            # Asegurar que sólo quede un signo negativo al inicio si existía
+            try:
+                return float(s)
+            except Exception:
+                return None
+        return None
+
     def clean_apartado(apartado):
         """Limpia nombre del apartado."""
         if not apartado or not apartado.strip():
@@ -538,7 +553,12 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
         for cf_item in cf.get("items", []):
             if not isinstance(cf_item, dict):
                 continue
-            
+            # Filtrar saldos negativos o cero cuando haya un campo 'saldo' parseable
+            saldo_val = cf_item.get("saldo")
+            saldo_num = _parse_amount_to_float(saldo_val)
+            if saldo_num is not None and saldo_num <= 0.0:
+                continue
+
             # Preservar todos los campos del item
             preserved_item = preserve_all_fields(cf_item)
             cf_items.append(preserved_item)

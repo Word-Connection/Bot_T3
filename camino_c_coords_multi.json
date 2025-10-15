@@ -11,9 +11,25 @@
     "x": 140,
     "y": 276
   },
+  "cuit_option": {
+    "x": 151,
+    "y": 296
+  },
   "dni_field": {
     "x": 913,
     "y": 240
+  },
+  "cuit_tipo_doc_btn": {
+    "x": 179,
+    "y": 262
+  },
+  "cuit_dni_field": {
+    "x": 163,
+    "y": 295
+  },
+  "cuit_field": {
+    "x": 912,
+    "y": 263
   },
   "client_id_field": {
     "x": 97,
