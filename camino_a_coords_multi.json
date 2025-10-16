@@ -79,6 +79,30 @@
     "x": 67,
     "y": 437
   },
+  "cuenta_financiera_area": {
+    "x": 556,
+    "y": 590
+  },
+  "extra_cuenta":
+  {
+    "x": 459,
+    "y": 482
+  },
+  "cf_count_area": {
+    "x": 556,
+    "y": 440
+  },
+  "cf_count_x": 373,
+  "cf_row_step": 20,
+  "copy_area_left_x": 94,
+  "context_menu_copy_offset_x": 26,
+  "context_menu_copy_offset_y": 12,
+
+  "extra_saldo":
+  {
+    "x": 702,
+    "y": 633
+  },
   "mostrar_lista_btn": {
     "x": 57,
     "y": 504

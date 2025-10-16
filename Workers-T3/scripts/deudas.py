@@ -225,23 +225,68 @@ def main():
                 print(f"INFO: Score {score_num} entre 80-89: iniciando Camino A para DNI {dni}", file=sys.stderr)
                 script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
+                
+                print(f"INFO: Script Camino A: {script_a}", file=sys.stderr)
+                print(f"INFO: Coords Camino A: {coords_a}", file=sys.stderr)
+                print(f"INFO: Script existe: {os.path.exists(script_a)}", file=sys.stderr)
+                
                 if os.path.exists(script_a):
                     cmd_a = [sys.executable, script_a, '--dni', dni, '--coords', coords_a]
-                    a_proc = subprocess.run(
+                    print(f"INFO: Comando: {' '.join(cmd_a)}", file=sys.stderr)
+                    print(f"INFO: CWD: {os.path.dirname(script_a)}", file=sys.stderr)
+                    
+                    # Usar Popen para leer stderr en tiempo real
+                    print(f"INFO: === STDERR DE CAMINO A (inicio en tiempo real) ===", file=sys.stderr)
+                    sys.stderr.flush()
+                    
+                    a_proc = subprocess.Popen(
                         cmd_a,
-                        capture_output=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,  # Redirigir stderr a stdout para capturar todo junto
                         text=True,
                         cwd=os.path.dirname(script_a),
-                        timeout=1200
+                        bufsize=1,  # Line buffered
+                        universal_newlines=True
                     )
-                    if a_proc.returncode == 0:
+                    
+                    # Leer salida en tiempo real
+                    stdout_lines = []
+                    try:
+                        for line in a_proc.stdout:
+                            stdout_lines.append(line)
+                            # Imprimir en tiempo real (sin \n extra porque line ya lo tiene)
+                            print(f"[CaminoA-RT] {line}", end='', file=sys.stderr)
+                            sys.stderr.flush()
+                        
+                        # Esperar a que termine
+                        a_proc.wait(timeout=1200)
+                    except subprocess.TimeoutExpired:
+                        a_proc.kill()
+                        print(f"WARNING: Timeout ejecutando Camino A para DNI {dni}", file=sys.stderr)
+                        raise
+                    
+                    stdout_full = ''.join(stdout_lines)
+                    returncode = a_proc.returncode
+                    
+                    print(f"INFO: === STDERR DE CAMINO A (fin) ===", file=sys.stderr)
+                    print(f"INFO: Camino A retornó código: {returncode}", file=sys.stderr)
+                    print(f"INFO: Stdout length: {len(stdout_full)}", file=sys.stderr)
+                    
+                    if returncode == 0:
                         print(f"Camino A completado exitosamente")
                         sys.stdout.flush()
                         print(f"INFO: Camino A finalizado OK para DNI {dni}", file=sys.stderr)
+                        
+                        # MOSTRAR STDOUT COMPLETO PARA VER EL JSON
+                        if stdout_full:
+                            print(f"INFO: === STDOUT DE CAMINO A (inicio) ===", file=sys.stderr)
+                            print(stdout_full[:500], file=sys.stderr)  # Primeros 500 caracteres
+                            print(f"INFO: === STDOUT DE CAMINO A (fin muestra) ===", file=sys.stderr)
+                        
                         # Intentar parsear JSON de Camino A
                         camino_a_data = None
                         try:
-                            a_out = a_proc.stdout or ""
+                            a_out = stdout_full or ""
                             pos = a_out.find('{')
                             if pos != -1:
                                 camino_a_data = json.loads(a_out[pos:])
@@ -275,9 +320,8 @@ def main():
                                 else:
                                     print(f"DEBUG: {key}: {type(value)} = {str(value)[:100]}", file=sys.stderr)
                     else:
-                        print(f"WARNING: Camino A retorno codigo {a_proc.returncode} para DNI {dni}", file=sys.stderr)
-                        if a_proc.stderr:
-                            print(f"STDERR Camino A:\n{a_proc.stderr[:500]}", file=sys.stderr)
+                        print(f"ERROR: Camino A falló con código {returncode} para DNI {dni}", file=sys.stderr)
+                        print(f"ERROR: STDOUT de Camino A:\n{stdout_full}", file=sys.stderr)
                 else:
                     print(f"WARNING: Script Camino A no encontrado en {script_a}", file=sys.stderr)
             except subprocess.TimeoutExpired:
