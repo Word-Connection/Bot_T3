@@ -238,16 +238,22 @@ def process_task(task: dict) -> bool:
             operation_msg = f"Iniciando automatización para {data_label} {input_data}"
             send_partial_update(task_id, {"info": operation_msg}, status="running")
         
-        # Ejecutar script con lectura en tiempo real para updates progresivos
+        # Ejecutar script - método simple SOLO para PIN, complejo para DEUDAS y MOVIMIENTOS
         if is_pin_operation:
             timeout = 120  # 2 minutos para PIN
         else:
-            timeout = 360 if TIPO == "deudas" else 800  # 6 min para deudas, 13+ min para movimientos
+            timeout = 900 if TIPO == "deudas" else 800  # 15 min para deudas, 13+ min para movimientos
         
+        # MÉTODO SIMPLE: Ejecutar y esperar resultado (SOLO PIN)
         if is_pin_operation:
-            # Ejecutar Camino D sencillo y esperar a que termine
             try:
-                cmd = [python_executable, script_path, '--dni', input_data, '--coords', coords_path]
+                if is_pin_operation:
+                    cmd = [python_executable, script_path, '--dni', input_data, '--coords', coords_path]
+                else:
+                    # Para deudas, simplemente pasar el DNI
+                    cmd = [python_executable, script_path, input_data]
+                
+                logger.info(f"[SIMPLE] Ejecutando script y esperando resultado...")
                 run_res = subprocess.run(
                     cmd,
                     cwd=os.path.dirname(script_path),
@@ -256,25 +262,30 @@ def process_task(task: dict) -> bool:
                     timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                logger.error(f"[TIMEOUT] Camino D (PIN) excedió tiempo límite de {timeout}s")
+                logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
                 stats["scraping_errors"] += 1
+                send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
                 return False
             except Exception as e:
-                logger.error(f"[ERROR] Camino D (PIN) fallo: {e}")
+                logger.error(f"[ERROR] Error ejecutando script: {e}")
                 stats["scraping_errors"] += 1
+                send_partial_update(task_id, {"info": f"Error: {str(e)}"}, status="error")
                 return False
 
             if run_res.returncode != 0:
-                logger.error(f"[ERROR] Camino D (PIN) terminó con código {run_res.returncode}")
-                logger.debug(f"[PIN][STDOUT]: {safe_str(run_res.stdout,200)}")
-                logger.debug(f"[PIN][STDERR]: {safe_str(run_res.stderr,200)}")
+                error_msg = f"Script falló con código {run_res.returncode}"
+                logger.error(f"[ERROR] {error_msg}")
+                logger.debug(f"[STDOUT]: {safe_str(run_res.stdout,500)}")
+                logger.debug(f"[STDERR]: {safe_str(run_res.stderr,500)}")
                 stats["scraping_errors"] += 1
+                send_partial_update(task_id, {"info": error_msg}, status="error")
                 return False
 
-            # Éxito sin enviar ningún update parcial
+            # Para PIN, no hay más que hacer
             return True
 
-        # En el caso normal (no PIN), continuar con Popen y lectura en tiempo real
+        # MÉTODO COMPLEJO CON TIEMPO REAL: Para DEUDAS y MOVIMIENTOS
+        # Continuar con Popen y lectura en tiempo real
         # Usar Popen para leer output en tiempo real con unbuffered
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
@@ -296,90 +307,207 @@ def process_task(task: dict) -> bool:
         stderr_lines = []
         score_sent = False
         searching_sent = False
+        capturing_partial = False  # Flag para capturar JSON parciales
 
         try:
+            import threading
+            import queue
+            
+            # Función para leer stdout en un hilo separado
+            def read_output(pipe, out_queue):
+                try:
+                    for line in iter(pipe.readline, ''):
+                        if line:
+                            out_queue.put(line)
+                except Exception as e:
+                    logger.error(f"[ERROR] Error leyendo output: {e}")
+                finally:
+                    out_queue.put(None)  # Señal de fin
+            
+            # Crear cola y hilo para lectura no bloqueante
+            output_queue = queue.Queue()
+            reader_thread = threading.Thread(target=read_output, args=(process.stdout, output_queue))
+            reader_thread.daemon = True
+            reader_thread.start()
+            
+            start_time = time.time()
+            last_line_time = start_time
+            no_output_timeout = 900  # 15 minutos sin output = timeout
+            
             while True:
-                if sys.platform == 'win32':
-                    output_line = process.stdout.readline()
-                    if output_line:
-                        output_lines.append(output_line.strip())
-                        line = output_line.strip()
-                        logger.info(f"[REALTIME] Línea detectada: {safe_str(line, 50)}...")
-                        if not score_sent and ("score" in line.lower()):
+                # Verificar timeout global
+                if time.time() - start_time > timeout:
+                    logger.error(f"[TIMEOUT] Timeout global de {timeout}s excedido")
+                    process.kill()
+                    stats["scraping_errors"] += 1
+                    send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
+                    return False
+                
+                # Verificar timeout de inactividad
+                if time.time() - last_line_time > no_output_timeout:
+                    logger.error(f"[TIMEOUT] Sin output por {no_output_timeout}s, considerando proceso bloqueado")
+                    process.kill()
+                    stats["scraping_errors"] += 1
+                    send_partial_update(task_id, {"info": "Proceso bloqueado (sin output)"}, status="error")
+                    return False
+                
+                # Verificar si el proceso terminó
+                if process.poll() is not None:
+                    # Leer líneas restantes de la cola
+                    while not output_queue.empty():
+                        try:
+                            line = output_queue.get_nowait()
+                            if line is not None:
+                                output_lines.append(line.strip())
+                        except queue.Empty:
+                            break
+                    logger.info(f"[PROCESO] Proceso terminado con código {process.returncode}")
+                    break
+                
+                # Intentar leer línea de la cola con timeout
+                try:
+                    line = output_queue.get(timeout=0.5)
+                    if line is None:  # Señal de fin
+                        break
+                    
+                    last_line_time = time.time()  # Actualizar timestamp de última línea
+                    output_lines.append(line.strip())
+                    line_text = line.strip()
+                    
+                    if line_text:
+                        logger.info(f"[REALTIME] Línea detectada: {safe_str(line_text, 50)}...")
+                    
+                    # DETECTAR JSON PARCIALES DEL SCRIPT
+                    if "===JSON_PARTIAL_START===" in line_text:
+                        # Iniciar captura de JSON parcial
+                        json_buffer = []
+                        capturing_partial = True
+                        logger.info(f"[PARCIAL] Detectado inicio de JSON parcial")
+                        
+                        # Leer líneas hasta encontrar el final
+                        while capturing_partial:
                             try:
-                                import re
-                                score_match = re.search(r'score[:\s]*(\d+)', line, re.IGNORECASE)
-                                if score_match:
-                                    score_val = int(score_match.group(1))
-                                    logger.info(f"[REALTIME] Score {score_val} detectado INMEDIATAMENTE")
-                                    import base64, glob
-                                    base_dir = os.path.dirname(__file__)
-                                    capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
-                                    screenshot_b64 = None
-                                    dni_for_pattern = str(input_data)
-                                    pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
-                                    for attempt in range(24):
-                                        matching_files = glob.glob(pattern)
-                                        if matching_files:
-                                            latest_image = max(matching_files, key=os.path.getctime)
-                                            try:
-                                                with open(latest_image, 'rb') as img_file:
-                                                    img_data = img_file.read()
-                                                    screenshot_b64 = base64.b64encode(img_data).decode()
-                                                    logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
-                                                break
-                                            except Exception as img_e:
-                                                logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
-                                        time.sleep(0.5)
-                                    if not screenshot_b64:
-                                        any_pattern = os.path.join(capturas_dir, 'score_*.png')
-                                        any_files = glob.glob(any_pattern)
-                                        if any_files:
-                                            latest_any = max(any_files, key=os.path.getctime)
-                                            try:
-                                                with open(latest_any, 'rb') as img_file:
-                                                    img_data = img_file.read()
-                                                    screenshot_b64 = base64.b64encode(img_data).decode()
-                                                    logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
-                                            except Exception as img_e:
-                                                logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
-                                    score_update = {
+                                json_line = output_queue.get(timeout=2.0)
+                                if json_line is None:
+                                    break
+                                
+                                json_line_text = json_line.strip()
+                                output_lines.append(json_line_text)
+                                
+                                if "===JSON_PARTIAL_END===" in json_line_text:
+                                    capturing_partial = False
+                                    logger.info(f"[PARCIAL] Detectado fin de JSON parcial")
+                                    
+                                    # Parsear y enviar el JSON parcial
+                                    try:
+                                        json_text = '\n'.join(json_buffer)
+                                        partial_data = json.loads(json_text)
+                                        
+                                        etapa = partial_data.get("etapa", "")
+                                        logger.info(f"[PARCIAL] JSON parseado: etapa={etapa}")
+                                        
+                                        # Enviar update parcial
+                                        send_partial_update(task_id, partial_data, status="running")
+                                        
+                                        # Marcar flags según la etapa
+                                        if etapa == "score_obtenido":
+                                            score_sent = True
+                                            logger.info(f"[PARCIAL] Score enviado desde JSON parcial")
+                                        elif etapa == "buscando_deudas":
+                                            searching_sent = True
+                                            logger.info(f"[PARCIAL] Update 'buscando deudas' enviado desde JSON parcial")
+                                        
+                                    except Exception as json_err:
+                                        logger.error(f"[PARCIAL] Error parseando JSON parcial: {json_err}")
+                                    
+                                    break
+                                else:
+                                    json_buffer.append(json_line_text)
+                                    
+                            except queue.Empty:
+                                logger.warning(f"[PARCIAL] Timeout esperando fin de JSON parcial")
+                                capturing_partial = False
+                                break
+                        
+                        continue  # Continuar con el siguiente ciclo del loop principal
+                    
+                    if not score_sent and ("score" in line_text.lower()):
+                        try:
+                            import re
+                            score_match = re.search(r'score[:\s]*(\d+)', line_text, re.IGNORECASE)
+                            if score_match:
+                                score_val = int(score_match.group(1))
+                                logger.info(f"[REALTIME] Score {score_val} detectado INMEDIATAMENTE")
+                                import base64, glob
+                                base_dir = os.path.dirname(__file__)
+                                capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
+                                screenshot_b64 = None
+                                dni_for_pattern = str(input_data)
+                                pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
+                                for attempt in range(24):
+                                    matching_files = glob.glob(pattern)
+                                    if matching_files:
+                                        latest_image = max(matching_files, key=os.path.getctime)
+                                        try:
+                                            with open(latest_image, 'rb') as img_file:
+                                                img_data = img_file.read()
+                                                screenshot_b64 = base64.b64encode(img_data).decode()
+                                                logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
+                                            break
+                                        except Exception as img_e:
+                                            logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
+                                    time.sleep(0.5)
+                                if not screenshot_b64:
+                                    any_pattern = os.path.join(capturas_dir, 'score_*.png')
+                                    any_files = glob.glob(any_pattern)
+                                    if any_files:
+                                        latest_any = max(any_files, key=os.path.getctime)
+                                        try:
+                                            with open(latest_any, 'rb') as img_file:
+                                                img_data = img_file.read()
+                                                screenshot_b64 = base64.b64encode(img_data).decode()
+                                                logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
+                                        except Exception as img_e:
+                                            logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
+                                score_update = {
+                                    "dni": input_data,
+                                    "score": score_val,
+                                    "etapa": "score_obtenido",
+                                    "info": f"Score obtenido: {score_val}",
+                                    "timestamp": int(time.time() * 1000)
+                                }
+                                if screenshot_b64:
+                                    score_update["image"] = screenshot_b64
+                                send_partial_update(task_id, score_update, status="running")
+                                logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
+                                score_sent = True
+                                if 80 <= score_val <= 89:
+                                    time.sleep(2)
+                                    search_update = {
                                         "dni": input_data,
                                         "score": score_val,
-                                        "etapa": "score_obtenido",
-                                        "info": f"Score obtenido: {score_val}",
+                                        "etapa": "buscando_deudas",
+                                        "info": "Buscando deudas...",
                                         "timestamp": int(time.time() * 1000)
                                     }
-                                    if screenshot_b64:
-                                        score_update["image"] = screenshot_b64
-                                    send_partial_update(task_id, score_update, status="running")
-                                    logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
-                                    score_sent = True
-                                    if 80 <= score_val <= 89:
-                                        time.sleep(2)
-                                        search_update = {
-                                            "dni": input_data,
-                                            "score": score_val,
-                                            "etapa": "buscando_deudas",
-                                            "info": "Buscando deudas...",
-                                            "timestamp": int(time.time() * 1000)
-                                        }
-                                        send_partial_update(task_id, search_update, status="running")
-                                        logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {input_data}")
-                                        searching_sent = True
-                            except Exception as e:
-                                logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
-                if process.poll() is not None:
-                    remaining_out = process.stdout.read()
-                    if remaining_out:
-                        output_lines.extend(remaining_out.split('\n'))
-                    break
-                time.sleep(0.1)
-            stderr_output = process.stderr.read()
+                                    send_partial_update(task_id, search_update, status="running")
+                                    logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {input_data}")
+                                    searching_sent = True
+                        except Exception as e:
+                            logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
+                
+                except queue.Empty:
+                    # No hay líneas en la cola, continuar esperando
+                    continue
+            
+            # Leer stderr
+            stderr_output = process.stderr.read() if process.stderr else ""
             if stderr_output:
                 stderr_lines = stderr_output.split('\n')
                 logger.info(f"[DEBUG] Script stderr: {safe_str(stderr_output, 200)}...")
-            process.wait(timeout=timeout)
+            
+            logger.info(f"[PROCESO] Lectura de output completada")
+            
         except subprocess.TimeoutExpired:
             process.kill()
             logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
@@ -393,8 +521,26 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": f"Error durante procesamiento: {str(e)}"}, status="error")
             return False
 
+        # Asegurarse de que el proceso haya terminado completamente
+        try:
+            process.wait(timeout=10)  # Esperar hasta 10 segundos adicionales
+        except subprocess.TimeoutExpired:
+            logger.warning(f"[WARN] Proceso no terminó en tiempo, forzando kill")
+            process.kill()
+            process.wait()
+
         output = '\n'.join([line for line in output_lines if line])
         stderr_output = '\n'.join([line for line in stderr_lines if line])
+        
+        # Verificar returncode
+        if process.returncode is None:
+            error_msg = "Proceso no terminó correctamente (returncode None)"
+            logger.error(f"[ERROR] {error_msg}")
+            logger.error(f"[STDOUT]: {safe_str(output, 200)}...")
+            logger.error(f"[STDERR]: {safe_str(stderr_output, 200)}...")
+            stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": error_msg}, status="error")
+            return False
         
         if process.returncode != 0:
             error_msg = f"Script falló (código {process.returncode})"
@@ -412,14 +558,41 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": "Script no produjo resultados"}, status="error")
             return False
         
-        # Parsear JSON del output
+        # Parsear JSON del output usando marcadores especiales
         data = None
         try:
-            pos = output.find('{')
-            if pos != -1:
-                data = json.loads(output[pos:])
+            # Buscar el marcador de inicio del JSON
+            start_marker = "===JSON_RESULT_START==="
+            end_marker = "===JSON_RESULT_END==="
+            
+            start_pos = output.find(start_marker)
+            if start_pos != -1:
+                # Encontrar la posición después del marcador de inicio
+                json_start = output.find('\n', start_pos) + 1
+                end_pos = output.find(end_marker, json_start)
+                
+                if end_pos != -1:
+                    json_text = output[json_start:end_pos].strip()
+                    data = json.loads(json_text)
+                    logger.info(f"[JSON] Parseado correctamente usando marcadores")
+                else:
+                    # Fallback: buscar desde el marcador hasta el final
+                    json_text = output[json_start:].strip()
+                    # Intentar encontrar el primer JSON completo
+                    first_brace = json_text.find('{')
+                    if first_brace != -1:
+                        json_text = json_text[first_brace:]
+                        data = json.loads(json_text)
+                        logger.info(f"[JSON] Parseado usando marcador de inicio (sin marcador de fin)")
+            else:
+                # Fallback al método antiguo si no hay marcadores
+                logger.warning(f"[WARN] No se encontraron marcadores JSON, usando fallback")
+                pos = output.find('{')
+                if pos != -1:
+                    data = json.loads(output[pos:])
         except Exception as e:
             logger.warning(f"[WARN] No se pudo parsear JSON de salida: {e}")
+            logger.debug(f"[DEBUG] Output completo:\n{output[:500]}")
             send_partial_update(task_id, {"info": "Error parseando resultado"}, status="error")
             return False
 
@@ -428,17 +601,11 @@ def process_task(task: dict) -> bool:
             send_partial_update(task_id, {"info": "Datos inválidos"}, status="error")
             return False
 
-        # Procesar según el tipo de tarea (no PIN aquí, PIN ya retornó)
-        if "operacion" in task and task.get("operacion") == "pin":
-            # No debería llegar aquí
-            return True
-        elif TIPO == "deudas":
+        # Procesar resultado según el tipo de worker
+        if TIPO == "deudas":
             return process_deudas_result(task_id, input_data, data)
-        elif TIPO == "movimientos":
-            return process_movimientos_result(task_id, input_data, data)
         else:
-            logger.error(f"[ERROR] Tipo desconocido: {TIPO}")
-            return False
+            return process_movimientos_result(task_id, input_data, data)
 
     except subprocess.TimeoutExpired:
         logger.error(f"[ERROR] Timeout ejecutando script para {task_id}")
@@ -580,92 +747,35 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
 
 
 def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
-    """Procesa resultado final del script de deudas (los updates progresivos ya se enviaron en tiempo real)."""
+    """Procesa resultado final del script de deudas.
+    Los updates parciales (score, buscando_deudas) ya fueron enviados en tiempo real.
+    
+    El script deudas.py ahora devuelve:
+    - Si hay Camino A: JSON directo de Camino A (con dni, success, records, fa_actual, cuenta_financiera)
+    - Si no hay Camino A: {dni, score, success}
+    """
     try:
-        score_val = data.get("score", "No encontrado")
-        camino_a_data = data.get("camino_a")
-        
         print(f"\n[DEUDAS] DNI {dni} - Procesando resultado final")
+        print(f"[DEBUG] DATA recibida: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
-        # DEBUG: Mostrar estructura completa de datos RAW del scraping
-        print(f"[DEBUG] DATOS RAW DEL SCRAPING:")
-        print(f"[DEBUG] Score: {score_val}")
-        print(f"[DEBUG] Camino A existe: {camino_a_data is not None}")
-        
-        if camino_a_data:
-            print(f"[DEBUG] Estructura de camino_a:")
-            print(f"[DEBUG]   - dni: {camino_a_data.get('dni')}")
-            print(f"[DEBUG]   - success: {camino_a_data.get('success')}")
-            print(f"[DEBUG]   - records: {camino_a_data.get('records')}")
+        # Verificar si es el JSON completo de Camino A (tiene fa_actual o cuenta_financiera)
+        if "fa_actual" in data or "cuenta_financiera" in data:
+            # Es el JSON directo de Camino A - enviarlo completo
+            final_data = data  # Ya es el JSON completo de Camino A
             
-            fa_actual = camino_a_data.get("fa_actual", [])
-            print(f"[DEBUG]   - fa_actual: {len(fa_actual)} items")
-            for i, item in enumerate(fa_actual):
-                print(f"[DEBUG]     [{i}]: {json.dumps(item, ensure_ascii=False)}")
-            
-            cf_data = camino_a_data.get("cuenta_financiera", [])
-            print(f"[DEBUG]   - cuenta_financiera: {len(cf_data)} niveles")
-            for cf in cf_data:
-                items = cf.get("items", [])
-                print(f"[DEBUG]     nivel_{cf.get('n', 0)}: {len(items)} items")
-                for i, item in enumerate(items):
-                    print(f"[DEBUG]       [{i}]: {json.dumps(item, ensure_ascii=False)}")
-            
-            # Verificar si hay campos adicionales que no estamos procesando
-            all_keys = set(camino_a_data.keys())
-            processed_keys = {"dni", "success", "records", "fa_actual", "cuenta_financiera"}
-            missing_keys = all_keys - processed_keys
-            if missing_keys:
-                print(f"[WARNING] CAMPOS NO PROCESADOS: {missing_keys}")
-                for key in missing_keys:
-                    print(f"[WARNING]   {key}: {camino_a_data.get(key)}")
-        
-        print(f"[DEBUG] =========================================")
-        
-        # Solo enviar el resultado final
-        if camino_a_data:
-            # Limpiar y formatear los datos de Camino A
-            cleaned_camino_a = _clean_and_format_camino_a(camino_a_data)
-            
-            final_data = {
-                "dni": dni,
-                "score": score_val,
-                "etapa": "deudas_completas",
-                "info": "Análisis de deudas completado",
-                "camino_a": cleaned_camino_a,
-                "success": True,
-                "timestamp": int(time.time() * 1000)
-            }
-            
-            print(f"[RESULTADO FINAL] DEUDAS_COMPLETAS:")
-            print(f"  dni: {cleaned_camino_a.get('dni')}")
-            print(f"  success: {cleaned_camino_a.get('success')}")
-            print(f"  records: {json.dumps(cleaned_camino_a.get('records', {}), indent=2)}")
-            
-            # Mostrar FA Cobranzas
-            fa_cobranzas = cleaned_camino_a.get("fa_cobranzas", [])
-            print(f"  fa_cobranzas: [{len(fa_cobranzas)} items]")
-            for idx, fa in enumerate(fa_cobranzas):
-                print(f"    [{idx}]: {json.dumps(fa, indent=6, ensure_ascii=False)}")
-            
-            # Mostrar Resumen de Facturación
-            resumen_data = cleaned_camino_a.get("resumen_facturacion", [])
-            print(f"  resumen_facturacion: [{len(resumen_data)} niveles]")
-            for resumen in resumen_data:
-                print(f"    nivel_{resumen.get('nivel', 0)}: {len(resumen.get('items', []))} items")
-                for idx, item in enumerate(resumen.get('items', [])):
-                    print(f"      [{idx}]: {json.dumps(item, indent=8, ensure_ascii=False)}")
-            
-            # Mostrar campos adicionales si existen
-            additional_fields = {k: v for k, v in cleaned_camino_a.items() 
-                               if k not in ["dni", "success", "records", "fa_cobranzas", "resumen_facturacion"]}
-            if additional_fields:
-                print(f"  campos_adicionales: {json.dumps(additional_fields, indent=2, ensure_ascii=False)}")
-            
-            print(f"\n[JSON COMPLETO ENVIADO AL FRONTEND]:")
+            print(f"[RESULTADO FINAL] DEUDAS COMPLETAS - JSON de Camino A:")
             print(json.dumps(final_data, indent=2, ensure_ascii=False))
+            
+            # Enviar al backend CON el status completed
+            send_result = send_partial_update(task_id, final_data, status="completed")
+            print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
+            
+            print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
+            return True
         else:
-            # Solo score, sin deudas
+            # Solo tiene score básico (sin Camino A)
+            score_val = data.get("score", "No encontrado")
+            
             final_data = {
                 "dni": dni,
                 "score": score_val,
@@ -678,14 +788,16 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
             print(f"[RESULTADO FINAL] SOLO_SCORE:")
             print(f"  score: {score_val}")
             print(f"  info: Score fuera del rango 80-89")
-        
-        # Enviar resultado final
-        send_result = send_partial_update(task_id, final_data, status="completed")
-        print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
-        
-        print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
-        return True
-
+            
+            print(f"\n[JSON ENVIADO AL BACKEND]:")
+            print(json.dumps(final_data, indent=2, ensure_ascii=False))
+            
+            # Enviar resultado final
+            send_result = send_partial_update(task_id, final_data, status="completed")
+            print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
+            
+            print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
+            return True
         
     except Exception as e:
         print(f"[ERROR] DNI {dni}: {e}")
@@ -774,6 +886,15 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     """Envía actualización parcial al backend."""
     partial_data["status"] = status
     payload = {"task_id": task_id, "partial_data": partial_data}
+    
+    # Log detallado del update parcial
+    print(f"\n{'='*80}")
+    print(f"[UPDATE PARCIAL] Task ID: {task_id}")
+    print(f"[UPDATE PARCIAL] Status: {status}")
+    print(f"[UPDATE PARCIAL] Datos enviados:")
+    print(json.dumps(partial_data, indent=2, ensure_ascii=False))
+    print(f"{'='*80}\n")
+    
     result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
         logger.info(f"[PARCIAL] Actualización enviada para {task_id} (status={status})")

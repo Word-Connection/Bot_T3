@@ -116,8 +116,6 @@ def _format_camino_a_for_front(camino_a: dict) -> dict:
 
 
 def main():
-    print("INFO: Iniciando deudas.py", file=sys.stderr)
-
     try:
         if len(sys.argv) < 2:
             result = {"error": "DNI requerido"}
@@ -125,7 +123,6 @@ def main():
             sys.exit(1)
 
         dni = sys.argv[1]
-        print(f"INFO: Procesando DNI {dni}", file=sys.stderr)
 
         # Directorio de capturas
         base_dir = os.path.dirname(__file__)
@@ -133,7 +130,6 @@ def main():
 
         # Limpiar capturas previas
         clean_captures_dir(captures_dir)
-        print(f"INFO: Directorio limpiado: {captures_dir}", file=sys.stderr)
 
         stages = []
 
@@ -146,7 +142,6 @@ def main():
             print(json.dumps(result))
             sys.exit(1)
 
-        print(f"INFO: Ejecutando {script_path}", file=sys.stderr)
         # Ejecutar con el mismo intérprete de Python (asegura usar venv) y pasar coords y shots-dir
         cmd = [sys.executable, script_path, '--dni', dni, '--coords', coords_path, '--shots-dir', captures_dir]
 
@@ -160,9 +155,6 @@ def main():
 
         if result_proc.returncode != 0:
             error_msg = f"Error en Camino C (code {result_proc.returncode})"
-            print(f"ERROR: {error_msg}", file=sys.stderr)
-            print(f"STDOUT:\n{result_proc.stdout}", file=sys.stderr)
-            print(f"STDERR:\n{result_proc.stderr}", file=sys.stderr)
             result = {"error": error_msg, "dni": dni, "stages": []}
             print(json.dumps(result))
             sys.exit(1)
@@ -178,7 +170,6 @@ def main():
         # ENVIAR SCORE A STDOUT PARA QUE EL WORKER LO DETECTE EN TIEMPO REAL
         print(f"Score: {score}")
         sys.stdout.flush()  # FORZAR FLUSH INMEDIATO
-        print(f"INFO: Score obtenido: {score}", file=sys.stderr)
 
         # Buscar captura más reciente
         pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
@@ -188,10 +179,7 @@ def main():
         latest_file = None
         if files:
             latest_file = max(files, key=os.path.getctime)
-            print(f"INFO: Captura encontrada: {latest_file}", file=sys.stderr)
             img_base64 = get_image_base64(latest_file)
-        else:
-            print("WARNING: No se encontró captura", file=sys.stderr)
 
         # Etapa con resultado
         stages.append({
@@ -200,7 +188,22 @@ def main():
             "timestamp": int(os.path.getctime(latest_file)) if latest_file else 0
         })
 
-        # Si el score está entre 80 y 89, ejecutar Camino A con el mismo DNI
+        # ===== ENVIAR UPDATE PARCIAL CON SCORE E IMAGEN =====
+        # Esto permite al worker mostrar el score en el frontend ANTES de ejecutar Camino A
+        score_update = {
+            "dni": dni,
+            "score": score,
+            # "image": img_base64,  # Comentado para no llenar logs
+            "etapa": "score_obtenido",
+            "info": f"Score obtenido: {score}",
+            "timestamp": int(time.time() * 1000)
+        }
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(score_update))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
+
+        # Si el score está entre 80 y 89 (INCLUYE 80 y 89), ejecutar Camino A con el mismo DNI
         try:
             import re as _re
             m = _re.search(r"\d+", str(score))
@@ -209,7 +212,20 @@ def main():
             score_num = None
 
         if score_num is not None and 80 <= score_num <= 89:
-            # Agregar stage intermedio para informar que se está buscando deudas
+            # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
+            buscando_update = {
+                "dni": dni,
+                "score": score,
+                "etapa": "buscando_deudas",
+                "info": f"Score {score_num} elegible. Buscando deudas del cliente...",
+                "timestamp": int(time.time() * 1000)
+            }
+            print("===JSON_PARTIAL_START===")
+            print(json.dumps(buscando_update))
+            print("===JSON_PARTIAL_END===")
+            sys.stdout.flush()
+            
+            # Agregar stage intermedio
             stages.append({
                 "info": f"Score {score_num} elegible. Buscando deudas del cliente...",
                 "image": "",
@@ -217,90 +233,62 @@ def main():
                 "etapa": "buscando_deudas"
             })
             
-            # ENVIAR MENSAJE AL WORKER EN TIEMPO REAL
-            print(f"Ejecutando Camino A para score {score_num}")
-            sys.stdout.flush()
-            
             try:
-                print(f"INFO: Score {score_num} entre 80-89: iniciando Camino A para DNI {dni}", file=sys.stderr)
                 script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
-                print(f"INFO: Script Camino A: {script_a}", file=sys.stderr)
-                print(f"INFO: Coords Camino A: {coords_a}", file=sys.stderr)
-                print(f"INFO: Script existe: {os.path.exists(script_a)}", file=sys.stderr)
-                
                 if os.path.exists(script_a):
-                    cmd_a = [sys.executable, script_a, '--dni', dni, '--coords', coords_a]
-                    print(f"INFO: Comando: {' '.join(cmd_a)}", file=sys.stderr)
-                    print(f"INFO: CWD: {os.path.dirname(script_a)}", file=sys.stderr)
+                    # Simplificar comando: solo pasar --dni como cuando se ejecuta manualmente
+                    # El script usará el DEFAULT_COORDS_FILE si no se especifica --coords
+                    cmd_a = [sys.executable, script_a, '--dni', dni]
                     
-                    # Usar Popen para leer stderr en tiempo real
-                    print(f"INFO: === STDERR DE CAMINO A (inicio en tiempo real) ===", file=sys.stderr)
-                    sys.stderr.flush()
+                    # Ejecutar Camino A de forma simple - solo esperar resultado
+                    print(f"[CaminoA] Iniciando ejecución del Camino A...", flush=True)
                     
-                    a_proc = subprocess.Popen(
-                        cmd_a,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,  # Redirigir stderr a stdout para capturar todo junto
-                        text=True,
-                        cwd=os.path.dirname(script_a),
-                        bufsize=1,  # Line buffered
-                        universal_newlines=True
-                    )
-                    
-                    # Leer salida en tiempo real
-                    stdout_lines = []
                     try:
-                        for line in a_proc.stdout:
-                            stdout_lines.append(line)
-                            # Imprimir en tiempo real (sin \n extra porque line ya lo tiene)
-                            print(f"[CaminoA-RT] {line}", end='', file=sys.stderr)
-                            sys.stderr.flush()
-                        
-                        # Esperar a que termine
-                        a_proc.wait(timeout=1200)
+                        result_a = subprocess.run(
+                            cmd_a,
+                            capture_output=True,
+                            text=True,
+                            cwd=os.path.dirname(script_a),
+                            timeout=1200  # 20 minutos
+                        )
                     except subprocess.TimeoutExpired:
-                        a_proc.kill()
-                        print(f"WARNING: Timeout ejecutando Camino A para DNI {dni}", file=sys.stderr)
                         raise
                     
-                    stdout_full = ''.join(stdout_lines)
-                    returncode = a_proc.returncode
-                    
-                    print(f"INFO: === STDERR DE CAMINO A (fin) ===", file=sys.stderr)
-                    print(f"INFO: Camino A retornó código: {returncode}", file=sys.stderr)
-                    print(f"INFO: Stdout length: {len(stdout_full)}", file=sys.stderr)
+                    returncode = result_a.returncode
+                    stdout_full = result_a.stdout
                     
                     if returncode == 0:
                         print(f"Camino A completado exitosamente")
                         sys.stdout.flush()
-                        print(f"INFO: Camino A finalizado OK para DNI {dni}", file=sys.stderr)
                         
-                        # MOSTRAR STDOUT COMPLETO PARA VER EL JSON
-                        if stdout_full:
-                            print(f"INFO: === STDOUT DE CAMINO A (inicio) ===", file=sys.stderr)
-                            print(stdout_full[:500], file=sys.stderr)  # Primeros 500 caracteres
-                            print(f"INFO: === STDOUT DE CAMINO A (fin muestra) ===", file=sys.stderr)
-                        
-                        # Intentar parsear JSON de Camino A
+                        # Intentar parsear JSON de Camino A desde stdout
                         camino_a_data = None
                         try:
+                            # El JSON está en stdout_full
+                            # Buscar el objeto JSON (empieza con '{' y termina con '}')
                             a_out = stdout_full or ""
-                            pos = a_out.find('{')
-                            if pos != -1:
-                                camino_a_data = json.loads(a_out[pos:])
+                            
+                            # Encontrar el primer '{' que inicia el JSON
+                            json_start = a_out.find('{')
+                            if json_start != -1:
+                                # Encontrar el último '}' que cierra el JSON
+                                json_end = a_out.rfind('}')
+                                if json_end != -1 and json_end > json_start:
+                                    json_str = a_out[json_start:json_end+1]
+                                    camino_a_data = json.loads(json_str)
                         except Exception as e:
-                            print(f"WARNING: No se pudo parsear salida de Camino A: {e}", file=sys.stderr)
+                            print(f"Error parseando JSON de Camino A: {e}")
                             camino_a_data = None
 
-                        # Agregar etapa y adjuntar datos estructurados (versión compacta para front)
+                        # Agregar etapa y adjuntar datos estructurados SIN FILTRAR
                         if camino_a_data:
                             stages.append({
                                 "info": "Camino A ejecutado",
                                 "image": "",
                                 "timestamp": int(time.time()),
-                                "camino_a": _format_camino_a_for_front(camino_a_data)
+                                "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
                             })
                         else:
                             stages.append({
@@ -308,31 +296,15 @@ def main():
                                 "image": "",
                                 "timestamp": int(time.time())
                             })
-                        # DEBUG: Mostrar estructura de datos RAW de Camino A
-                        if camino_a_data:
-                            print(f"DEBUG: Camino A datos RAW - FA Actual: {len(camino_a_data.get('fa_actual', []))} items", file=sys.stderr)
-                            print(f"DEBUG: Camino A datos RAW - Cuenta Financiera: {len(camino_a_data.get('cuenta_financiera', []))} niveles", file=sys.stderr)
-                            
-                            # Mostrar estructura detallada
-                            for key, value in camino_a_data.items():
-                                if isinstance(value, list):
-                                    print(f"DEBUG: {key}: {len(value)} items", file=sys.stderr)
-                                else:
-                                    print(f"DEBUG: {key}: {type(value)} = {str(value)[:100]}", file=sys.stderr)
-                    else:
-                        print(f"ERROR: Camino A falló con código {returncode} para DNI {dni}", file=sys.stderr)
-                        print(f"ERROR: STDOUT de Camino A:\n{stdout_full}", file=sys.stderr)
-                else:
-                    print(f"WARNING: Script Camino A no encontrado en {script_a}", file=sys.stderr)
             except subprocess.TimeoutExpired:
-                print(f"WARNING: Timeout ejecutando Camino A para DNI {dni}", file=sys.stderr)
-            except Exception as e:
-                print(f"WARNING: Error ejecutando Camino A para DNI {dni}: {e}", file=sys.stderr)
+                pass
+            except Exception:
+                pass
 
-        # Preparar respuesta final (incluyendo, si existe, datos de Camino A)
+        # Preparar respuesta final - SOLO el JSON de Camino A si existe
         final_camino_a = None
         try:
-            # Buscar en stages
+            # Buscar en stages el JSON de Camino A
             for st in reversed(stages):
                 if isinstance(st, dict) and 'camino_a' in st:
                     final_camino_a = st['camino_a']
@@ -340,19 +312,44 @@ def main():
         except Exception:
             final_camino_a = None
 
-        result = {
-            "dni": dni,
-            "score": score,
-            "stages": stages,
-            "success": True,
-            "camino_a": final_camino_a if final_camino_a else None
-        }
+        # Si hay datos de Camino A, devolver SOLO ese JSON sin modificar
+        if final_camino_a:
+            result = final_camino_a  # PASAR DIRECTAMENTE EL JSON DE CAMINO A
+        else:
+            # Si no hay Camino A, devolver solo info básica
+            result = {
+                "dni": dni,
+                "score": score,
+                "success": True
+            }
 
-        # Output JSON limpio
+        # ===== MOSTRAR COMPARATIVA: SCRAPING vs BACKEND =====
+        print("\n" + "="*80)
+        print("COMPARATIVA: DATOS DEL SCRAPING vs DATOS AL BACKEND")
+        print("="*80)
+        
+        if final_camino_a:
+            print("\n[SCRAPING - CAMINO A] JSON completo:")
+            print(json.dumps(final_camino_a, indent=2, ensure_ascii=False))
+            
+            print("\n[BACKEND] Mismo JSON (sin modificaciones):")
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print("\n[SCRAPING] Sin datos de Camino A (score fuera de rango 80-89)")
+            print(f"Score obtenido: {score}")
+            
+            print("\n[BACKEND] Solo info básica:")
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        
+        print("="*80 + "\n")
+
+        # Output JSON limpio con marcador especial para que el worker lo identifique
+        print("===JSON_RESULT_START===")
         print(json.dumps(result))
+        print("===JSON_RESULT_END===")
         sys.stdout.flush()
 
-        print("INFO: Procesamiento completado", file=sys.stderr)
+        sys.exit(0)  # Salir explícitamente con código 0 (éxito)
 
     except subprocess.TimeoutExpired:
         result = {"error": "Timeout ejecutando Camino C", "dni": dni, "stages": []}
@@ -361,7 +358,6 @@ def main():
     except Exception as e:
         result = {"error": f"Excepción: {str(e)}", "dni": dni, "stages": []}
         print(json.dumps(result))
-        print(f"ERROR: Excepción no manejada: {e}", file=sys.stderr)
         sys.exit(1)
 
 
