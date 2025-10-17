@@ -32,8 +32,16 @@
     "y": 263
   },
   "client_id_field": {
-    "x": 97,
-    "y": 237
+      "x": 100,
+      "y": 237
+  },
+  "client_name_field": {
+      "x": 36,
+      "y": 236
+  },
+  "copi_id_field": {
+      "x": 77,
+      "y": 241
   },
   "seleccionar_btn": {
     "x": 37,

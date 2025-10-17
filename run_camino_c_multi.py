@@ -22,6 +22,12 @@ except Exception:
     _HAS_MSS = False
 
 try:
+    from pynput.keyboard import Controller as KBController, Key as KBKey
+    _HAS_PYNPUT = True
+except Exception:
+    _HAS_PYNPUT = False
+
+try:
     import pyperclip
 except Exception:
     pyperclip = None
@@ -114,6 +120,31 @@ def _press_enter(delay_after: float):
     time.sleep(delay_after)
 
 
+def _send_down_presses(count: int, interval: float, use_pynput: bool):
+    """Envía flecha abajo 'count' veces. Si use_pynput y disponible, usa pynput (Key.down
+    con press/release explícito). Si no, usa pyautogui.press.
+    """
+    if use_pynput and _HAS_PYNPUT:
+        kb = KBController()
+        print(f"[CaminoC] Navegación con pynput: {count} x Key.down (interval={interval}s)")
+        for i in range(count):
+            print(f"[CaminoC]   -> press(Key.down) #{i+1}")
+            kb.press(KBKey.down)
+            time.sleep(0.04)
+            kb.release(KBKey.down)
+            time.sleep(interval)
+        return
+    # Fallback pyautogui
+    print(f"[CaminoC] Navegación con pyautogui: {count} x down (interval={interval}s)")
+    try:
+        pg.press('down', presses=count, interval=interval)
+    except TypeError:
+        for i in range(count):
+            print(f"[CaminoC]   -> press('down') #{i+1}")
+            pg.press('down')
+            time.sleep(interval)
+
+
 def _get_clipboard_text() -> str:
     if pyperclip:
         try:
@@ -171,6 +202,122 @@ def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float)
     if step_delays and index < len(step_delays):
         return step_delays[index]
     return fallback
+
+
+def _stable_copy_text_simple(max_attempts: int = 8) -> str:
+    """Copia con Ctrl+C varias veces hasta obtener contenido estable.
+    Versión simplificada para Camino C."""
+    result = ''
+    last = None
+    stable = 0
+    for attempt in range(max_attempts):
+        pg.hotkey('ctrl','c')
+        time.sleep(0.2)
+        txt = _get_clipboard_text() or ''
+        if txt and txt == last:
+            stable += 1
+            if stable >= 1:  # Solo necesitamos 2 lecturas iguales
+                result = txt
+                break
+        else:
+            last = txt
+            stable = 0
+    return result or last or ''
+
+
+def _validate_selected_record_c(conf: Dict[str, Any], base_delay: float, max_copy_attempts: int = 3) -> str:
+    """Valida si el registro seleccionado es estable o corrupto (versión Camino C).
+    Proceso:
+    1. Espera 1.5s
+    2. Presiona Enter UNA VEZ
+    3. Espera 1.5s
+    4. Va al área del ID, hace right-click, copia con copi_id_field
+    5. Si copia números (4+ dígitos) O contiene "Seleccionar" → CORRUPTO
+    6. Si copia cualquier otra cosa → FUNCIONAL (continuar)
+    
+    Retorna:
+    - "Funcional": registro estable, continuar flujo normal
+    - "Corrupto": tiene números en el ID O contiene "Seleccionar", debe ir al siguiente
+    """
+    print("[CaminoC] Validando registro seleccionado...")
+    time.sleep(1.5)
+    
+    # Presionar Enter UNA SOLA VEZ
+    pg.press('enter')
+    print("[CaminoC] Enter presionado")
+    time.sleep(1.5)
+    
+    # Ir al área del nombre para validar si está corrupto
+    x, y = _xy(conf, 'client_name_field')
+    if not (x or y):
+        print("[CaminoC] WARNING: client_name_field no definido, asumiendo funcional")
+        return "Funcional"
+    
+    print(f"[CaminoC] Right-click en client_name_field ({x},{y}) para validar corrupción")
+    pg.click(x, y, button='right')
+    time.sleep(0.5)
+    
+    # Click en copi_id_field para copiar el ID
+    cx, cy = _xy(conf, 'copi_id_field')
+    if not (cx or cy):
+        print("[CaminoC] WARNING: copi_id_field no definido, asumiendo funcional")
+        return "Funcional"
+    
+    print(f"[CaminoC] Click en copi_id_field ({cx},{cy}) para copiar")
+    _click(cx, cy, 'copi_id_field', 0.3)
+    time.sleep(0.5)
+    
+    # Leer el ID del clipboard (ya copiado por el click)
+    id_copied = ""
+    for attempt in range(max_copy_attempts):
+        print(f"[CaminoC] Intento de lectura ID {attempt + 1}/{max_copy_attempts}")
+        
+        # Solo leer del clipboard, sin hacer Ctrl+C
+        if pyperclip:
+            try:
+                txt = pyperclip.paste()
+                id_copied = (txt or '').strip()
+            except Exception as e:
+                print(f"[CaminoC] Error al leer clipboard: {e}")
+                id_copied = ""
+        else:
+            print("[CaminoC] pyperclip no disponible")
+            id_copied = ""
+        
+        print(f"[CaminoC] ID copiado: '{id_copied}'")
+        
+        if id_copied:
+            break
+        
+        if attempt < max_copy_attempts - 1:
+            print("[CaminoC] Reintentando lectura...")
+            time.sleep(0.5)
+    
+    # Validar si tiene números (4+ dígitos) O contiene "Seleccionar" → CORRUPTO
+    # Cualquier otra cosa (texto, vacío, etc.) → FUNCIONAL
+    
+    # 1. Verificar si contiene "Seleccionar"
+    if 'Seleccionar' in id_copied or 'seleccionar' in id_copied.lower():
+        print(f"[CaminoC] 'Seleccionar' encontrado → CORRUPTO")
+        print("[CaminoC] Registro CORRUPTO (contiene 'Seleccionar')")
+        return "Corrupto"
+    
+    # 2. Verificar si tiene números de 4+ dígitos
+    numbers_found = re.findall(r'\d+', id_copied)
+    has_numbers = False
+    
+    for num in numbers_found:
+        if len(num) >= 4:
+            print(f"[CaminoC] Números encontrados: {num} (>= 4 dígitos) → CORRUPTO")
+            has_numbers = True
+            break
+    
+    if has_numbers:
+        print("[CaminoC] Registro CORRUPTO (tiene secuencia de números)")
+        return "Corrupto"
+    else:
+        print(f"[CaminoC] Registro FUNCIONAL (sin números de 4+ dígitos ni 'Seleccionar')")
+        return "Funcional"
 
 
 def _capture_region(rx: int, ry: int, rw: int, rh: int, out_path: Path) -> bool:
@@ -385,9 +532,133 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     else:
         x,y = _xy(conf,'dni_field'); _click(x,y,'dni_field', 0.2); _type(dni, _step_delay(step_delays,3,base_delay))
     _press_enter(_step_delay(step_delays,4,post_enter))
-    x,y = _xy(conf,'client_id_field'); time.sleep(2.5); _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
-    x,y = _xy(conf,'seleccionar_btn'); _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
-    # Espera extra después de seleccionar_btn para que cargue la página
+    
+    # NUEVO: Validación de cliente creado/no creado
+    print("[CaminoC] Validando si cliente está creado...")
+    time.sleep(2.5)
+    
+    # Right-click en client_name_field
+    x,y = _xy(conf,'client_name_field')
+    if not (x or y):
+        print("[CaminoC] ERROR: client_name_field no definido")
+        print("CLIENTE NO CREADO")
+        return
+    
+    print(f"[CaminoC] Right-click en client_name_field ({x},{y})")
+    pg.click(x, y, button='right')
+    time.sleep(0.5)
+    
+    # Click en copi_id_field para copiar el ID
+    cx, cy = _xy(conf,'copi_id_field')
+    if not (cx or cy):
+        print("[CaminoC] ERROR: copi_id_field no definido")
+        print("CLIENTE NO CREADO")
+        return
+    
+    print(f"[CaminoC] Click en copi_id_field ({cx},{cy}) para copiar ID")
+    _click(cx, cy, 'copi_id_field', 0.3)
+    time.sleep(0.5)
+    
+    # Copiar y validar el ID
+    copied_id = _stable_copy_text_simple(max_attempts=5)
+    copied_id_clean = (copied_id or '').strip()
+    
+    print(f"[CaminoC] ID copiado: '{copied_id_clean}'")
+    
+    # Validar si tiene 4 o más dígitos consecutivos
+    numbers_found = re.findall(r'\d+', copied_id_clean)
+    has_valid_id = False
+    
+    for num in numbers_found:
+        if len(num) >= 4:
+            print(f"[CaminoC] ID válido encontrado: {num} (>= 4 dígitos)")
+            has_valid_id = True
+            break
+    
+    if not has_valid_id:
+        print("[CaminoC] No se encontró ID válido (sin números de 4+ dígitos)")
+        print("CLIENTE NO CREADO")
+        
+        # Imprimir score para que deudas.py lo detecte
+        print("Score obtenido: CLIENTE NO CREADO")
+        
+        # Devolver JSON estructurado para el worker con marcadores
+        result = {
+            "dni": dni,
+            "score": "CLIENTE NO CREADO",
+            "etapa": "cliente_no_creado",
+            "info": "Cliente no creado - No se encontró ID válido",
+            "success": True,
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        # Imprimir con marcadores para que el worker lo parsee correctamente
+        print("===JSON_RESULT_START===")
+        print(json.dumps(result))
+        print("===JSON_RESULT_END===")
+        
+        # Cerrar tab y volver a home antes de terminar
+        print("[CaminoC] Cerrando tab y volviendo a home...")
+        x,y = _xy(conf,'close_tab_btn')
+        if x or y:
+            _multi_click(x, y, 'close_tab_btn (left x5)', times=5, button='left', interval=0.3)
+        
+        hx, hy = _xy(conf,'home_area')
+        if hx or hy:
+            time.sleep(0.5)
+            _click(hx, hy, 'home_area', base_delay)
+        
+        print("[CaminoC] Finalizado - Cliente no creado")
+        return
+    
+    print("[CaminoC] Cliente creado verificado, seleccionando client_id_field")
+    
+    # Click en client_id_field para continuar con el flujo normal
+    x,y = _xy(conf,'client_id_field')
+    _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
+    
+    # Validación de registro estable/corrupto (Camino C)
+    # Note: Camino C no tiene records_total, así que intentamos máximo 10 veces (valor razonable)
+    max_validation_attempts = 10
+    validation_success = False
+    current_offset = 0
+    
+    for validation_attempt in range(max_validation_attempts):
+        print(f"[CaminoC] Intento de validación {validation_attempt + 1}/{max_validation_attempts}")
+        
+        # Click seleccionar_btn
+        x,y = _xy(conf,'seleccionar_btn')
+        _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
+        
+        # Validar si el registro es estable o corrupto
+        validation_result = _validate_selected_record_c(conf, base_delay)
+        
+        if validation_result == "Funcional":
+            print("[CaminoC] Registro funcional (sin números en ID), continuando con flujo normal")
+            validation_success = True
+            break
+        else:  # "Corrupto" - tiene números en el ID
+            print("[CaminoC] Registro corrupto (tiene números en ID), intentando con el siguiente")
+            # Esperar 1 segundo antes de continuar
+            time.sleep(1.0)
+            # Incrementar offset
+            current_offset += 1
+            
+            # Volver a client_id_field y navegar hacia abajo
+            x,y = _xy(conf,'client_id_field')
+            _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
+            time.sleep(0.3)
+            
+            print(f"[CaminoC] Navegando al siguiente registro (offset total: {current_offset})")
+            # Usar pynput como en Camino A
+            use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+            _send_down_presses(1, 0.15, use_pynput)
+    
+    if not validation_success:
+        print("[CaminoC] ADVERTENCIA: No se encontró registro válido tras todos los intentos")
+        # Continuar de todos modos con el último registro probado
+    
+    # Espera extra después de validación
     time.sleep(2.0)
 
     # Nombre cliente

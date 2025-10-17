@@ -1,7 +1,60 @@
 {
-  "created_at": "2025-10-16T14:31:33",
-  "duration": 1.5493166000233032,
-  "events": [],
+  "created_at": "2025-10-17T14:43:37",
+  "duration": 6.922297300014179,
+  "events": [
+    {
+      "t": 4.137542999989819,
+      "type": "mouse_click",
+      "x": 36,
+      "y": 236,
+      "button": "Button.right",
+      "pressed": true
+    },
+    {
+      "t": 4.142807800031733,
+      "type": "key_down",
+      "key": "<255>"
+    },
+    {
+      "t": 4.1429548999876715,
+      "type": "key_up",
+      "key": "<255>"
+    },
+    {
+      "t": 4.145980000030249,
+      "type": "key_down",
+      "key": "<255>"
+    },
+    {
+      "t": 4.146561300032772,
+      "type": "key_up",
+      "key": "<255>"
+    },
+    {
+      "t": 4.305502100032754,
+      "type": "mouse_click",
+      "x": 37,
+      "y": 236,
+      "button": "Button.right",
+      "pressed": false
+    },
+    {
+      "t": 6.1855518000083975,
+      "type": "mouse_click",
+      "x": -718,
+      "y": 849,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 6.265528100018855,
+      "type": "mouse_click",
+      "x": -718,
+      "y": 849,
+      "button": "Button.left",
+      "pressed": false
+    }
+  ],
   "meta": {
     "include_moves": false,
     "move_interval": 0.12,
