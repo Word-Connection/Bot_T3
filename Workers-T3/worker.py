@@ -13,6 +13,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from datetime import datetime
 import pytz
 import re
+import websocket
+import threading
 
 load_dotenv()
 os.makedirs("logs", exist_ok=True)
@@ -75,6 +77,12 @@ POLL_INTERVAL = args.poll_interval
 API_KEY = args.api_key
 TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
 VALID_TASK_TYPES = ["deudas", "movimientos"]
+
+# WebSocket globals
+ws_connected = False
+ws_connection = None
+task_queue = []
+task_queue_lock = threading.Lock()
 
 stats = {
     "tasks_completed": 0,
@@ -145,6 +153,22 @@ def register_pc() -> bool:
     if result and result.get("status") == "ok":
         logger.info(f"[OK] PC registrada correctamente | pc_id={result.get('pc_id')}, tipo={result.get('tipo')}")
         return True
+    logger.error(f"[ERROR] No se pudo registrar PC")
+    return False
+
+def send_heartbeat() -> bool:
+    """Envía heartbeat al backend para mantener la PC como online"""
+    try:
+        # El backend actualiza el heartbeat automáticamente en get_task
+        # pero también podemos usar register_pc para mantener online
+        result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
+        if result and result.get("status") == "ok":
+            logger.debug(f"[HEARTBEAT] Enviado correctamente")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"[HEARTBEAT] Error: {e}")
+        return False
     logger.error("[ERROR] Fallo en registro de PC")
     return False
 
@@ -294,7 +318,7 @@ def process_task(task: dict) -> bool:
             [python_executable, '-u', script_path, input_data],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd=os.path.dirname(script_path),
+            # NO cambiar cwd para que las rutas relativas funcionen
             text=True,
             encoding='utf-8',
             errors='replace',
@@ -883,21 +907,43 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
 
 
 def send_partial_update(task_id: str, partial_data: dict, status: str = "running"):
-    """Envía actualización parcial al backend."""
+    """Envía actualización parcial al backend por WebSocket o HTTP."""
     partial_data["status"] = status
-    payload = {"task_id": task_id, "partial_data": partial_data}
     
-    # Log detallado del update parcial
+    # Log detallado del update parcial (sin imagen para no llenar consola)
     print(f"\n{'='*80}")
     print(f"[UPDATE PARCIAL] Task ID: {task_id}")
     print(f"[UPDATE PARCIAL] Status: {status}")
     print(f"[UPDATE PARCIAL] Datos enviados:")
-    print(json.dumps(partial_data, indent=2, ensure_ascii=False))
+    
+    # Crear copia sin imagen para logging
+    log_data = partial_data.copy()
+    if "image" in log_data:
+        img_size = len(log_data["image"]) if log_data["image"] else 0
+        log_data["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
+    
+    print(json.dumps(log_data, indent=2, ensure_ascii=False))
     print(f"{'='*80}\n")
     
+    # Intentar enviar por WebSocket primero (más rápido)
+    if ws_connected and ws_connection:
+        try:
+            message = {
+                "type": "task_update",
+                "task_id": task_id,
+                "partial_data": partial_data
+            }
+            ws_connection.send(json.dumps(message))
+            logger.info(f"[WS-UPDATE] Actualización enviada por WebSocket para {task_id} (status={status})")
+            return True
+        except Exception as e:
+            logger.warning(f"[WS-UPDATE] Error enviando por WebSocket: {e}, usando HTTP como fallback")
+    
+    # Fallback a HTTP si WebSocket no está disponible
+    payload = {"task_id": task_id, "partial_data": partial_data}
     result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
-        logger.info(f"[PARCIAL] Actualización enviada para {task_id} (status={status})")
+        logger.info(f"[HTTP-UPDATE] Actualización enviada para {task_id} (status={status})")
         return True
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
@@ -913,30 +959,117 @@ def task_done(task_id: str, execution_time: int, success: bool = True) -> bool:
     }
     
     try:
-        result = make_request("POST", "/workers/task_done", payload)
+        # Intentar sin retry para evitar delays en caso de 404
+        url = f"{BACKEND}/workers/task_done"
+        headers = {"X-API-KEY": API_KEY}
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+        
         if result and result.get("status") == "ok":
             status_text = "exitosamente" if success else "con errores"
             logger.info(f"[ENVIADO] Tarea {task_id} completada {status_text} en {execution_time}s")
             return True
         logger.error(f"[ERROR] Fallo reportando tarea {task_id}")
         return False
+    except requests.exceptions.HTTPError as e:
+        # Si es 404, no reintentar - simplemente continuar
+        if e.response and e.response.status_code == 404:
+            logger.warning(f"[WARNING] Endpoint task_done no encontrado (404) - continuando sin reintentos")
+            return True
+        logger.error(f"[ERROR] Error HTTP reportando tarea {task_id}: {e}")
+        return False
     except Exception as e:
-        # Manejar casos especiales como tareas PIN que no tienen lock en el backend
-        error_str = str(e)
-        if ("404" in error_str or "Not Found" in error_str or 
-            isinstance(e, RetryError) and "404" in str(e.last_attempt.exception())):
-            logger.warning(f"[WARNING] Tarea {task_id} no encontrada en backend (posiblemente PIN) - continuando")
-            return True  # Consideramos exitoso para no bloquear el worker
-        else:
-            logger.error(f"[ERROR] Error reportando tarea {task_id}: {e}")
-            return False
+        logger.error(f"[ERROR] Error reportando tarea {task_id}: {e}")
+        return False
 
+
+# -----------------------------
+# WebSocket handlers
+# -----------------------------
+def on_ws_message(ws, message):
+    """Callback cuando se recibe un mensaje del WebSocket"""
+    global task_queue, task_queue_lock
+    try:
+        data = json.loads(message)
+        msg_type = data.get("type")
+        
+        if msg_type == "connected":
+            logger.info(f"[WS] {data.get('message', 'Conectado')}")
+        elif msg_type == "new_task":
+            # Nueva tarea disponible - obtenerla usando get_task()
+            logger.info(f"[WS] Notificación de nueva tarea recibida")
+            # Trigger para obtener tarea inmediatamente
+            with task_queue_lock:
+                task_queue.append({"trigger": "fetch"})
+        else:
+            logger.debug(f"[WS] Mensaje recibido: {data}")
+    except json.JSONDecodeError as e:
+        logger.error(f"[WS] Error parseando mensaje: {e}")
+    except Exception as e:
+        logger.error(f"[WS] Error procesando mensaje: {e}")
+
+def on_ws_error(ws, error):
+    """Callback cuando hay un error en el WebSocket"""
+    logger.error(f"[WS] Error: {error}")
+
+def on_ws_close(ws, close_status_code, close_msg):
+    """Callback cuando se cierra el WebSocket"""
+    global ws_connected
+    ws_connected = False
+    logger.warning(f"[WS] Conexión cerrada (code: {close_status_code}, msg: {close_msg})")
+
+def on_ws_open(ws):
+    """Callback cuando se abre el WebSocket"""
+    global ws_connected
+    ws_connected = True
+    logger.info(f"[WS] Conexión establecida con el backend")
+
+def connect_websocket():
+    """Conecta al WebSocket del backend"""
+    global ws_connection
+    
+    # Convertir HTTP URL a WebSocket URL
+    ws_url = BACKEND.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_url}/workers/ws/{PC_ID}"
+    
+    logger.info(f"[WS] Conectando a {ws_url}")
+    
+    ws_connection = websocket.WebSocketApp(
+        ws_url,
+        on_message=on_ws_message,
+        on_error=on_ws_error,
+        on_close=on_ws_close,
+        on_open=on_ws_open
+    )
+    
+    # Ejecutar en un thread separado
+    ws_thread = threading.Thread(target=ws_connection.run_forever, daemon=True)
+    ws_thread.start()
+    
+    # Esperar a que se conecte
+    for i in range(10):
+        if ws_connected:
+            return True
+        time.sleep(0.5)
+    
+    logger.error("[WS] No se pudo establecer conexión en 5 segundos")
+    return False
+
+def get_task_from_queue():
+    """Obtiene una tarea de la cola local (llenada por WebSocket)"""
+    global task_queue, task_queue_lock
+    
+    with task_queue_lock:
+        if task_queue:
+            return task_queue.pop(0)
+    return None
 
 # -----------------------------
 # Loop principal
 # -----------------------------
 def main_loop():
-    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Poll: {POLL_INTERVAL}s")
+    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Modo: WebSocket")
     
     # Crear directorio de logs
     os.makedirs("logs", exist_ok=True)
@@ -951,39 +1084,90 @@ def main_loop():
         logger.error("[ERROR] No se pudo registrar después de 5 intentos. Terminando.")
         sys.exit(1)
     
+    # Conectar WebSocket
+    logger.info("[WS] Iniciando conexión WebSocket...")
+    if not connect_websocket():
+        logger.error("[WS] No se pudo conectar al WebSocket. Intentando con polling como fallback...")
+        use_websocket = False
+    else:
+        logger.info("[WS] Conectado exitosamente. Esperando tareas...")
+        use_websocket = True
+    
     last_stats_log = time.time()
+    last_reconnect_attempt = time.time()
+    last_heartbeat = time.time()
+    last_task_poll = time.time()  # Para hacer polling periódico
     
     while True:
         try:
+            # Enviar heartbeat cada 30 segundos
+            if time.time() - last_heartbeat > 30:
+                send_heartbeat()
+                last_heartbeat = time.time()
+            
             if time.time() - last_stats_log > 60:
                 log_stats()
                 last_stats_log = time.time()
             
-            task = get_task()
-            if task:
-                start_time = time.time()
-                success = process_task(task)
-                execution_time = int(time.time() - start_time)
-                
-                if success:
-                    if task_done(task["task_id"], execution_time, success=True):
-                        stats["tasks_completed"] += 1
-                    else:
-                        stats["tasks_failed"] += 1
-                else:
-                    stats["tasks_failed"] += 1
-                    task_done(task["task_id"], execution_time, success=False)
+            # Reconectar WebSocket si se desconectó
+            if use_websocket and not ws_connected and time.time() - last_reconnect_attempt > 10:
+                logger.warning("[WS] Intentando reconectar...")
+                if connect_websocket():
+                    logger.info("[WS] Reconectado exitosamente")
+                last_reconnect_attempt = time.time()
             
-            time.sleep(POLL_INTERVAL)
+            # Obtener tarea (WebSocket + polling híbrido)
+            task = None
+            
+            if use_websocket:
+                # Revisar si hay notificación de nueva tarea por WebSocket
+                trigger = get_task_from_queue()
+                if trigger:
+                    # Hay notificación, obtener tarea inmediatamente
+                    logger.debug("[WS] Trigger recibido, obteniendo tarea...")
+                    task = get_task()
+                
+                # IMPORTANTE: También hacer polling cada 5 segundos por si acaso
+                # el WebSocket no está funcionando correctamente o no se reciben notificaciones
+                if not task and time.time() - last_task_poll > 5:
+                    task = get_task()
+                    last_task_poll = time.time()
+                
+                # Si no hay tarea, esperar un poco
+                if not task:
+                    time.sleep(0.5)
+                    continue
+            else:
+                # Fallback a polling si WebSocket falló
+                task = get_task()
+                if not task:
+                    time.sleep(POLL_INTERVAL)
+                    continue
+            
+            # Procesar tarea
+            start_time = time.time()
+            success = process_task(task)
+            execution_time = int(time.time() - start_time)
+            
+            # No llamar a task_done - el backend lo hace automáticamente
+            # cuando recibe el update con status="completed"
+            if success:
+                stats["tasks_completed"] += 1
+                logger.info(f"[COMPLETADO] Tarea {task['task_id']} procesada exitosamente")
+            else:
+                stats["tasks_failed"] += 1
+                logger.error(f"[FALLIDA] Tarea {task['task_id']} falló")
         
         except KeyboardInterrupt:
             logger.info("[DETENIDO] Worker detenido por usuario")
+            if ws_connection:
+                ws_connection.close()
             log_stats()
             sys.exit(0)
         except Exception as e:
             logger.error(f"[ERROR] Inesperado en loop principal: {e}")
             stats["connection_errors"] += 1
-            time.sleep(POLL_INTERVAL)
+            time.sleep(1)
 
 
 # -----------------------------

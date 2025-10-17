@@ -293,22 +293,22 @@ def _validate_selected_record_c(conf: Dict[str, Any], base_delay: float, max_cop
             print("[CaminoC] Reintentando lectura...")
             time.sleep(0.5)
     
-    # Validar si tiene números (4+ dígitos) O contiene "Seleccionar" → CORRUPTO
-    # Cualquier otra cosa (texto, vacío, etc.) → FUNCIONAL
+    # Validar si tiene numeros (4+ digitos) O contiene "Seleccionar" = CORRUPTO
+    # Cualquier otra cosa (texto, vacio, etc.) = FUNCIONAL
     
     # 1. Verificar si contiene "Seleccionar"
     if 'Seleccionar' in id_copied or 'seleccionar' in id_copied.lower():
-        print(f"[CaminoC] 'Seleccionar' encontrado → CORRUPTO")
+        print(f"[CaminoC] 'Seleccionar' encontrado = CORRUPTO")
         print("[CaminoC] Registro CORRUPTO (contiene 'Seleccionar')")
         return "Corrupto"
     
-    # 2. Verificar si tiene números de 4+ dígitos
+    # 2. Verificar si tiene numeros de 4+ digitos
     numbers_found = re.findall(r'\d+', id_copied)
     has_numbers = False
     
     for num in numbers_found:
         if len(num) >= 4:
-            print(f"[CaminoC] Números encontrados: {num} (>= 4 dígitos) → CORRUPTO")
+            print(f"[CaminoC] Numeros encontrados: {num} (>= 4 digitos) = CORRUPTO")
             has_numbers = True
             break
     
@@ -559,10 +559,15 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     _click(cx, cy, 'copi_id_field', 0.3)
     time.sleep(0.5)
     
-    # Copiar y validar el ID
-    copied_id = _stable_copy_text_simple(max_attempts=5)
-    copied_id_clean = (copied_id or '').strip()
+    # Leer el ID del clipboard (ya copiado por el click, sin hacer Ctrl+C)
+    copied_id = ""
+    if pyperclip:
+        try:
+            copied_id = pyperclip.paste()
+        except Exception as e:
+            print(f"[CaminoC] Error al leer clipboard: {e}")
     
+    copied_id_clean = (copied_id or '').strip()
     print(f"[CaminoC] ID copiado: '{copied_id_clean}'")
     
     # Validar si tiene 4 o más dígitos consecutivos

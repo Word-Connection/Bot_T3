@@ -145,17 +145,32 @@ def main():
         # Ejecutar con el mismo intérprete de Python (asegura usar venv) y pasar coords y shots-dir
         cmd = [sys.executable, script_path, '--dni', dni, '--coords', coords_path, '--shots-dir', captures_dir]
 
+        # NO cambiar cwd para que las rutas relativas funcionen correctamente
         result_proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            cwd=os.path.dirname(script_path),
             timeout=300  # Timeout de 5 minutos
         )
 
         if result_proc.returncode != 0:
+            # Mostrar stderr completo para debugging
+            stderr_output = result_proc.stderr.strip() if result_proc.stderr else "No stderr"
+            stdout_output = result_proc.stdout.strip() if result_proc.stdout else "No stdout"
             error_msg = f"Error en Camino C (code {result_proc.returncode})"
-            result = {"error": error_msg, "dni": dni, "stages": []}
+            
+            # Imprimir stderr completo a stderr para que el worker lo capture
+            print(f"\n=== STDERR COMPLETO DE CAMINO C ===", file=sys.stderr)
+            print(stderr_output, file=sys.stderr)
+            print(f"=== FIN STDERR ===\n", file=sys.stderr)
+            
+            result = {
+                "error": error_msg, 
+                "dni": dni, 
+                "stages": [],
+                "stderr": stderr_output[:1000],  # Primeros 1000 caracteres
+                "stdout": stdout_output[:500]    # Primeros 500 de stdout también
+            }
             print(json.dumps(result))
             sys.exit(1)
 
@@ -208,8 +223,14 @@ def main():
             import re as _re
             m = _re.search(r"\d+", str(score))
             score_num = int(m.group(0)) if m else None
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG] Error parseando score: {e}", file=sys.stderr)
             score_num = None
+
+        print(f"[DEBUG] Score parseado: score='{score}', score_num={score_num}, tipo={type(score_num)}", file=sys.stderr)
+        print(f"[DEBUG] Condición: score_num is not None = {score_num is not None}", file=sys.stderr)
+        if score_num is not None:
+            print(f"[DEBUG] Rango: 80 <= {score_num} <= 89 = {80 <= score_num <= 89}", file=sys.stderr)
 
         if score_num is not None and 80 <= score_num <= 89:
             # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
@@ -237,6 +258,10 @@ def main():
                 script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
+                print(f"[DEBUG] base_dir={base_dir}", file=sys.stderr)
+                print(f"[DEBUG] script_a calculado={script_a}", file=sys.stderr)
+                print(f"[DEBUG] script_a existe? {os.path.exists(script_a)}", file=sys.stderr)
+                
                 if os.path.exists(script_a):
                     # Simplificar comando: solo pasar --dni como cuando se ejecuta manualmente
                     # El script usará el DEFAULT_COORDS_FILE si no se especifica --coords
@@ -246,11 +271,11 @@ def main():
                     print(f"[CaminoA] Iniciando ejecución del Camino A...", flush=True)
                     
                     try:
+                        # NO cambiar cwd para que las rutas relativas funcionen
                         result_a = subprocess.run(
                             cmd_a,
                             capture_output=True,
                             text=True,
-                            cwd=os.path.dirname(script_a),
                             timeout=1200  # 20 minutos
                         )
                     except subprocess.TimeoutExpired:
@@ -258,9 +283,14 @@ def main():
                     
                     returncode = result_a.returncode
                     stdout_full = result_a.stdout
+                    stderr_full = result_a.stderr
+                    
+                    print(f"[DEBUG] Camino A returncode={returncode}", file=sys.stderr)
+                    print(f"[DEBUG] Camino A stdout length={len(stdout_full) if stdout_full else 0}", file=sys.stderr)
+                    print(f"[DEBUG] Camino A stderr length={len(stderr_full) if stderr_full else 0}", file=sys.stderr)
                     
                     if returncode == 0:
-                        print(f"Camino A completado exitosamente")
+                        print(f"[CaminoA] Camino A completado exitosamente")
                         sys.stdout.flush()
                         
                         # Intentar parsear JSON de Camino A desde stdout
@@ -296,8 +326,32 @@ def main():
                                 "image": "",
                                 "timestamp": int(time.time())
                             })
+                    else:
+                        # Camino A falló
+                        print(f"[CaminoA] ERROR: Camino A falló con código {returncode}", file=sys.stderr)
+                        if stderr_full:
+                            print(f"[CaminoA] STDERR: {stderr_full[:500]}", file=sys.stderr)
+                        if stdout_full:
+                            print(f"[CaminoA] STDOUT: {stdout_full[:500]}", file=sys.stderr)
+                        stages.append({
+                            "info": f"Camino A falló (código {returncode})",
+                            "image": "",
+                            "timestamp": int(time.time())
+                        })
             except subprocess.TimeoutExpired:
-                pass
+                print(f"[CaminoA] ERROR: Timeout ejecutando Camino A", file=sys.stderr)
+                stages.append({
+                    "info": "Camino A: Timeout",
+                    "image": "",
+                    "timestamp": int(time.time())
+                })
+            except Exception as e:
+                print(f"[CaminoA] ERROR: Excepción ejecutando Camino A: {e}", file=sys.stderr)
+                stages.append({
+                    "info": f"Camino A: Error ({str(e)})",
+                    "image": "",
+                    "timestamp": int(time.time())
+                })
             except Exception:
                 pass
 
