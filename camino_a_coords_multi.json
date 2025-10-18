@@ -65,12 +65,20 @@
     "y": 351
   },
   "fa_seleccion": {
-    "x": 586,
-    "y": 436
+      "x": 536,
+      "y": 435
+  },
+    "fa_seleccion_copy": {
+      "x": 595,
+      "y": 447
   },
   "fa_deuda": {
     "x": 16,
     "y": 211
+  },
+  "fa_deuda_copy": {
+    "x": 67,
+    "y": 297
   },
   "fa_area_copy": {
     "x": 28,
