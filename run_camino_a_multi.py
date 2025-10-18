@@ -477,6 +477,30 @@ def _currency_like(txt: str) -> bool:
     return ("," in s or "." in s)
 
 
+def _read_clipboard_only(max_attempts: int = 3, read_delay: float = 0.2) -> str:
+    """Lee el portapapeles SIN hacer Ctrl+C.
+    Útil después de clicks manuales que ya copian automáticamente.
+    Intenta varias veces hasta obtener lecturas consecutivas iguales.
+    """
+    last = None
+    stable_count = 0
+    for attempt in range(max_attempts):
+        time.sleep(read_delay)
+        txt = _get_clipboard_text() or ''
+        if txt:
+            print(f"[CaminoA]   -> portapapeles (lectura {attempt+1}): '{txt[:60]}{'...' if len(txt)>60 else ''}'")
+        
+        if txt == last and txt:
+            stable_count += 1
+            if stable_count >= 1:  # 2 lecturas iguales = estable
+                return txt
+        else:
+            last = txt
+            stable_count = 0
+    
+    return last or ''
+
+
 def _stable_copy_text(max_attempts: int = 10, consecutive: int = 2, read_delay: float = 0.12,
                       require_non_empty: bool = True, validator: Optional[Any] = None,
                       clear_first: bool = False, require_changed: bool = False) -> str:
@@ -553,15 +577,16 @@ def _right_click_copy_text(x: int, y: int, conf: Dict[str, Any], max_attempts: i
     Parámetros idénticos a _stable_copy_text() pero usa método de menú contextual.
     - x, y: coordenadas base donde hacer right-click
     - conf: configuración con context_menu_copy_offset_x y context_menu_copy_offset_y
+    
+    Si después de 3 intentos consecutivos el clipboard mantiene el mismo valor,
+    se considera que ese es el valor correcto y se retorna.
     """
     offset_x = conf.get('context_menu_copy_offset_x', 26)
     offset_y = conf.get('context_menu_copy_offset_y', 12)
     
     baseline = _get_clipboard_text() if require_changed else None
-    last = None
-    stable_count = 0
-    result = ''
-    prev_attempt_txt = None
+    last_txt = None
+    same_value_count = 0
     
     for attempt in range(max_attempts):
         print(f"[CaminoA]   -> Right-click copy (attempt {attempt+1}/{max_attempts})")
@@ -580,40 +605,36 @@ def _right_click_copy_text(x: int, y: int, conf: Dict[str, Any], max_attempts: i
         if txt:
             print(f"[CaminoA]   -> clipboard: '{txt[:60]}{'...' if len(txt)>60 else ''}'")
         
-        # Si el valor cambió respecto al intento anterior, considerarlo copia exitosa
-        if prev_attempt_txt is not None and txt != prev_attempt_txt and txt:
-            print(f"[CaminoA]   -> valor cambió, copia exitosa con right-click")
-            result = txt
-            break
+        # Detectar si el clipboard se quedó estancado con el mismo valor
+        if txt and txt == last_txt:
+            same_value_count += 1
+            if same_value_count >= 2:  # 3 intentos totales con el mismo valor
+                print(f"[CaminoA]   -> clipboard estable después de 3 intentos, usando valor: '{txt[:60]}{'...' if len(txt)>60 else ''}'")
+                return txt
+        else:
+            same_value_count = 0
+            last_txt = txt
         
+        # Validaciones básicas
         if require_changed and baseline is not None and txt == baseline:
-            prev_attempt_txt = txt
             time.sleep(0.5)
             continue
         if require_non_empty and not txt:
-            prev_attempt_txt = txt
             time.sleep(0.5)
             continue
         if validator is not None and txt and not validator(txt):
-            last = txt
-            stable_count = 0
-            prev_attempt_txt = txt
             time.sleep(0.5)
             continue
-        if txt == last and txt:
-            stable_count += 1
-            if stable_count >= (consecutive - 1):
-                print(f"[CaminoA]   -> {stable_count+1} lecturas consecutivas idénticas, valor estable")
-                result = txt
-                break
-        else:
-            last = txt
-            stable_count = 0
         
-        prev_attempt_txt = txt
+        # Si pasa validaciones, tomar el valor de la primera lectura
+        if txt:
+            print(f"[CaminoA]   -> valor obtenido en primera lectura")
+            return txt
+        
         time.sleep(0.5)
     
-    return result or (last or '')
+    # Si llegamos aquí y tenemos un último valor, retornarlo
+    return last_txt or ''
 
 
 def _looks_like_apartado(txt: str) -> bool:
@@ -1241,10 +1262,19 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
         # Usando coordenadas: saldo en (x_copy, y_copy); ID en (copy_left_x, y_copy)
         _click(x_copy, y_copy, 'copy_area_saldo_row_0', 0.05)
         first_saldo = _right_click_copy_text(x_copy, y_copy, conf, consecutive=2, read_delay=0.1)
-        _click(int(copy_left_x), y_copy, 'copy_area_id_row_0', 0.05)
-        first_id_txt = _right_click_copy_text(int(copy_left_x), y_copy, conf, consecutive=2, read_delay=0.1)
-        first_id_extracted = _extract_first_number(first_id_txt or '') or (first_id_txt or '').strip()
-        _click(x_copy, y_copy, 'copy_area_return_row_0', 0.05)
+        
+        # Si el saldo es exactamente 0, saltar copia del ID y continuar
+        first_saldo_val = _parse_amount_value(first_saldo or '')
+        first_id_txt = ''
+        first_id_extracted = ''
+        if first_saldo_val is not None and abs(first_saldo_val) < 0.0005:
+            print("[CaminoA] Saldo es 0, saltando copia de ID")
+            _click(x_copy, y_copy, 'copy_area_return_row_0', 0.05)
+        else:
+            _click(int(copy_left_x), y_copy, 'copy_area_id_row_0', 0.05)
+            first_id_txt = _right_click_copy_text(int(copy_left_x), y_copy, conf, consecutive=2, read_delay=0.1)
+            first_id_extracted = _extract_first_number(first_id_txt or '') or (first_id_txt or '').strip()
+            _click(x_copy, y_copy, 'copy_area_return_row_0', 0.05)
 
         # Agregar primer ítem a resultados
         if cf_entry is not None:
@@ -1286,6 +1316,24 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
             # Saldo
             _click(x_copy, row_y, f'copy_area_saldo_row_{row_idx}', 0.05)
             saldo_txt = _right_click_copy_text(x_copy, row_y, conf, consecutive=2, read_delay=0.1)
+            
+            # Si el saldo es exactamente 0, saltar copia del ID y continuar
+            val = _parse_amount_value(saldo_txt or '')
+            if val is not None and abs(val) < 0.0005:
+                print(f"[CaminoA] Saldo {row_idx} es 0, saltando copia de ID")
+                _click(x_copy, row_y, f'copy_area_return_row_{row_idx}', 0.05)
+                # Agregar a resultados con ID vacío
+                if cf_entry is not None:
+                    cf_entry["items"].append({
+                        "saldo_raw": saldo_txt or "",
+                        "saldo": val,
+                        "id_raw": "",
+                        "id": None
+                    })
+                to_log = saldo_txt if saldo_txt else 'No Tiene Pedido'
+                _append_log(log_path, dni, to_log)
+                continue
+            
             # ID (columna izquierda específica)
             _click(int(copy_left_x), row_y, f'copy_area_id_row_{row_idx}', 0.05)
             id_txt = _right_click_copy_text(int(copy_left_x), row_y, conf, consecutive=2, read_delay=0.1)
@@ -1295,11 +1343,10 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
             if cf_entry is not None:
                 cf_entry["items"].append({
                     "saldo_raw": saldo_txt or "",
-                    "saldo": _parse_amount_value(saldo_txt or ""),
+                    "saldo": val,
                     "id_raw": id_txt or "",
                     "id": (_extract_first_number(id_txt or "") or None)
                 })
-            val = _parse_amount_value(saldo_txt or '')
             to_log = saldo_txt if saldo_txt else 'No Tiene Pedido'
             if val is not None and abs(val) > 0.0005:
                 to_log = f"{saldo_txt} | ID: {id_txt}"
@@ -1315,64 +1362,101 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
 def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
                          arrow_nav_delay: float, log_path: Path, dni: str,
                          results: Optional[Dict[str, Any]] = None) -> int:
-    """Procesa la sección 'FA Cobranza -> Actual' recorriendo N elementos.
+    """Procesa la sección 'FA Cobranza -> Actual' verificando dinámicamente cuántos 'Actuales' existen.
+    
+    Nuevo flujo:
+    1. Después de fa_cobranza_buscar, verificar si existe "Actual" en fa_seleccion
+    2. Si existe, procesarlo INMEDIATAMENTE (fa_deuda, fa_copy, cerrar)
+    3. Buscar el siguiente sumando 17 píxeles en Y
+    4. Repetir hasta que no se encuentre más "Actual"
+    
     Devuelve N (cantidad procesada) o 0 si no hay 'Actual'.
     """
-    # Siempre al entrar en FA: Buscar -> Records -> Cerrar panel (copiando N con el mismo mecanismo robusto)
+    # Buscar primero
     bx, by = _xy(conf, 'fa_cobranza_buscar')
     if bx or by:
         _click(bx, by, 'fa_cobranza_buscar', _step_delay(step_delays,10,base_delay))
-    fx, fy = _xy(conf, 'fa_records_btn')
-    if not (fx or fy):
-        print('[CaminoA] fa_records_btn no definido en coords; se salta procesamiento de Actual')
-        return 0
-
-    fa_attempts = 1
-    try:
-        fa_attempts = max(1, int(os.getenv('FA_RECORDS_ATTEMPTS', '1')))
-    except Exception:
-        fa_attempts = 1
-    rec_txt = _copy_records_count_via_button(conf, 'fa_records_btn', step_delays, base_delay, attempts=fa_attempts)
-    n = _parse_count_with_cap(rec_txt or '', 'MAX_FA_ACTUALES', 50)
-    if n <= 0:
-        print('[CaminoA] No hay "Actual" para procesar (N=0)')
-        return 0
-
-    print(f"[CaminoA] Actual(es) a procesar: N={n}")
-    use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-    for i in range(n):
-        # Seleccionar siempre la primera, luego bajar i filas
-        x, y = _xy(conf, 'fa_seleccion')
-        _click(x, y, 'fa_seleccion', 0.2)
-        if i > 0:
-            _send_down_presses(i, arrow_nav_delay, use_pynput)
-
-        # Abrir y copiar
-        _press_enter(0.3)
+    
+    # Parámetros de búsqueda
+    base_y = conf.get('fa_seleccion', {}).get('y', 435)
+    base_copy_y = conf.get('fa_seleccion_copy', {}).get('y', 447)
+    temp_seleccion_x = conf.get('fa_seleccion', {}).get('x', 536)
+    temp_copy_x = conf.get('fa_seleccion_copy', {}).get('x', 595)
+    y_step = 17  # Incremento para buscar siguiente
+    max_attempts_per_position = 2
+    max_positions = 10  # Máximo de posiciones a revisar (evitar loop infinito)
+    
+    print(f"[CaminoA] Buscando y procesando 'Actuales' en FA Cobranza...")
+    
+    actuales_procesados = 0
+    
+    for position in range(max_positions):
+        current_y = base_y + (position * y_step)
+        current_copy_y = base_copy_y + (position * y_step)
+        
+        print(f"[CaminoA] Revisando posición {position + 1} (Y={current_y})...")
+        
+        # Click derecho en fa_seleccion para abrir menú contextual
+        _right_click(temp_seleccion_x, current_y, f'fa_seleccion pos {position + 1}', delay_after=0.5)
+        
+        # Click en fa_seleccion_copy para copiar del menú contextual
+        _click(temp_copy_x, current_copy_y, f'fa_seleccion_copy pos {position + 1}', 0.3)
+        
+        # Intentar leer lo copiado (sin Ctrl+C, solo lectura del portapapeles)
+        actual_found = False
+        for attempt in range(max_attempts_per_position):
+            copied_text = _read_clipboard_only(max_attempts=2, read_delay=0.3)
+            
+            if copied_text and 'Actual' in copied_text:
+                print(f"[CaminoA] ✓ 'Actual' encontrado en posición {position + 1}")
+                actual_found = True
+                break
+            
+            if attempt < max_attempts_per_position - 1:
+                print(f"[CaminoA] Intento {attempt + 2}/{max_attempts_per_position} en posición {position + 1}")
+                time.sleep(0.3)
+        
+        if not actual_found:
+            print(f"[CaminoA] No hay más 'Actuales' (posición {position + 1} sin 'Actual')")
+            break
+        
+        # ===== PROCESAR ESTE ACTUAL INMEDIATAMENTE =====
+        print(f"[CaminoA] Procesando Actual {actuales_procesados + 1} en posición {position + 1} (Y={current_y})")
+        
+        # Click en la posición del Actual para seleccionarlo (ya abre automáticamente)
+        _click(temp_seleccion_x, current_y, f'fa_seleccion Actual {actuales_procesados + 1}', 1.5)
+        
+        # Copiar saldo (doble click en fa_deuda para seleccionar, luego right-click + copy)
         dx, dy = _xy(conf, 'fa_deuda')
         _double_click_xy(dx, dy, 'fa_deuda', 0.25)
-        time.sleep(1.0)
-
-        # Paso 1: copiar saldo tras doble click en fa_deuda usando Ctrl+C estable
-        deuda_txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.1, require_non_empty=False)
+        time.sleep(0.3)
+        
+        # Right-click en fa_deuda y copiar desde menú contextual
+        dcx, dcy = _xy(conf, 'fa_deuda_copy')
+        deuda_txt = ''
+        if dx and dy and dcx and dcy:
+            _right_click(dx, dy, 'fa_deuda_context', 0.2)
+            _click(dcx, dcy, 'fa_deuda_copy', 0.15)
+            time.sleep(0.1)
+            deuda_txt = _read_clipboard_only()
+        
         _append_log(log_path, dni, f"saldo {deuda_txt}" if deuda_txt else 'saldo No Tiene Pedido')
-
-        # Paso 2: copiar ID usando fa_area_copy (click derecho) + fa_copy (click izquierdo)
+        
+        # Copiar ID usando fa_area_copy (click derecho) + fa_copy (click izquierdo)
         rax, ray = _xy(conf, 'fa_area_copy')
         cpx, cpy = _xy(conf, 'fa_copy')
         id_txt = ''
         if rax or ray:
             id_txt = _copy_fa_id_via_context_with_retries(rax, ray, cpx, cpy,
-                                                          compare_saldo_txt=deuda_txt, compare_n=n,
+                                                          compare_saldo_txt=deuda_txt, compare_n=1,
                                                           max_rounds=4)
         else:
-            # Fallback si no hay coords: intentar Ctrl+C directo con validación
             id_txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
                                        require_non_empty=True,
-                                       validator=lambda t: _is_valid_fa_id(t, compare_saldo_txt=deuda_txt, compare_n=n))
+                                       validator=lambda t: _is_valid_fa_id(t, compare_saldo_txt=deuda_txt, compare_n=1))
         _append_log(log_path, dni, f"id {id_txt}" if id_txt else 'id No Data')
-
-        # Registrar FA en resultados estructurados (con valores parseados)
+        
+        # Registrar FA en resultados estructurados
         if results is not None:
             results.setdefault("fa_actual", []).append({
                 "apartado": "",
@@ -1381,12 +1465,20 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
                 "id_raw": id_txt or "",
                 "id": (_extract_first_number(id_txt or "") or None)
             })
-
+        
         # Cerrar detalle
         cx, cy = _xy(conf, 'close_tab_btn')
         _click(cx, cy, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
-
-    return n
+        
+        # Incrementar contador
+        actuales_procesados += 1
+    
+    if actuales_procesados <= 0:
+        print('[CaminoA] No hay "Actual" para procesar (N=0)')
+        return 0
+    
+    print(f"[CaminoA] Total de Actual(es) procesados: N={actuales_procesados}")
+    return actuales_procesados
 
 
 def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None):
