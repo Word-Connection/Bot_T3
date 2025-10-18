@@ -1,33 +1,14 @@
 {
-  "cliente_section": {
-    "x": 135,
-    "y": 167
+
+  "validar": {
+      "x": 956,
+      "y": 234
   },
-  "tipo_doc_btn": {
-    "x": 244,
-    "y": 237
-  },
-  "dni_option": {
-    "x": 140,
-    "y": 276
-  },
-  "dni_field": {
-    "x": 913,
-    "y": 240
-  },
-  "records_N": {
-    "x": 1870,
-    "y": 162
-  },
-  "close_records": {
-    "x": 1110,
-    "y": 465
+  "validar_copy": {
+      "x": 999,
+      "y": 246
   },
   "client_id_field": {
-      "x": 100,
-      "y": 237
-  },
-  "client_name_field": {
       "x": 36,
       "y": 236
   },
@@ -144,10 +125,7 @@
     "action": "clear_clipboard"
   },
   "steps": [
-    "cliente_section",
-    "tipo_doc_btn",
-    "dni_option",
-    "dni_field",
+    "house_area",
     "client_id_field",
     "seleccionar_btn",
     "fa_cobranza_btn",

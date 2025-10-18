@@ -260,7 +260,7 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     1. Espera 1.5s
     2. Presiona Enter UNA VEZ
     3. Espera 1.5s
-    4. Right-click en client_name_field → Click en copi_id_field para copiar
+    4. Right-click en client_id_field → Click en copi_id_field para copiar
     
     Retorna:
     - "Llamada": registro estable, continuar flujo normal
@@ -274,13 +274,13 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     print("[CaminoA] Enter presionado")
     time.sleep(1.5)
     
-    # Ir al área del nombre para validar
-    x, y = _xy(conf, 'client_name_field')
+    # Ir al área de client_id_field para validar
+    x, y = _xy(conf, 'client_id_field')
     if not (x or y):
-        print("[CaminoA] WARNING: client_name_field no definido, asumiendo funcional")
+        print("[CaminoA] WARNING: client_id_field no definido, asumiendo funcional")
         return "Llamada"
     
-    print(f"[CaminoA] Right-click en client_name_field ({x},{y}) para validar")
+    print(f"[CaminoA] Right-click en client_id_field ({x},{y}) para validar")
     pg.click(x, y, button='right')
     time.sleep(0.5)
     
@@ -1357,6 +1357,11 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
     # Cerrar pestaña al terminar CFs (o si se abortó por coincidencia de ID)
     x, y = _xy(conf, 'close_tab_btn')
     _click(x, y, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+    
+    # Volver a house_area después de cerrar el tab
+    hx, hy = _xy(conf, 'house_area')
+    if hx or hy:
+        _click(hx, hy, 'house_area', base_delay)
 
 
 def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1510,66 +1515,139 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         "cuenta_financiera": []
     }
 
-    print('[CaminoA] Paso 0: cliente_section', flush=True)
-    # 0) cliente_section
-    x,y = _xy(conf,'cliente_section')
-    _click(x,y,'cliente_section', _step_delay(step_delays,0,base_delay))
-    print('[CaminoA] Paso 1: tipo_doc_btn', flush=True)
-    # 1) tipo_doc_btn
-    x,y = _xy(conf,'tipo_doc_btn')
-    _click(x,y,'tipo_doc_btn', _step_delay(step_delays,1,base_delay))
-    print('[CaminoA] Paso 2: dni_option', flush=True)
-    # 2) dni_option
-    x,y = _xy(conf,'dni_option')
-    _click(x,y,'dni_option', _step_delay(step_delays,2,base_delay))
-    print('[CaminoA] Paso 3: dni_field + escribir DNI', flush=True)
-    # 3) dni_field + escribir DNI
-    x,y = _xy(conf,'dni_field')
-    _click(x,y,'dni_field', 0.2)
-    _type(dni, _step_delay(step_delays,3,base_delay))
-    print('[CaminoA] Paso 4: Enter para buscar por DNI', flush=True)
-    # 4) Enter para buscar por DNI
-    _press_enter(_step_delay(step_delays,4,post_enter))
-    print('[CaminoA] EXTRA: Abrir y cerrar panel de Records', flush=True)
-    # EXTRA) Abrir y cerrar panel de Records, y copiar el número "N Record(s)"
-    rx, ry = _xy(conf,'records_N')
-    records_total = 1
-    if rx or ry:
-        # Usar el mismo mecanismo robusto de copia que fa_records_btn (intentos configurables)
-        rec_attempts = 1
-        try:
-            rec_attempts = max(1, int(os.getenv('RECORDS_ATTEMPTS', '1')))
-        except Exception:
-            rec_attempts = 1
-        rec_txt = _copy_records_count_via_button(conf, 'records_N', step_delays, base_delay, attempts=rec_attempts)
-        n_int = _parse_count_with_cap(rec_txt or '', 'MAX_RECORDS_INICIO', 50)
-        if n_int:
-            # Registrar sólo el número asociado al DNI
-            _append_log(log_path, dni, str(n_int))
-            # Ajuste solicitado: procesar N-1 (saltear el último)
-            records_total = max(1, n_int - 1)
-            print(f"[CaminoA] Records detectados={n_int}. Procesando={records_total} (saltando el último)")
-            # Guardar en resultados
-            results["records"]["inicio_total"] = n_int
-            results["records"]["procesados"] = records_total
-        else:
-            print('[CaminoA] ADVERTENCIA: No se detectó número en Records')
-        # Ir directamente a client_id_field tras manejar Records
-        xci, yci = _xy(conf,'client_id_field')
-        _click(xci, yci, 'client_id_field', _step_delay(step_delays,5,base_delay))
-        jumped_to_client_field = True
-    # 5) client_id_field (solo click, sin Enter)
-    if not jumped_to_client_field:
-        x,y = _xy(conf,'client_id_field')
-        _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
+    print('[CaminoA] Paso 0: house_area', flush=True)
+    # 0) house_area - Ir directamente al área de registros
+    x,y = _xy(conf,'house_area')
+    _click(x,y,'house_area', _step_delay(step_delays,0,base_delay))
     
-    # 6) seleccionar_btn + validación de registro estable/corrupto
-    current_offset = 0  # Track actual position in list
-    max_validation_attempts = records_total  # Max attempts = total records available
+    # NUEVO: Obtener ID del primer registro usando validar + validar_copy
+    print('[CaminoA] Obteniendo ID del registro actual', flush=True)
+    
+    # Click izquierdo en validar
+    vnx, vny = _xy(conf, 'validar')
+    _click(vnx, vny, 'validar', 0.3)
+    
+    # Click derecho en validar
+    _right_click(vnx, vny, 'validar_context', 0.2)
+    
+    # Click en validar_copy para copiar el ID
+    vcx, vcy = _xy(conf, 'validar_copy')
+    _click(vcx, vcy, 'validar_copy', 0.2)
+    time.sleep(0.1)
+    
+    # Leer el ID del clipboard
+    first_record_id = _read_clipboard_only()
+    print(f"[CaminoA] ID del registro 1: {first_record_id}")
+    
+    # Guardar el primer ID para control de registros
+    processed_ids = [first_record_id]
+    records_total = 50  # Límite de seguridad, se detendrá cuando no haya más IDs
+    
+    # Ir directamente a seleccionar_btn + validación simplificada (primer registro)
+    # Una sola validación es suficiente para determinar si el registro es corrupto
     validation_success = False
     
-    for validation_attempt in range(max_validation_attempts):
-        print(f"[CaminoA] Intento de validación {validation_attempt + 1}/{max_validation_attempts}")
+    print(f"[CaminoA] Validando primer registro")
+    
+    # Click seleccionar_btn
+    x,y = _xy(conf,'seleccionar_btn')
+    _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
+    _maybe_close_ok_popup(conf, step_delays, base_delay)
+    
+    # Validar si el registro es estable o corrupto
+    validation_result = _validate_selected_record(conf, base_delay)
+    
+    if validation_result == "Llamada":
+        print("[CaminoA] Registro válido, continuando con flujo normal")
+        validation_success = True
+    else:
+        print("[CaminoA] Registro corrupto, saltando al siguiente")
+    
+    if not validation_success:
+        print("[CaminoA] ADVERTENCIA: Primer registro corrupto, saltando al siguiente")
+        # No procesar este registro corrupto, ir directamente al loop de siguientes registros
+    else:
+        # Solo procesar si el registro es válido
+        # Espera extra después de validación exitosa
+        time.sleep(2.0)
+        
+        # Insertar fa_cobranza_* antes de iniciar fa_seleccion
+        x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
+        x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
+        x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
+
+        # Nuevo flujo solicitado (actualizado): Tras fa_cobranza_buscar usar fa_records_btn para contar 'Actual' y procesarlos
+        # Asegurar variable de referencia inicializada para evitar UnboundLocalError en ramas donde no se obtenga ID de referencia
+        id_ref = None
+        use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
+        # Nuevo camino: contar y procesar 'Actual' por fa_records_btn
+        n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        if n_actual <= 0:
+            # Si no hay Actual, continuar con resumen/cuenta/lista como fallback
+            _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        else:
+            # Si hubo Actual(es), mantener el camino original: continuar con resumen/cuenta/lista
+            _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+
+    # Nota: Si hubo Actual (n_actual > 0), no ejecutamos resumen/cuenta/lista aquí.
+
+    # Repetir para los registros restantes, usando IDs para controlar cuándo terminar
+    for loop_iteration in range(1, records_total):
+        print(f"[CaminoA] === Procesando registro {loop_iteration + 1} ===")
+        
+        # Obtener ID del siguiente registro (sin ir a house_area todavía)
+        print('[CaminoA] Obteniendo ID del siguiente registro', flush=True)
+        
+        # Leer clipboard ANTES de intentar copiar
+        clipboard_before = _read_clipboard_only()
+        print(f"[CaminoA] Clipboard antes de copiar: '{clipboard_before}'")
+        
+        # Click izquierdo en validar (con offset para registro N)
+        vnx_base, vny_base = _xy(conf, 'validar')
+        # Agregar 19 píxeles por cada registro (loop_iteration es 1-based, así que loop_iteration=1 → offset=19)
+        validar_offset_y = loop_iteration * 19
+        vnx = vnx_base
+        vny = vny_base + validar_offset_y
+        _click(vnx, vny, f'validar_registro_{loop_iteration + 1}', 0.3)
+        
+        # Click derecho en validar (con offset)
+        _right_click(vnx, vny, f'validar_context_registro_{loop_iteration + 1}', 0.2)
+        
+        # Click en validar_copy para copiar el ID (con offset)
+        vcx_base, vcy_base = _xy(conf, 'validar_copy')
+        vcx = vcx_base
+        vcy = vcy_base + validar_offset_y
+        _click(vcx, vcy, f'validar_copy_registro_{loop_iteration + 1}', 0.2)
+        time.sleep(0.1)
+        
+        # Leer el ID del clipboard DESPUÉS de copiar
+        clipboard_after = _read_clipboard_only()
+        print(f"[CaminoA] Clipboard después de copiar: '{clipboard_after}'")
+        
+        # Si el clipboard no cambió, significa que no hay más registros
+        if clipboard_before == clipboard_after:
+            print(f"[CaminoA] No hay más registros disponibles (clipboard no cambió). Total procesados: {loop_iteration}")
+            # Cerrar pestaña antes de terminar
+            ctx, cty = _xy(conf, 'close_tab_btn')
+            if ctx or cty:
+                _click(ctx, cty, 'close_tab_btn', base_delay)
+            # Volver a home_area
+            hx, hy = _xy(conf, 'home_area')
+            if hx or hy:
+                _click(hx, hy, 'home_area', base_delay)
+            break
+        
+        current_record_id = clipboard_after
+        print(f"[CaminoA] ID del registro {loop_iteration + 1}: {current_record_id}")
+        
+        # Agregar el ID a la lista de procesados
+        processed_ids.append(current_record_id)
+        
+        # Ir directamente a validación (sin pasar por client_id_field)
+        # Una sola validación es suficiente para determinar si el registro es corrupto
+        loop_validation_success = False
+        
+        print(f"[CaminoA] Validando registro {loop_iteration + 1}")
         
         # Click seleccionar_btn
         x,y = _xy(conf,'seleccionar_btn')
@@ -1577,143 +1655,22 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         _maybe_close_ok_popup(conf, step_delays, base_delay)
         
         # Validar si el registro es estable o corrupto
-        validation_result = _validate_selected_record(conf, base_delay)
+        loop_validation_result = _validate_selected_record(conf, base_delay)
         
-        if validation_result == "Llamada":
-            print("[CaminoA] Registro valido, continuando con flujo normal")
-            validation_success = True
-            break
-        else:  # Cualquier cosa que no sea "Llamada" es corrupto
-            print("[CaminoA] Registro corrupto, intentando con el siguiente")
-            # Verificar si hay más registros disponibles
-            if current_offset + 1 >= records_total:
-                print("[CaminoA] No hay más registros disponibles, terminando validación")
-                break
-            
-            # Volver a client_id_field y bajar uno más
-            current_offset += 1
-            x,y = _xy(conf,'client_id_field')
-            _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
-            
-            # Intentar enfocar la lista si está definida
-            lx, ly = _xy(conf, 'list_area')
-            if lx or ly:
-                _click(lx, ly, 'list_area (focus)', 0.2)
-            
-            print(f"[CaminoA] Bajando {current_offset} fila(s) para llegar al registro {current_offset + 1}")
-            use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-            _send_down_presses(current_offset, arrow_nav_delay, use_pynput)
-    
-    if not validation_success:
-        print("[CaminoA] ADVERTENCIA: No se encontró registro válido tras todos los intentos")
-    
-    # Espera extra después de validación exitosa
-    time.sleep(2.0)
-    
-    # Insertar fa_cobranza_* antes de iniciar fa_seleccion
-    x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
-    x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
-    x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
-
-    # Nuevo flujo solicitado (actualizado): Tras fa_cobranza_buscar usar fa_records_btn para contar 'Actual' y procesarlos
-    # Asegurar variable de referencia inicializada para evitar UnboundLocalError en ramas donde no se obtenga ID de referencia
-    id_ref = None
-    use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-    # Nuevo camino: contar y procesar 'Actual' por fa_records_btn
-    n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-    if n_actual <= 0:
-        # Si no hay Actual, continuar con resumen/cuenta/lista como fallback
-        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-    else:
-        # Si hubo Actual(es), mantener el camino original: continuar con resumen/cuenta/lista
-        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-
-    # Nota: Si hubo Actual (n_actual > 0), no ejecutamos resumen/cuenta/lista aquí.
-
-    # Repetir para los apartados restantes, navegando con flecha abajo
-    # El primero ya se hizo; procesar desde el 2 hasta records_total
-    # IMPORTANT: Necesitamos ajustar el offset inicial en base a cuántos registros saltamos en la validación inicial
-    actual_record_index = current_offset  # Start from where we ended after initial validation
-    
-    for loop_iteration in range(1, records_total):
-        # Calculate the target record index (0-based)
-        target_record_index = actual_record_index + loop_iteration
-        
-        # Check if we've run out of records
-        if target_record_index >= records_total:
-            print(f"[CaminoA] Alcanzado el límite de registros ({records_total}), terminando loop")
-            break
-        
-        print(f"[CaminoA] Procesando apartado {loop_iteration+1}/{records_total}, registro índice {target_record_index}")
-        
-        # Ir a house_area (o fallback a home_area si no está)
-        hx2, hy2 = _xy(conf,'house_area')
-        if not (hx2 or hy2):
-            hx2, hy2 = _xy(conf,'home_area')
-        if hx2 or hy2:
-            # Espera previa solicitada antes de ir a house_area
-            time.sleep(2.0)
-            _click(hx2, hy2, 'house_area', base_delay)
-        
-        # Volver a client_id_field, moverse N veces con flecha abajo hasta target_record_index
-        x,y = _xy(conf,'client_id_field'); _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
-        # Intentar enfocar la lista si está definida explícitamente
-        lx, ly = _xy(conf, 'list_area')
-        if lx or ly:
-            _click(lx, ly, 'list_area (focus)', 0.2)
-        
-        print(f"[CaminoA] Bajando {target_record_index} fila(s) con flecha abajo para llegar al registro {target_record_index + 1}")
-        use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
-        _send_down_presses(target_record_index, arrow_nav_delay, use_pynput)
-        
-        # Validación del registro en el loop
-        loop_validation_success = False
-        loop_current_offset = target_record_index
-        max_loop_attempts = records_total - target_record_index  # Remaining records
-        
-        for loop_validation_attempt in range(max_loop_attempts):
-            print(f"[CaminoA] Loop validación intento {loop_validation_attempt + 1}/{max_loop_attempts}")
-            
-            # Click seleccionar_btn
-            x,y = _xy(conf,'seleccionar_btn')
-            _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
-            _maybe_close_ok_popup(conf, step_delays, base_delay)
-            
-            # Validar si el registro es estable o corrupto
-            loop_validation_result = _validate_selected_record(conf, base_delay)
-            
-            if loop_validation_result == "Llamada":
-                print("[CaminoA] Registro válido en loop, continuando")
-                loop_validation_success = True
-                actual_record_index = loop_current_offset  # Update actual position
-                break
-            else:  # Cualquier cosa que no sea "Llamada" es corrupto
-                print("[CaminoA] Registro corrupto en loop, probando siguiente")
-                # Verificar si hay más registros
-                if loop_current_offset + 1 >= records_total:
-                    print("[CaminoA] No hay más registros disponibles en loop")
-                    break
-                
-                # Volver a client_id_field y bajar a la siguiente posición
-                loop_current_offset += 1
-                x,y = _xy(conf,'client_id_field')
-                _click(x,y,'client_id_field', _step_delay(step_delays,5,base_delay))
-                
-                lx, ly = _xy(conf, 'list_area')
-                if lx or ly:
-                    _click(lx, ly, 'list_area (focus)', 0.2)
-                
-                print(f"[CaminoA] Bajando {loop_current_offset} fila(s) para probar registro {loop_current_offset + 1}")
-                _send_down_presses(loop_current_offset, arrow_nav_delay, use_pynput)
+        if loop_validation_result == "Llamada":
+            print("[CaminoA] Registro válido en loop, continuando")
+            loop_validation_success = True
+        else:
+            print("[CaminoA] Registro corrupto en loop, saltando al siguiente")
         
         if not loop_validation_success:
-            print(f"[CaminoA] No se encontró registro válido en iteración {loop_iteration+1}, saltando al siguiente")
+            print(f"[CaminoA] Registro {loop_iteration+1} corrupto, saltando al siguiente")
             continue
         
         # Espera extra después de validación exitosa
         time.sleep(2.0)
         
-        # fa_cobranza_* antes de procesar Actual
+        # fa_cobranza_* antes de procesar Actual (ir directamente sin house_area)
         x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
         x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
         x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
