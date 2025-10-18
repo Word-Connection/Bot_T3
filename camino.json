@@ -1,56 +1,72 @@
 {
-  "created_at": "2025-10-18T12:16:16",
-  "duration": 3.946198199999344,
+  "created_at": "2025-10-18T13:49:38",
+  "duration": 8.024108199999318,
   "events": [
     {
-      "t": 2.1216857000035816,
+      "t": 2.967632300002151,
       "type": "mouse_click",
-      "x": 67,
-      "y": 297,
+      "x": 975,
+      "y": 231,
       "button": "Button.left",
       "pressed": true
     },
     {
-      "t": 2.127117399999406,
+      "t": 2.972069299998111,
       "type": "key_down",
       "key": "<255>"
     },
     {
-      "t": 2.12736969999969,
+      "t": 2.972197499999311,
       "type": "key_up",
       "key": "<255>"
     },
     {
-      "t": 2.129939500002365,
+      "t": 2.9739924000023166,
       "type": "key_down",
       "key": "<255>"
     },
     {
-      "t": 2.130728399999498,
+      "t": 2.9742758000065805,
       "type": "key_up",
       "key": "<255>"
     },
     {
-      "t": 2.2017282000015257,
+      "t": 3.0557159000018146,
       "type": "mouse_click",
-      "x": 67,
-      "y": 297,
+      "x": 975,
+      "y": 231,
       "button": "Button.left",
       "pressed": false
     },
     {
-      "t": 3.2576542000024347,
+      "t": 6.423618100001477,
       "type": "mouse_click",
-      "x": -877,
-      "y": 849,
+      "x": 976,
+      "y": 246,
       "button": "Button.left",
       "pressed": true
     },
     {
-      "t": 3.3456564000007347,
+      "t": 6.51963209999667,
       "type": "mouse_click",
-      "x": -877,
-      "y": 849,
+      "x": 976,
+      "y": 246,
+      "button": "Button.left",
+      "pressed": false
+    },
+    {
+      "t": 7.839642599996296,
+      "type": "mouse_click",
+      "x": -683,
+      "y": 735,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 7.911655100004282,
+      "type": "mouse_click",
+      "x": -683,
+      "y": 735,
       "button": "Button.left",
       "pressed": false
     }
