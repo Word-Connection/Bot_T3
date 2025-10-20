@@ -289,6 +289,12 @@ def main():
                     print(f"[DEBUG] Camino A stdout length={len(stdout_full) if stdout_full else 0}", file=sys.stderr)
                     print(f"[DEBUG] Camino A stderr length={len(stderr_full) if stderr_full else 0}", file=sys.stderr)
                     
+                    # Mostrar stderr completo de Camino A para debugging
+                    if stderr_full:
+                        print(f"[DEBUG] Camino A stderr completo:", file=sys.stderr)
+                        print(stderr_full, file=sys.stderr)
+                        print(f"[DEBUG] --- Fin stderr Camino A ---", file=sys.stderr)
+                    
                     if returncode == 0:
                         print(f"[CaminoA] Camino A completado exitosamente")
                         sys.stdout.flush()
@@ -300,20 +306,35 @@ def main():
                             # Buscar el objeto JSON (empieza con '{' y termina con '}')
                             a_out = stdout_full or ""
                             
+                            print(f"[DEBUG] Buscando JSON en stdout de Camino A...", file=sys.stderr)
+                            print(f"[DEBUG] Primeros 200 chars de stdout: {a_out[:200]}", file=sys.stderr)
+                            print(f"[DEBUG] Últimos 200 chars de stdout: {a_out[-200:]}", file=sys.stderr)
+                            
                             # Encontrar el primer '{' que inicia el JSON
                             json_start = a_out.find('{')
                             if json_start != -1:
+                                print(f"[DEBUG] JSON start encontrado en posición {json_start}", file=sys.stderr)
                                 # Encontrar el último '}' que cierra el JSON
                                 json_end = a_out.rfind('}')
                                 if json_end != -1 and json_end > json_start:
+                                    print(f"[DEBUG] JSON end encontrado en posición {json_end}", file=sys.stderr)
                                     json_str = a_out[json_start:json_end+1]
+                                    print(f"[DEBUG] JSON extraído (primeros 300 chars): {json_str[:300]}", file=sys.stderr)
                                     camino_a_data = json.loads(json_str)
+                                    print(f"[DEBUG] JSON parseado exitosamente. Keys: {list(camino_a_data.keys())}", file=sys.stderr)
+                                else:
+                                    print(f"[DEBUG] No se encontró JSON end válido", file=sys.stderr)
+                            else:
+                                print(f"[DEBUG] No se encontró JSON start", file=sys.stderr)
                         except Exception as e:
-                            print(f"Error parseando JSON de Camino A: {e}")
+                            print(f"[DEBUG] Error parseando JSON de Camino A: {e}", file=sys.stderr)
+                            import traceback
+                            traceback.print_exc(file=sys.stderr)
                             camino_a_data = None
 
                         # Agregar etapa y adjuntar datos estructurados SIN FILTRAR
                         if camino_a_data:
+                            print(f"[DEBUG] Agregando camino_a_data a stages", file=sys.stderr)
                             stages.append({
                                 "info": "Camino A ejecutado",
                                 "image": "",
@@ -321,6 +342,7 @@ def main():
                                 "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
                             })
                         else:
+                            print(f"[DEBUG] camino_a_data es None, agregando stage sin datos", file=sys.stderr)
                             stages.append({
                                 "info": "Camino A ejecutado (sin datos parseados)",
                                 "image": "",
@@ -358,12 +380,19 @@ def main():
         # Preparar respuesta final - SOLO el JSON de Camino A si existe
         final_camino_a = None
         try:
+            print(f"[DEBUG] Buscando 'camino_a' en stages. Total stages: {len(stages)}", file=sys.stderr)
             # Buscar en stages el JSON de Camino A
-            for st in reversed(stages):
+            for idx, st in enumerate(reversed(stages)):
+                print(f"[DEBUG] Stage {idx}: tipo={type(st)}, keys={list(st.keys()) if isinstance(st, dict) else 'N/A'}", file=sys.stderr)
                 if isinstance(st, dict) and 'camino_a' in st:
                     final_camino_a = st['camino_a']
+                    print(f"[DEBUG] ✓ Encontrado 'camino_a' en stage {idx}", file=sys.stderr)
                     break
-        except Exception:
+            
+            if not final_camino_a:
+                print(f"[DEBUG] ✗ No se encontró 'camino_a' en ningún stage", file=sys.stderr)
+        except Exception as e:
+            print(f"[DEBUG] Error buscando camino_a: {e}", file=sys.stderr)
             final_camino_a = None
 
         # Si hay datos de Camino A, devolver SOLO ese JSON sin modificar
@@ -389,7 +418,7 @@ def main():
             print("\n[BACKEND] Mismo JSON (sin modificaciones):")
             print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
-            print("\n[SCRAPING] Sin datos de Camino A (score fuera de rango 80-89)")
+            print("\n[SCRAPING] Sin datos de Camino A (no se obtuvieron resultados)")
             print(f"Score obtenido: {score}")
             
             print("\n[BACKEND] Solo info básica:")

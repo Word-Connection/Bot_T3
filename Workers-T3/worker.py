@@ -528,7 +528,9 @@ def process_task(task: dict) -> bool:
             stderr_output = process.stderr.read() if process.stderr else ""
             if stderr_output:
                 stderr_lines = stderr_output.split('\n')
-                logger.info(f"[DEBUG] Script stderr: {safe_str(stderr_output, 200)}...")
+                # Mostrar stderr completo para debugging (sin truncar)
+                logger.info(f"[DEBUG] Script stderr (completo):")
+                logger.info(stderr_output)
             
             logger.info(f"[PROCESO] Lectura de output completada")
             
@@ -811,7 +813,7 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
             
             print(f"[RESULTADO FINAL] SOLO_SCORE:")
             print(f"  score: {score_val}")
-            print(f"  info: Score fuera del rango 80-89")
+            print(f"  info: No se obtuvieron datos de Camino A (solo score disponible)")
             
             print(f"\n[JSON ENVIADO AL BACKEND]:")
             print(json.dumps(final_data, indent=2, ensure_ascii=False))
