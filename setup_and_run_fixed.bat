@@ -221,7 +221,7 @@ if exist "Workers-T3\.env" (
     REM --- Valores por defecto para nueva configuracion ---
     set "CURRENT_PC_ID=%COMPUTERNAME%"
     set "CURRENT_WORKER_TYPE=deudas"
-    set "CURRENT_BACKEND_URL=http://192.168.9.11:8000"
+    set "CURRENT_BACKEND_URL=http://192.168.9.160:8000"
     set "CURRENT_API_KEY=lucas123"
     
     goto :configurar_env
