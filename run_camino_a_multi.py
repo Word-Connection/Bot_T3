@@ -824,7 +824,7 @@ def _copy_id_with_retries() -> str:
 def _append_log(log_path: Path, dni: str, content: str):
     one = (content or '').replace('\r',' ').replace('\n',' ').strip()
     if len(one) > 400:
-        one = one[:400] + '…'
+        one = one[:400] + '...'
     if not one:
         one = 'No Tiene Pedido'
     line = f"{dni}  {one}\n"
@@ -1413,23 +1413,28 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
             copied_text = _read_clipboard_only(max_attempts=2, read_delay=0.3)
             
             if copied_text and 'Actual' in copied_text:
-                print(f"[CaminoA] ✓ 'Actual' encontrado en posición {position + 1}")
+                print(f"[CaminoA] OK 'Actual' encontrado en posicion {position + 1}")
                 actual_found = True
                 break
             
             if attempt < max_attempts_per_position - 1:
-                print(f"[CaminoA] Intento {attempt + 2}/{max_attempts_per_position} en posición {position + 1}")
+                print(f"[CaminoA] Intento {attempt + 2}/{max_attempts_per_position} en posicion {position + 1}")
                 time.sleep(0.3)
         
         if not actual_found:
             print(f"[CaminoA] No hay más 'Actuales' (posición {position + 1} sin 'Actual')")
             break
         
+        # Click izquierdo en la misma posición para seleccionar el Actual
+        print(f"[CaminoA] Seleccionando Actual en posición {position + 1} (Y={current_y})")
+        _click(temp_seleccion_x, current_y, f'fa_seleccion Actual {actuales_procesados + 1}', 0.5)
+        
+        # Esperar a que se abra el detalle del Actual
+        print(f"[CaminoA] Esperando a que se abra el detalle del Actual...")
+        time.sleep(3.0)
+        
         # ===== PROCESAR ESTE ACTUAL INMEDIATAMENTE =====
         print(f"[CaminoA] Procesando Actual {actuales_procesados + 1} en posición {position + 1} (Y={current_y})")
-        
-        # Click en la posición del Actual para seleccionarlo (ya abre automáticamente)
-        _click(temp_seleccion_x, current_y, f'fa_seleccion Actual {actuales_procesados + 1}', 1.5)
         
         # Copiar saldo (doble click en fa_deuda para seleccionar, luego right-click + copy)
         dx, dy = _xy(conf, 'fa_deuda')
@@ -1581,15 +1586,16 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         id_ref = None
         use_pynput = os.getenv('NAV_USE_PYNPUT','1') in ('1','true','True')
         # Nuevo camino: contar y procesar 'Actual' por fa_records_btn
-        n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-        if n_actual <= 0:
-            # Si no hay Actual, continuar con resumen/cuenta/lista como fallback
-            _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-        else:
-            # Si hubo Actual(es), mantener el camino original: continuar con resumen/cuenta/lista
-            _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
-
-    # Nota: Si hubo Actual (n_actual > 0), no ejecutamos resumen/cuenta/lista aquí.
+        try:
+            n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        except Exception as e:
+            print(f"[CaminoA] ERROR en _process_fa_actuales: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            n_actual = 0
+        
+        # Siempre continuar con resumen/cuenta/lista (haya o no Actuales)
+        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
 
     # Repetir para los registros restantes, usando IDs para controlar cuándo terminar
     for loop_iteration in range(1, records_total):
@@ -1675,7 +1681,14 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
         x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
         # Procesar Actual(es) de forma consistente: buscar -> records -> cerrar -> iterar N
-        n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        try:
+            n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        except Exception as e:
+            print(f"[CaminoA] ERROR en _process_fa_actuales (loop): {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            n_actual = 0
+        
         # Mantener el flujo original: siempre continuar con resumen/cuenta/lista
         _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
 
