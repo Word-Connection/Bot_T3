@@ -84,7 +84,8 @@ def main():
     try:
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
-        venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
+
+        venv_python = project_root / 'venv' / 'bin' / 'python'
         
         if not venv_python.exists():
             stages.append({

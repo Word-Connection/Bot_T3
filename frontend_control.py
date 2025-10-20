@@ -22,12 +22,31 @@ class BotController:
         self.worker_status = "detenido"
         self.worker_logs = []
         self.start_time = None
+        self.config = self.load_config()
         self.setup_routes()
         
+    def load_config(self):
+        """Carga la configuración del .env al inicio"""
+        env_path = os.path.join("Workers-T3", ".env")
+        if os.path.exists(env_path):
+            return self.read_env_file(env_path)
+        return {}
+    
     def setup_routes(self):
         @self.app.route('/')
         def index():
             return render_template('control.html')
+        
+        @self.app.route('/api/config')
+        def get_config():
+            return jsonify({
+                'config': {
+                    'PC_ID': self.config.get('PC_ID', 'No configurado'),
+                    'WORKER_TYPE': self.config.get('WORKER_TYPE', 'No configurado'),
+                    'BACKEND_URL': self.config.get('BACKEND_URL', 'No configurado'),
+                    'API_KEY': self.config.get('API_KEY', 'No configurado')[:8] + '***' if self.config.get('API_KEY') else 'No configurado'
+                }
+            })
         
         @self.app.route('/api/status')
         def get_status():
@@ -43,15 +62,15 @@ class BotController:
             if self.worker_status == "ejecutando":
                 return jsonify({'success': False, 'message': 'El bot ya está ejecutándose'})
             
-            # Iniciar countdown de 50 segundos
+            # Iniciar countdown de 30 segundos
             self.worker_status = "esperando"
-            self.add_log("⏳ Iniciando bot en 50 segundos...")
+            self.add_log("⏳ Iniciando bot en 30 segundos...")
             self.add_log("🖥️ ABRE EL SISTEMA T3 AHORA y dejalo maximizado")
             
             # Usar threading para el delay
             threading.Thread(target=self.delayed_start, daemon=True).start()
             
-            return jsonify({'success': True, 'message': 'Bot iniciando en 50 segundos'})
+            return jsonify({'success': True, 'message': 'Bot iniciando en 30 segundos'})
         
         @self.app.route('/api/stop', methods=['POST'])
         def stop_worker():
@@ -66,8 +85,8 @@ class BotController:
             return jsonify({'logs': self.worker_logs})
     
     def delayed_start(self):
-        """Inicia el worker después de 50 segundos"""
-        for i in range(50, 0, -1):
+        """Inicia el worker después de 30 segundos"""
+        for i in range(30, 0, -1):
             if self.worker_status != "esperando":  # Si se cancela
                 return
             self.add_log(f"⏱️ Iniciando en {i} segundos... (Prepara el sistema T3)")
