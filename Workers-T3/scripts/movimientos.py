@@ -84,9 +84,11 @@ def main():
     try:
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
+        if sys.platform == "win32":
+            venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
+        else:
+            venv_python = project_root / 'venv' / 'bin' / 'python'
 
-        venv_python = project_root / 'venv' / 'bin' / 'python'
-        
         if not venv_python.exists():
             stages.append({
                 "info": f"Error: No se encuentra Python del venv en {venv_python}"
@@ -94,12 +96,9 @@ def main():
             result = {"dni": dni, "stages": stages}
             print(json.dumps(result))
             return
-            
+
         python_exe = str(venv_python)
-        
-        # Log para debugging
         print(f"DEBUG: Usando Python del venv: {python_exe}", file=sys.stderr)
-        
         result_proc = subprocess.run([
             python_exe, str(script_path),
             '--dni', dni,
