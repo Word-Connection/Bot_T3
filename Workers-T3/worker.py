@@ -76,7 +76,7 @@ PROCESS_DELAY = args.delay
 POLL_INTERVAL = args.poll_interval
 API_KEY = args.api_key
 TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
-VALID_TASK_TYPES = ["deudas", "movimientos"]
+VALID_TASK_TYPES = ["deudas", "movimientos", "pin"]
 
 # WebSocket globals
 ws_connected = False
@@ -183,6 +183,15 @@ def get_task() -> Optional[dict]:
         
         # Determinar si es tarea PIN o normal
         is_pin_task = "operacion" in task and task.get("operacion") == "pin"
+        task_type = "pin" if is_pin_task else TIPO
+        
+        # VALIDACIÓN: Rechazar tareas que no sean del tipo de este worker
+        if TIPO == "pin" and not is_pin_task:
+            logger.warning(f"[RECHAZO] Worker PIN recibió tarea {TIPO}, rechazando")
+            return None
+        elif TIPO != "pin" and is_pin_task:
+            logger.warning(f"[RECHAZO] Worker {TIPO} recibió tarea PIN, rechazando")
+            return None
         
         if is_pin_task:
             # Para PIN, validar teléfono
@@ -1074,7 +1083,9 @@ def get_task_from_queue():
 # Loop principal
 # -----------------------------
 def main_loop():
-    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {TIPO} | Modo: WebSocket")
+    worker_type_display = "PIN" if TIPO == "pin" else TIPO.upper()
+    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Modo: WebSocket")
+    logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}")
     
     # Crear directorio de logs
     os.makedirs("logs", exist_ok=True)
