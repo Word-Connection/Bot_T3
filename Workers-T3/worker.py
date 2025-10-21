@@ -468,6 +468,7 @@ def process_task(task: dict) -> bool:
                                 screenshot_b64 = None
                                 dni_for_pattern = str(input_data)
                                 pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
+                                # Esperar hasta 12 segundos por la imagen
                                 for attempt in range(24):
                                     matching_files = glob.glob(pattern)
                                     if matching_files:
@@ -493,6 +494,7 @@ def process_task(task: dict) -> bool:
                                                 logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
                                         except Exception as img_e:
                                             logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
+                                # Enviar solo un update de score_obtenido, siempre con imagen si está disponible
                                 score_update = {
                                     "dni": input_data,
                                     "score": score_val,
@@ -505,6 +507,7 @@ def process_task(task: dict) -> bool:
                                 send_partial_update(task_id, score_update, status="running")
                                 logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
                                 score_sent = True
+                                # Si el score está en el rango de deudas, continuar con updates de búsqueda
                                 if 80 <= score_val <= 89:
                                     time.sleep(2)
                                     search_update = {
