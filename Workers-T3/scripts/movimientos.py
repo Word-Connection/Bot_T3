@@ -92,10 +92,8 @@ def main():
     try:
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
-        if sys.platform == "win32":
-            venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
-        else:
-            venv_python = project_root / 'venv' / 'bin' / 'python'
+        venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
+
 
         if not venv_python.exists():
             stages.append({

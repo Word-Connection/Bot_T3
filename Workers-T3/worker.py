@@ -247,12 +247,8 @@ def process_task(task: dict) -> bool:
             return False
         
         logger.info(f"[WORKER] Ejecutando script: {script_path}")
-        
-        # Usar el Python del entorno virtual del proyecto si existe
-        if sys.platform == "win32":
-            project_venv = os.path.join(base_dir, '..', 'venv', 'Scripts', 'python.exe')
-        else:
-            project_venv = os.path.join(base_dir, '..', 'venv', 'bin', 'python')
+
+        project_venv = os.path.join(base_dir, '..', 'venv', 'Scripts', 'python.exe')
 
         if os.path.exists(project_venv):
             python_executable = project_venv
