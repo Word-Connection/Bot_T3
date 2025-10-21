@@ -3,6 +3,10 @@
     "x": 1560,
     "y": 256
   },
+    "cuit_field": {
+    "x": 1690,
+    "y": 256
+  },
   "service_id_field": {
     "x": 305,
     "y": 257
@@ -32,5 +36,14 @@
   "copy_area": {
     "x": 837,
     "y": 374
-  }
+  },
+  "id_servicio": {
+    "x": 307,
+    "y": 275
+  },
+  "id_copy": {
+    "x": 338,
+    "y": 310
+  },
+  "id_servicio_offset_y": 19
 }

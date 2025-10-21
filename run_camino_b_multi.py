@@ -603,8 +603,9 @@ def _collect_ids(csv_path: Path, dni: str) -> List[str]:
         if n not in ids:
             ids.append(n)
     if not ids:
-        print(f"No se encontraron IDs para DNI {dni}")
-        sys.exit(3)
+        print(f"[MultiB] No se encontraron IDs en CSV para DNI {dni}")
+        print(f"[MultiB] Se activará búsqueda directa en el sistema")
+        return []  # Retornar lista vacía en lugar de exit
     print(f"[MultiB] IDs detectados para DNI {dni}: {ids}")
     return ids
 
@@ -690,6 +691,132 @@ def _append_log_raw(log_path: Path, raw_line: str):
         f.write(raw_line + '\n')
     print(f"[MultiB] Log registrado: {raw_line}")
 
+def _collect_movimientos_uno_por_uno(conf: Dict[str, Any], log_path: Path, service_id: str, base_delay: float = 1.0) -> List[str]:
+    """
+    Recolecta movimientos uno por uno cuando no se encuentran en la base de datos.
+    
+    Copia el apartado completo de cada fila:
+    Accion de orden | Producto | ID de servicio | Estado | ID de orden | Fecha de aplicacion | Fecha de vencimiento | ID de accion de orden | Oferta | ID de cliente | Nombre del cliente | Modo de orden | ID de documento | CUIT | StoreID
+    
+    Extrae: ID de servicio y Fecha de aplicacion
+    
+    IMPORTANTE: Esta funcion es TEMPORAL - solo recolecta IDs para procesarlos en la misma ejecucion.
+    NO guarda los IDs para futuras ejecuciones.
+    
+    Args:
+        conf: Configuracion de coordenadas
+        log_path: Ruta del archivo de log
+        service_id: ID de servicio actual (para contexto en logs)
+        base_delay: Delay base entre operaciones
+    
+    Returns:
+        Lista de IDs de servicio encontrados (temporales para esta ejecucion)
+    """
+    print(f"[MultiB] Recolectando IDs de servicio uno por uno (TEMPORAL) para DNI asociado a {service_id}")
+    
+    # Obtener coordenadas
+    id_servicio_x = conf.get('id_servicio', {}).get('x')
+    id_servicio_y = conf.get('id_servicio', {}).get('y')
+    id_copy_x = conf.get('id_copy', {}).get('x')
+    id_copy_y = conf.get('id_copy', {}).get('y')
+    offset_y = conf.get('id_servicio_offset_y', 19)
+    
+    if not all([id_servicio_x, id_servicio_y, id_copy_x, id_copy_y]):
+        print("[MultiB] ERROR: Coordenadas id_servicio o id_copy no configuradas")
+        return []
+    
+    ids_encontrados = []  # Lista temporal de IDs de servicio
+    prev_clipboard = None
+    position = 0
+    max_positions = 50  # Limite de seguridad
+    
+    while position < max_positions:
+        # Calcular coordenada Y actual con offset
+        current_y = id_servicio_y + (position * offset_y)
+        
+        print(f"[MultiB] Posicion {position + 1}: Y={current_y}")
+        
+        # Limpiar clipboard
+        _clear_clipboard()
+        time.sleep(0.2)
+        
+        # IMPORTANTE: Left-click primero para seleccionar la fila
+        print(f"[MultiB] Left-click para seleccionar fila en ({id_servicio_x}, {current_y})")
+        pg.moveTo(id_servicio_x, current_y, duration=0.15)
+        time.sleep(0.2)
+        pg.click()  # Click izquierdo para seleccionar
+        time.sleep(0.3)
+        
+        # Ahora right-click en la misma posicion
+        print(f"[MultiB] Right-click para menu contextual en ({id_servicio_x}, {current_y})")
+        pg.rightClick()
+        time.sleep(0.3)
+        
+        # Click en opcion Copiar del menu contextual (ajustando Y con el mismo offset)
+        current_copy_y = id_copy_y + (position * offset_y)
+        print(f"[MultiB] Click en Copiar ({id_copy_x}, {current_copy_y})")
+        pg.moveTo(id_copy_x, current_copy_y, duration=0.1)
+        time.sleep(0.1)
+        pg.click()
+        time.sleep(0.5)
+        
+        # Leer clipboard
+        clipboard_content = _get_clipboard_text().strip()
+        
+        # Detectar fin: clipboard repetido
+        if clipboard_content == prev_clipboard:
+            print(f"[MultiB] Clipboard repetido. Fin de movimientos en posicion {position + 1}")
+            break
+        
+        # Si esta vacio, tambien terminar
+        if not clipboard_content:
+            print(f"[MultiB] Clipboard vacio en posicion {position + 1}. Fin de movimientos")
+            break
+        
+        # Parsear el contenido para extraer ID de servicio y Fecha de aplicacion
+        # El clipboard contiene múltiples líneas:
+        # Línea 1 (header): Acción de orden    Producto    ID de servicio    Estado...
+        # Línea 2 (datos):  Cambiar           Movil       2944834762         Terminado...
+        
+        # Separar por líneas y tomar la segunda línea (índice 1) que tiene los datos reales
+        lines = clipboard_content.split('\n')
+        data_line = lines[1].strip() if len(lines) > 1 else clipboard_content.strip()
+        
+        # Parsear la línea de datos por tabs o espacios múltiples
+        parts = re.split(r'\t+|\s{2,}', data_line)
+        parts = [p.strip() for p in parts if p.strip()]
+        
+        # DEBUG: Mostrar todas las partes parseadas
+        print(f"[MultiB] DEBUG - Total líneas: {len(lines)}")
+        print(f"[MultiB] DEBUG - Línea de datos: '{data_line[:100]}...'")
+        print(f"[MultiB] DEBUG - Total partes encontradas: {len(parts)}")
+        for i, part in enumerate(parts[:10]):  # Mostrar primeras 10 partes
+            print(f"[MultiB] DEBUG - parts[{i}] = '{part}'")
+        
+        # Indices: [0]=Accion, [1]=Producto, [2]=ID servicio, [3]=Estado, [4]=ID orden, [5]=Fecha aplicacion
+        id_servicio_extracted = parts[2] if len(parts) > 2 else ""
+        fecha_aplicacion = parts[5] if len(parts) > 5 else ""
+        
+        # Agregar ID a la lista temporal (solo si es valido)
+        if id_servicio_extracted and id_servicio_extracted.strip():
+            ids_encontrados.append(id_servicio_extracted.strip())
+        
+        # Registrar en log
+        log_entry = f"{service_id}  Pos{position+1} | ID Servicio: {id_servicio_extracted} | Fecha: {fecha_aplicacion} | Full: {clipboard_content[:200]}"
+        _append_log_raw(log_path, log_entry)
+        
+        print(f"[MultiB] Movimiento {position + 1}: ID={id_servicio_extracted}, Fecha={fecha_aplicacion}")
+        
+        # Actualizar para siguiente iteracion
+        prev_clipboard = clipboard_content
+        position += 1
+        
+        time.sleep(base_delay)
+    
+    print(f"[MultiB] Total de IDs recolectados (TEMPORAL): {len(ids_encontrados)}")
+    print(f"[MultiB] IDs encontrados: {ids_encontrados}")
+    return ids_encontrados
+
 def run(
     dni: str,
     csv_path: Path,
@@ -748,51 +875,102 @@ def run(
         ids = [single_id]
     else:
         ids = _collect_ids(csv_path, dni)
+    
+    # NUEVO: Si no hay IDs, activar modo de búsqueda directa
+    busqueda_directa_mode = len(ids) == 0
+    ids_from_system = []  # Inicializar para el resumen final
+    if busqueda_directa_mode:
+        print("[MultiB] ===== MODO BÚSQUEDA DIRECTA ACTIVADO =====")
+        print("[MultiB] DNI no encontrado en CSV - Se buscarán IDs directamente en el sistema")
 
-    # 0) DNI inicial (fuera del loop por ID)
-    x,y = _xy(conf,'dni_field')
-    print(f"[MultiB] Procesando DNI: '{dni}' en coordenadas ({x},{y})")
-    _click(x,y,'DNI field', base_step_delay)
+    # LIMPIEZA INICIAL DE LOS 3 CAMPOS (Service ID, DNI y CUIT)
+    print("[MultiB] === LIMPIEZA INICIAL DE CAMPOS ===")
     
-    # Limpieza DNI con doble click + delete
-    print("[MultiB] === INICIANDO LIMPIEZA DNI ===")
-    print(f"[MultiB] Preparando para escribir DNI: '{dni}'")
+    # Función auxiliar para limpiar un campo
+    def _limpiar_campo(field_key: str, field_label: str):
+        fx, fy = _xy(conf, field_key)
+        if fx or fy:
+            print(f"[MultiB] Limpiando {field_label}...")
+            pg.click(fx, fy)
+            time.sleep(0.2)
+            
+            # Limpieza: 2 clicks + delete + backspace
+            pg.click()
+            time.sleep(0.1)
+            pg.click()
+            time.sleep(0.2)
+            pg.press('delete')
+            time.sleep(0.6)
+            pg.press('backspace')
+            time.sleep(0.2)
+            
+            # Segundo pase
+            pg.click(fx, fy)
+            time.sleep(0.2)
+            for i in range(3):
+                pg.press('backspace')
+                time.sleep(0.1)
+            time.sleep(0.2)
     
-    # Espera antes de cualquier acción
-    time.sleep(0.3)
+    # Limpiar los 3 campos siempre al inicio
+    _limpiar_campo('service_id_field', 'Service ID')
+    _limpiar_campo('dni_field', 'DNI Field')
+    _limpiar_campo('cuit_field', 'CUIT Field')
+    print("[MultiB] === LIMPIEZA INICIAL COMPLETADA ===")
+
+    # 0) DNI/CUIT inicial (fuera del loop por ID)
+    # Detectar si es CUIT (11 dígitos) o DNI (8 dígitos o menos)
+    dni_clean = dni.strip()
+    is_cuit = len(dni_clean) == 11 and dni_clean.isdigit()
     
-    # 2 clicks simples + delete + esperar punto + backspace
-    print("[MultiB] Limpiando DNI con 2 clicks + Delete...")
-    pg.click()
-    time.sleep(0.1)
-    pg.click()
-    time.sleep(0.2)
-    pg.press('delete')
-    print("[MultiB] Esperando aparición del punto automático...")
-    time.sleep(0.6)  # Esperar 0.6 segundos para que aparezca el punto
-    print("[MultiB] Eliminando punto con backspace...")
-    pg.press('backspace')  # Eliminar el punto que aparece automáticamente
-    time.sleep(0.2)
+    if is_cuit:
+        field_key = 'cuit_field'
+        field_label = 'CUIT field'
+        print(f"[MultiB] Detectado CUIT de 11 dígitos: '{dni}'")
+    else:
+        field_key = 'dni_field'
+        field_label = 'DNI field'
+        print(f"[MultiB] Detectado DNI: '{dni}'")
     
-    # Segundo pase: re-seleccionar campo y borrar 3 veces
-    print("[MultiB] Aplicando segundo pase de limpieza...")
-    nav_stabilize_delay: float = 0.15,
-    single_id: Optional[str] = None,
-    print("[MultiB] Re-seleccionando campo DNI...")
-    dni_x, dni_y = _xy(conf, 'dni_field')
-    pg.click(dni_x, dni_y)
-    time.sleep(0.2)
+    x, y = _xy(conf, field_key)
+    print(f"[MultiB] Procesando {field_label}: '{dni}' en coordenadas ({x},{y})")
+    _click(x, y, field_label, base_step_delay)
     
-    print("[MultiB] Borrando 3 veces...")
-    for i in range(3):
-        pg.press('backspace')
-        print(f"[MultiB] Backspace {i+1}/3")
-        time.sleep(0.1)
-    time.sleep(0.2)
-    
-    print("[MultiB] === LIMPIEZA DNI COMPLETADA ===")
-    
+    # Escribir el DNI/CUIT (los campos ya fueron limpiados al inicio)
+    print(f"[MultiB] Escribiendo {field_label}: '{dni}'")
     _type(dni, base_step_delay)
+    
+    # NUEVO: Si modo búsqueda directa, presionar Enter y recolectar IDs del sistema
+    if busqueda_directa_mode:
+        print("[MultiB] Presionando Enter después de DNI para buscar en el sistema...")
+        pg.press('enter')
+        time.sleep(post_enter_delay)  # Esperar a que el sistema busque
+        
+        print("[MultiB] Recolectando IDs de servicio directamente del sistema...")
+        # Usar un service_id dummy para el contexto del log
+        ids_from_system = _collect_movimientos_uno_por_uno(conf, log_path, f"DNI_{dni}", base_step_delay)
+        
+        if len(ids_from_system) > 0:
+            # Filtrar IDs "desconocido" y eliminar duplicados manteniendo el orden
+            ids_validos = [id_svc for id_svc in ids_from_system if id_svc.lower() != 'desconocido']
+            # Usar dict.fromkeys() para eliminar duplicados manteniendo el orden
+            ids_unicos = list(dict.fromkeys(ids_validos))
+            
+            print(f"[MultiB] IDs totales recolectados: {len(ids_from_system)}")
+            print(f"[MultiB] IDs únicos (sin duplicados ni 'desconocido'): {len(ids_unicos)}")
+            
+            if len(ids_unicos) > 0:
+                ids = ids_unicos  # Reemplazar la lista vacía con los IDs únicos
+                print(f"[MultiB] IDs a procesar: {ids_unicos}")
+            else:
+                print(f"[MultiB] No se encontraron IDs válidos para DNI {dni}")
+                print(f"[MultiB] Finalizando ejecución")
+                return
+        else:
+            print(f"[MultiB] No se encontraron IDs en el sistema para DNI {dni}")
+            print(f"[MultiB] Finalizando ejecución")
+            return
+    
     svc_x, svc_y = _xy(conf,'service_id_field')
     prev_trailing_part: Optional[str] = None
 
@@ -911,10 +1089,119 @@ def run(
             time.sleep(copy_wait)
             clip_txt = _get_clipboard_text()
         display_txt = clip_txt.replace('\r',' ').replace('\n',' ').strip()
+        ids_temporales_procesados = False  # Flag para indicar si se procesaron IDs temporales
+        
         if not display_txt:
-            # vacío directo
+            # vacío directo - NO HAY MOVIMIENTOS EN LA BASE
             new_info = False
-            log_line = f"{service_id}  No Tiene Pedido"
+            log_line = f"{service_id}  No Tiene Pedido (base de datos)"
+            
+            # NUEVO: Consultar IDs uno por uno y procesarlos TEMPORALMENTE
+            print(f"[MultiB] No hay movimientos en BD para {service_id}. Recolectando IDs...")
+            ids_temporales = _collect_movimientos_uno_por_uno(conf, log_path, service_id, base_step_delay)
+            
+            if len(ids_temporales) > 0:
+                ids_temporales_procesados = True
+                print(f"[MultiB] Se encontraron {len(ids_temporales)} IDs. Procesando cada uno...")
+                
+                # Cerrar la pestaña actual antes de procesar los nuevos IDs
+                bx, by = _xy(conf,'close_tab_btn')
+                _click(bx, by, 'Cerrar pestaña antes de procesar IDs temporales', base_step_delay)
+                
+                # PROCESAR CADA ID TEMPORAL (mismo flujo que IDs normales)
+                for temp_idx, temp_id in enumerate(ids_temporales, start=1):
+                    print(f"[MultiB] Procesando ID temporal {temp_idx}/{len(ids_temporales)}: {temp_id}")
+                    
+                    # Limpiar y escribir el service ID temporal
+                    _click(svc_x, svc_y, f'Service ID field (temp {temp_idx})', 0.5)
+                    time.sleep(0.3)
+                    pg.click()
+                    time.sleep(0.1)
+                    pg.click()
+                    time.sleep(0.2)
+                    pg.press('delete')
+                    time.sleep(0.6)
+                    pg.press('backspace')
+                    time.sleep(0.2)
+                    
+                    # Segundo pase de limpieza
+                    pg.click(svc_x, svc_y)
+                    time.sleep(0.2)
+                    for i in range(3):
+                        pg.press('backspace')
+                        time.sleep(0.1)
+                    time.sleep(0.2)
+                    
+                    # Escribir el ID temporal
+                    pg.typewrite(temp_id, interval=0.08)
+                    time.sleep(0.3)
+                    
+                    # Enter
+                    pg.press('enter')
+                    time.sleep(post_enter_delay)
+                    
+                    # Resto del flujo (doble click primera fila, actividad, filtro, copia)
+                    # Paso 4: primera fila (DOBLE CLICK)
+                    fx, fy = _xy(conf, 'first_row')
+                    pg.moveTo(fx, fy, duration=0.15)
+                    time.sleep(0.2)
+                    pg.doubleClick()
+                    time.sleep(0.3)
+                    
+                    # Paso 5: Actividad (DOBLE CLICK - SIN MOVER MOUSE)
+                    ax, ay = _xy(conf, 'actividad_btn')
+                    pg.moveTo(ax, ay, duration=0.15)
+                    time.sleep(0.2)
+                    pg.doubleClick()
+                    time.sleep(0.3)
+                    
+                    # Navegación con Ctrl+Tab
+                    right_moves_config = conf.get('actividad_right_moves', {})
+                    if right_moves_config:
+                        _try_multiple_navigation_methods_no_mouse(right_moves_config)
+                    else:
+                        for _ in range(2):
+                            pg.hotkey('ctrl', 'tab')
+                            time.sleep(0.8)
+                        time.sleep(0.2)
+                    
+                    # Filtro doble click
+                    fx2, fy2 = _xy(conf, 'filtro_btn')
+                    _click(fx2, fy2, 'Filtro (1)', 0.5)
+                    time.sleep(filter_second_delay)
+                    _click(fx2, fy2, 'Filtro (2)', 0.5)
+                    
+                    # Copiar
+                    cx, cy = _xy(conf, 'copy_area')
+                    _click(cx, cy, 'Copy area', 0.5)
+                    _clear_clipboard()
+                    time.sleep(0.2)
+                    pg.keyDown('ctrl')
+                    time.sleep(0.1)
+                    pg.press('c')
+                    time.sleep(0.3)
+                    pg.keyUp('ctrl')
+                    time.sleep(1.0)
+                    
+                    temp_clip = _get_clipboard_text()
+                    temp_display = temp_clip.replace('\r', ' ').replace('\n', ' ').strip()
+                    
+                    if temp_display:
+                        temp_log = f"{temp_id}  {temp_display}"
+                        _append_log_raw(log_path, temp_log)
+                        print(f"[MultiB] ID temporal {temp_id}: Datos copiados")
+                    else:
+                        _append_log_raw(log_path, f"{temp_id}  No Tiene Pedido")
+                        print(f"[MultiB] ID temporal {temp_id}: Sin datos")
+                    
+                    # Cerrar pestaña
+                    _click(bx, by, f'Cerrar pestaña ID temporal {temp_idx}', base_step_delay)
+                
+                new_info = True  # Se procesaron IDs temporales
+                log_line = f"{service_id}  {len(ids_temporales)} IDs procesados (consulta directa)"
+            else:
+                print(f"[MultiB] No se encontraron IDs para {service_id}")
+                
         else:
             parts = display_txt.split()
             if len(parts) > 1:
@@ -922,9 +1209,116 @@ def run(
             else:
                 trailing = ''
             if trailing and prev_trailing_part is not None and trailing == prev_trailing_part:
-                # repetido => no hay nuevo
+                # repetido => no hay nuevo - NO HAY MOVIMIENTOS EN LA BASE
                 new_info = False
-                log_line = f"{service_id}  No Tiene Pedido"
+                log_line = f"{service_id}  No Tiene Pedido (base de datos - repetido)"
+                
+                # NUEVO: Consultar IDs uno por uno y procesarlos TEMPORALMENTE
+                print(f"[MultiB] Clipboard repetido para {service_id}. Recolectando IDs...")
+                ids_temporales = _collect_movimientos_uno_por_uno(conf, log_path, service_id, base_step_delay)
+                
+                if len(ids_temporales) > 0:
+                    ids_temporales_procesados = True
+                    print(f"[MultiB] Se encontraron {len(ids_temporales)} IDs. Procesando cada uno...")
+                    
+                    # Cerrar la pestaña actual antes de procesar los nuevos IDs
+                    bx, by = _xy(conf,'close_tab_btn')
+                    _click(bx, by, 'Cerrar pestaña antes de procesar IDs temporales', base_step_delay)
+                    
+                    # PROCESAR CADA ID TEMPORAL (mismo flujo que IDs normales)
+                    for temp_idx, temp_id in enumerate(ids_temporales, start=1):
+                        print(f"[MultiB] Procesando ID temporal {temp_idx}/{len(ids_temporales)}: {temp_id}")
+                        
+                        # Limpiar y escribir el service ID temporal
+                        _click(svc_x, svc_y, f'Service ID field (temp {temp_idx})', 0.5)
+                        time.sleep(0.3)
+                        pg.click()
+                        time.sleep(0.1)
+                        pg.click()
+                        time.sleep(0.2)
+                        pg.press('delete')
+                        time.sleep(0.6)
+                        pg.press('backspace')
+                        time.sleep(0.2)
+                        
+                        # Segundo pase de limpieza
+                        pg.click(svc_x, svc_y)
+                        time.sleep(0.2)
+                        for i in range(3):
+                            pg.press('backspace')
+                            time.sleep(0.1)
+                        time.sleep(0.2)
+                        
+                        # Escribir el ID temporal
+                        pg.typewrite(temp_id, interval=0.08)
+                        time.sleep(0.3)
+                        
+                        # Enter
+                        pg.press('enter')
+                        time.sleep(post_enter_delay)
+                        
+                        # Resto del flujo (doble click primera fila, actividad, filtro, copia)
+                        # Paso 4: primera fila (DOBLE CLICK)
+                        fx, fy = _xy(conf, 'first_row')
+                        pg.moveTo(fx, fy, duration=0.15)
+                        time.sleep(0.2)
+                        pg.doubleClick()
+                        time.sleep(0.3)
+                        
+                        # Paso 5: Actividad (DOBLE CLICK - SIN MOVER MOUSE)
+                        ax, ay = _xy(conf, 'actividad_btn')
+                        pg.moveTo(ax, ay, duration=0.15)
+                        time.sleep(0.2)
+                        pg.doubleClick()
+                        time.sleep(0.3)
+                        
+                        # Navegación con Ctrl+Tab
+                        right_moves_config = conf.get('actividad_right_moves', {})
+                        if right_moves_config:
+                            _try_multiple_navigation_methods_no_mouse(right_moves_config)
+                        else:
+                            for _ in range(2):
+                                pg.hotkey('ctrl', 'tab')
+                                time.sleep(0.8)
+                            time.sleep(0.2)
+                        
+                        # Filtro doble click
+                        fx2, fy2 = _xy(conf, 'filtro_btn')
+                        _click(fx2, fy2, 'Filtro (1)', 0.5)
+                        time.sleep(filter_second_delay)
+                        _click(fx2, fy2, 'Filtro (2)', 0.5)
+                        
+                        # Copiar
+                        cx, cy = _xy(conf, 'copy_area')
+                        _click(cx, cy, 'Copy area', 0.5)
+                        _clear_clipboard()
+                        time.sleep(0.2)
+                        pg.keyDown('ctrl')
+                        time.sleep(0.1)
+                        pg.press('c')
+                        time.sleep(0.3)
+                        pg.keyUp('ctrl')
+                        time.sleep(1.0)
+                        
+                        temp_clip = _get_clipboard_text()
+                        temp_display = temp_clip.replace('\r', ' ').replace('\n', ' ').strip()
+                        
+                        if temp_display:
+                            temp_log = f"{temp_id}  {temp_display}"
+                            _append_log_raw(log_path, temp_log)
+                            print(f"[MultiB] ID temporal {temp_id}: Datos copiados")
+                        else:
+                            _append_log_raw(log_path, f"{temp_id}  No Tiene Pedido")
+                            print(f"[MultiB] ID temporal {temp_id}: Sin datos")
+                        
+                        # Cerrar pestaña
+                        _click(bx, by, f'Cerrar pestaña ID temporal {temp_idx}', base_step_delay)
+                    
+                    new_info = True  # Se procesaron IDs temporales
+                    log_line = f"{service_id}  {len(ids_temporales)} IDs procesados (consulta directa)"
+                else:
+                    print(f"[MultiB] No se encontraron IDs para {service_id}")
+                    
             else:
                 new_info = True
                 log_line = f"{service_id}  {display_txt}"  # incluir service_id antes del contenido
@@ -933,11 +1327,15 @@ def run(
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
         time.sleep(_step_delay(step_delays,7,base_step_delay))
-        if new_info:
+        
+        # Solo cerrar pestaña si NO se procesaron IDs temporales (ya se cerró en el sub-loop)
+        if new_info and not ids_temporales_procesados:
             bx, by = _xy(conf,'close_tab_btn')
             _click(bx, by, 'Cerrar pestaña', _step_delay(step_delays,8,base_step_delay))
-        else:
+        elif not new_info:
             print('[MultiB] Se omite cerrar pestaña (sin nuevo pedido)')
+        else:
+            print('[MultiB] Se omite cerrar pestaña (ya cerrada en procesamiento temporal)')
     # Copia final opcional
     fx_final, fy_final = _xy(conf,'final_copy_area')
     if fx_final or fy_final:
@@ -948,7 +1346,7 @@ def run(
         print('[MultiB] Copiado final al portapapeles')
 
     # Limpieza final de campos para dejar listo el próximo pedido
-    print('[MultiB] Limpieza final de Service ID y DNI')
+    print('[MultiB] Limpieza final de Service ID y DNI/CUIT')
     svc_x, svc_y = _xy(conf,'service_id_field')
     if svc_x or svc_y:
         _click(svc_x, svc_y, 'Service ID field (final clear)', 0.1)
@@ -958,16 +1356,32 @@ def run(
         pg.hotkey('shift', 'end')
         time.sleep(0.2)
         pg.press('delete')
-    dx, dy = _xy(conf,'dni_field')
+    
+    # Limpiar el campo correcto según si es CUIT o DNI
+    dx, dy = _xy(conf, field_key)
     if dx or dy:
-        _click(dx, dy, 'DNI field (final clear)', 0.1)
-        # Limpieza final DNI sin Ctrl+A
+        _click(dx, dy, f'{field_label} (final clear)', 0.1)
+        # Limpieza final sin Ctrl+A
         pg.press('home')
         time.sleep(0.1)
         pg.hotkey('shift', 'end')
         time.sleep(0.2)
         pg.press('delete')
     print('[MultiB] Campos limpiados.')
+    
+    # Resumen final
+    print('[MultiB] ========================================')
+    print(f'[MultiB] RESUMEN DE EJECUCIÓN - DNI: {dni}')
+    print('[MultiB] ========================================')
+    if busqueda_directa_mode:
+        print(f'[MultiB] Modo: BÚSQUEDA DIRECTA (DNI no en CSV)')
+        print(f'[MultiB] IDs recolectados del sistema: {len(ids_from_system)}')
+        print(f'[MultiB] IDs únicos procesados: {len(ids)}')
+        print(f'[MultiB] IDs únicos: {ids}')
+    else:
+        print(f'[MultiB] Modo: CSV')
+        print(f'[MultiB] IDs procesados: {len(ids)}')
+    print('[MultiB] ========================================')
     print('[MultiB] Finalizado.')
 
 

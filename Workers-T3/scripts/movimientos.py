@@ -46,35 +46,43 @@ def main():
 
     if not rows_for_dni:
         stages.append({
-            "info": f"No se encontraron líneas para DNI {dni}"
+            "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema"
         })
-        result = {"dni": dni, "stages": stages}
-        print(json.dumps(result))
-        return
-
-    # Simular recolección de IDs (líneas)
-    ids = []
-    for row in rows_for_dni:
-        linea2 = row.get('Linea2', '').strip()
-        if linea2:
-            ids.append(linea2)
-        # Simular extracción de números de Domicilio
-        domicilio = row.get('Domicilio', '')
-        import re
-        nums = re.findall(r'\d+', domicilio)
-        ids.extend(nums)
-
-    ids = list(set(ids))  # únicos
-
-    # Crear CSV temporal
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
-        writer = csv.DictWriter(tmp, fieldnames=reader.fieldnames, delimiter=delimiter)
-        writer.writeheader()
+        
+        # NUEVO: Crear CSV temporal vacío (solo headers) para activar modo búsqueda directa
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
+            writer = csv.DictWriter(tmp, fieldnames=reader.fieldnames, delimiter=delimiter)
+            writer.writeheader()
+            # NO escribir ninguna fila - CSV vacío activará búsqueda directa
+            tmp_csv = tmp.name
+        
+        # Continuar con la ejecución del Camino B en modo búsqueda directa
+        rows_for_dni = []  # Lista vacía pero continúa
+        ids = []  # Lista vacía - activará búsqueda directa
+    else:
+        # Simular recolección de IDs (líneas)
+        ids = []
         for row in rows_for_dni:
-            # Solo escribir campos conocidos para evitar errores
-            clean_row = {k: row.get(k, '') for k in reader.fieldnames}
-            writer.writerow(clean_row)
-        tmp_csv = tmp.name
+            linea2 = row.get('Linea2', '').strip()
+            if linea2:
+                ids.append(linea2)
+            # Simular extracción de números de Domicilio
+            domicilio = row.get('Domicilio', '')
+            import re
+            nums = re.findall(r'\d+', domicilio)
+            ids.extend(nums)
+
+        ids = list(set(ids))  # únicos
+
+        # Crear CSV temporal con las filas encontradas
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
+            writer = csv.DictWriter(tmp, fieldnames=reader.fieldnames, delimiter=delimiter)
+            writer.writeheader()
+            for row in rows_for_dni:
+                # Solo escribir campos conocidos para evitar errores
+                clean_row = {k: row.get(k, '') for k in reader.fieldnames}
+                writer.writerow(clean_row)
+            tmp_csv = tmp.name
 
     # Ejecutar run_camino_b_multi.py
     script_path = Path(__file__).parent / '../../run_camino_b_multi.py'
@@ -132,11 +140,28 @@ def main():
     # Leer el log y parsear movimientos
     movimientos_por_linea = {}
     total_movimientos = 0
+    ids_from_busqueda_directa = []
+    busqueda_directa_detected = False
     
     if log_path.exists():
         with log_path.open('r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
+                
+                # Detectar formato de búsqueda directa: "DNI_29940807  Pos1 | ID Servicio: 2944834762 | Fecha: ..."
+                if line.startswith('DNI_') and '| ID Servicio:' in line:
+                    busqueda_directa_detected = True
+                    # Extraer el ID de servicio
+                    import re
+                    match = re.search(r'ID Servicio:\s*(\S+)', line)
+                    if match:
+                        service_id = match.group(1).strip()
+                        if service_id and service_id.lower() != 'desconocido':
+                            if service_id not in ids_from_busqueda_directa:
+                                ids_from_busqueda_directa.append(service_id)
+                    continue
+                
+                # Formato normal de log: "service_id  contenido"
                 if '  ' in line:
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
@@ -148,7 +173,7 @@ def main():
                                 movimientos_por_linea[service_id] = []
                             
                             # Si el contenido no es "No Tiene Pedido", procesarlo
-                            if content != "No Tiene Pedido" and content != ".":
+                            if content != "No Tiene Pedido" and content != "." and content != "No Tiene Pedido (base de datos)":
                                 # Dividir por líneas si hay múltiples movimientos
                                 lines = content.replace('\\n', '\n').split('\n')
                                 for mov_line in lines:
@@ -159,6 +184,11 @@ def main():
                             else:
                                 # Registrar que no tiene pedidos
                                 movimientos_por_linea[service_id].append("No Tiene Pedido")
+
+    # Si se detectó búsqueda directa, usar esos IDs en lugar de los del CSV
+    if busqueda_directa_detected and ids_from_busqueda_directa:
+        ids = ids_from_busqueda_directa
+        print(f"DEBUG: Búsqueda directa detectada, usando {len(ids)} IDs del log: {ids}", file=sys.stderr)
 
     # Etapa 2: Información de procesamiento
     if total_movimientos > 0:
