@@ -102,6 +102,15 @@ def _get_clipboard_text() -> str:
             return ''
     return ''
 
+def _clear_clipboard():
+    """Limpia el portapapeles"""
+    if pyperclip:
+        try:
+            pyperclip.copy('')
+            print(f"[CaminoJulian] Portapapeles limpiado")
+        except Exception as e:
+            print(f"[CaminoJulian] Error al limpiar clipboard: {e}")
+
 def _parse_fa_ids_from_table(table_text: str) -> List[str]:
     """
     Parsea la tabla copiada y extrae los IDs de FA.
@@ -242,6 +251,9 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     
     for idx, fa_id in enumerate(fa_ids):
         print(f"[CaminoJulian] ===== Procesando registro {idx + 1}/{len(fa_ids)}: ID FA {fa_id} =====")
+        
+        # Limpiar portapapeles antes de cada registro
+        _clear_clipboard()
         
         # 12a: Click en id_area con offset
         current_y = id_area_y + (idx * offset_y)
