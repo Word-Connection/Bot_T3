@@ -789,19 +789,23 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
     Los updates parciales (score, buscando_deudas) ya fueron enviados en tiempo real.
     
     El script deudas.py ahora devuelve:
-    - Si hay Camino A: JSON directo de Camino A (con dni, success, records, fa_actual, cuenta_financiera)
+    - Si hay Camino A (nuevo formato): JSON con {dni, fa_saldos: [{id_fa, saldo}]}
+    - Si hay Camino A (viejo formato): JSON con {dni, fa_actual, cuenta_financiera}
     - Si no hay Camino A: {dni, score, success}
     """
     try:
         print(f"\n[DEUDAS] DNI {dni} - Procesando resultado final")
         print(f"[DEBUG] DATA recibida: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
-        # Verificar si es el JSON completo de Camino A (tiene fa_actual o cuenta_financiera)
-        if "fa_actual" in data or "cuenta_financiera" in data:
+        # Verificar si es el JSON de Camino A (nuevo o viejo formato)
+        # Nuevo formato: tiene "fa_saldos"
+        # Viejo formato: tiene "fa_actual" o "cuenta_financiera"
+        if "fa_saldos" in data or "fa_actual" in data or "cuenta_financiera" in data:
             # Es el JSON directo de Camino A - enviarlo completo
             final_data = data  # Ya es el JSON completo de Camino A
             
-            print(f"[RESULTADO FINAL] DEUDAS COMPLETAS - JSON de Camino A:")
+            formato = "NUEVO (fa_saldos)" if "fa_saldos" in data else "VIEJO (fa_actual/cuenta_financiera)"
+            print(f"[RESULTADO FINAL] DEUDAS COMPLETAS - JSON de Camino A ({formato}):")
             print(json.dumps(final_data, indent=2, ensure_ascii=False))
             
             # Enviar al backend CON el status completed
