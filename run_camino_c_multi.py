@@ -501,9 +501,9 @@ def _ensure_exact_region(rx: int, ry: int, rw: int, rh: int, shot_path: Path) ->
 
 def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None, screenshot_dir: Optional[Path] = None):
     pg.FAILSAFE = True
-    start_delay = float(os.getenv('COORDS_START_DELAY','0.75'))
-    base_delay = float(os.getenv('STEP_DELAY','0.5'))
-    post_enter = float(os.getenv('POST_ENTER_DELAY','2.0'))
+    start_delay = float(os.getenv('COORDS_START_DELAY','0.375'))
+    base_delay = float(os.getenv('STEP_DELAY','0.25'))
+    post_enter = float(os.getenv('POST_ENTER_DELAY','1.0'))
     log_path = log_file or Path('camino_c_copias.log')
     shot_dir = screenshot_dir or Path('capturas_camino_c')
     shot_dir.mkdir(parents=True, exist_ok=True)

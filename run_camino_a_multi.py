@@ -267,12 +267,12 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     - "Corrupto": cualquier otra cosa (números de 4+ dígitos o "Seleccionar"), debe ir al siguiente
     """
     print("[CaminoA] Validando registro seleccionado...")
-    time.sleep(1.5)
+    time.sleep(0.25)
     
     # Presionar Enter UNA SOLA VEZ
     _press_enter(0.1)
     print("[CaminoA] Enter presionado")
-    time.sleep(1.5)
+    time.sleep(1.0)  # Espera adicional de 1 segundo después de Enter
     
     # Ir al área de client_id_field para validar
     x, y = _xy(conf, 'client_id_field')
@@ -282,7 +282,7 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     
     print(f"[CaminoA] Right-click en client_id_field ({x},{y}) para validar")
     pg.click(x, y, button='right')
-    time.sleep(0.5)
+    time.sleep(0.25)
     
     # Click en copi_id_field para copiar el ID
     cx, cy = _xy(conf, 'copi_id_field')
@@ -292,7 +292,7 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     
     print(f"[CaminoA] Click en copi_id_field ({cx},{cy}) para copiar")
     pg.click(cx, cy)
-    time.sleep(0.5)
+    time.sleep(0.25)
     
     # Leer el ID del clipboard (ya copiado por el click)
     id_copied = ""
@@ -318,7 +318,7 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
         
         if attempt < max_copy_attempts - 1:
             print("[CaminoA] Reintentando lectura...")
-            time.sleep(0.5)
+            time.sleep(0.25)
     
     # Validar si tiene números (4+ dígitos) O contiene "Seleccionar" → CORRUPTO
     # "Llamada" o cualquier texto sin números → FUNCIONAL
@@ -956,7 +956,7 @@ def _copy_fa_saldo_context_simple(rax: int, ray: int, cpx: int, cpy: int) -> str
     """
     if rax or ray:
         _right_click(rax, ray, 'fa_deuda_context', 0.1)
-    time.sleep(1.0)
+    time.sleep(0.25)
     if cpx or cpy:
         _click(cpx, cpy, 'fa_deuda_copy', 0.1)
     # Lectura estable mínima
@@ -1494,10 +1494,10 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
 def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None):
     print(f'[CaminoA] run() iniciado para DNI={dni}', flush=True)
     pg.FAILSAFE = True
-    start_delay = float(os.getenv('COORDS_START_DELAY','0.75'))
-    base_delay = float(os.getenv('STEP_DELAY','1.0'))
-    post_enter = float(os.getenv('POST_ENTER_DELAY','2.0'))
-    arrow_nav_delay = float(os.getenv('ARROW_NAV_DELAY','0.15'))
+    start_delay = float(os.getenv('COORDS_START_DELAY','0.25'))
+    base_delay = float(os.getenv('STEP_DELAY','0.25'))
+    post_enter = float(os.getenv('POST_ENTER_DELAY','0.25'))
+    arrow_nav_delay = float(os.getenv('ARROW_NAV_DELAY','0.25'))
     log_path = log_file or Path('camino_a_copias.log')
     jumped_to_client_field = False
 
@@ -1630,6 +1630,22 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         clipboard_after = _read_clipboard_only()
         print(f"[CaminoA] Clipboard después de copiar: '{clipboard_after}'")
         
+        # Validar que el ID no esté vacío o sea solo espacios
+        current_record_id = clipboard_after.strip()
+        
+        # Si el clipboard está vacío o es solo espacios, no hay registro válido
+        if not current_record_id:
+            print(f"[CaminoA] Registro {loop_iteration + 1} sin ID válido (clipboard vacío o espacios). Total procesados: {loop_iteration}")
+            # Cerrar pestaña antes de terminar
+            ctx, cty = _xy(conf, 'close_tab_btn')
+            if ctx or cty:
+                _click(ctx, cty, 'close_tab_btn', base_delay)
+            # Volver a home_area
+            hx, hy = _xy(conf, 'home_area')
+            if hx or hy:
+                _click(hx, hy, 'home_area', base_delay)
+            break
+        
         # Si el clipboard no cambió, significa que no hay más registros
         if clipboard_before == clipboard_after:
             print(f"[CaminoA] No hay más registros disponibles (clipboard no cambió). Total procesados: {loop_iteration}")
@@ -1643,7 +1659,6 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                 _click(hx, hy, 'home_area', base_delay)
             break
         
-        current_record_id = clipboard_after
         print(f"[CaminoA] ID del registro {loop_iteration + 1}: {current_record_id}")
         
         # Agregar el ID a la lista de procesados
