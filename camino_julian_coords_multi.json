@@ -1,0 +1,65 @@
+{
+
+  "cliente_section": {
+      "x": 266,
+      "y": 168
+  },
+  "tipo_doc_btn": {
+    "x": 244,
+    "y": 237
+  },
+  "dni_option": {
+    "x": 140,
+    "y": 276
+  },
+
+    "dni_field": {
+    "x": 913,
+    "y": 240
+  },
+
+  "ver_todos_btn": {
+    "x": 1810,
+    "y": 159
+  },
+
+  "copiar_todo_btn": {
+      "x": 24,
+      "y": 174
+  },
+  "resaltar_btn": {
+      "x": 97,
+      "y": 229
+  },
+  "copiado_btn": {
+      "x": 96,
+      "y": 212
+  },
+  "close_tab_btn": {
+    "x": 1896,
+    "y": 138
+  },
+  "id_area":{
+    "x": 914,
+    "y": 239
+  },
+  "saldo":{
+      "x": 986,
+      "y": 174
+  },
+  "saldo_copy":{
+    "x": 1031,
+    "y": 263
+  },
+  "saldo_all_copy":{
+      "x": 1051,
+      "y": 338
+  },
+    "home_area": {
+    "x": 888,
+    "y": 110
+  },
+  "steps": [
+    ""
+  ]
+}
