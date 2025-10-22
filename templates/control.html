@@ -5,463 +5,282 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control Bot T3</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
             padding: 20px;
         }
-
         .container {
-            max-width: 900px;
-            margin: 0 auto;
             background: white;
             border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
         }
-
         .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-            color: white;
-            padding: 30px;
             text-align: center;
-            border-radius: 20px 20px 0 0;
+            margin-bottom: 40px;
         }
-
         .header h1 {
             font-size: 2.5em;
+            color: #2c3e50;
             margin-bottom: 10px;
         }
-
-        .main-content {
-            padding: 40px;
+        .header p {
+            color: #666;
+            font-size: 1.1em;
         }
-
-        .config-section {
+        .config-box {
             background: #f8f9fa;
             border-radius: 15px;
             padding: 25px;
             margin-bottom: 30px;
             border-left: 5px solid #3498db;
         }
-
-        .config-section h2 {
-            color: #2c3e50;
-            margin-bottom: 20px;
-            font-size: 1.5em;
-        }
-
-        .config-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-
         .config-item {
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e0e0e0;
         }
-
+        .config-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
         .config-label {
-            font-size: 0.85em;
-            color: #666;
-            margin-bottom: 5px;
-            text-transform: uppercase;
             font-weight: bold;
-        }
-
-        .config-value {
-            font-size: 1.1em;
             color: #2c3e50;
-            font-weight: 600;
+            font-size: 0.95em;
         }
-
-        .status-card {
+        .config-value {
+            color: #666;
+            font-size: 0.95em;
+            word-break: break-all;
+        }
+        .status-box {
             background: #f8f9fa;
             border-radius: 15px;
-            padding: 30px;
+            padding: 25px;
             margin-bottom: 30px;
-            border-left: 5px solid #dc3545;
             text-align: center;
+            border-left: 5px solid #dc3545;
         }
-
-        .status-card.waiting {
+        .status-box.waiting {
             border-left-color: #ffc107;
             background: #fffbf0;
         }
-
-        .status-card.running {
+        .status-box.running {
             border-left-color: #28a745;
             background: #f0fff4;
         }
-
-        .status-card.stopped {
-            border-left-color: #dc3545;
-            background: #fff5f5;
-        }
-
-        .status-card h3 {
-            color: #666;
-            margin-bottom: 15px;
-            font-size: 1.2em;
-        }
-
-        .status-value {
-            font-size: 2em;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 10px;
-            font-weight: bold;
-        }
-
-        .status-value.running {
-            color: #28a745;
-        }
-
-        .status-value.waiting {
-            color: #ffc107;
-        }
-
-        .status-value.stopped {
-            color: #dc3545;
-        }
-
-        .uptime {
+        .status-text {
             font-size: 1.5em;
-            color: #666;
-            margin-top: 10px;
+            font-weight: bold;
+            margin-bottom: 15px;
         }
-
+        .status-text.stopped { color: #dc3545; }
+        .status-text.waiting { color: #ffc107; }
+        .status-text.running { color: #28a745; }
         .countdown {
-            font-size: 3em;
+            font-size: 3.5em;
             font-weight: bold;
             color: #ffc107;
-            margin: 20px 0;
             animation: pulse 1s infinite;
+            margin: 20px 0;
         }
-
         @keyframes pulse {
             0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
+            50% { transform: scale(1.15); }
             100% { transform: scale(1); }
         }
-
         .controls {
             display: flex;
-            gap: 20px;
-            justify-content: center;
-            margin: 30px 0;
+            gap: 15px;
+            margin-bottom: 20px;
         }
-
         .btn {
-            padding: 20px 40px;
-            font-size: 1.3em;
+            flex: 1;
+            padding: 18px;
+            font-size: 1.2em;
             font-weight: bold;
             border: none;
             border-radius: 50px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            min-width: 200px;
+            transition: all 0.2s ease;
         }
-
         .btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(0,0,0,0.2);
         }
-
+        .btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
         .btn-start {
             background: #28a745;
             color: white;
         }
-
         .btn-stop {
             background: #dc3545;
             color: white;
         }
-
         .btn:disabled {
             background: #6c757d;
             cursor: not-allowed;
-            opacity: 0.5;
+            opacity: 0.6;
         }
-
-        .instructions {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
+        .info-text {
             text-align: center;
-        }
-
-        .instructions h3 {
-            color: #856404;
-            margin-bottom: 15px;
-            font-size: 1.3em;
-        }
-
-        .instructions p {
-            color: #856404;
-            font-size: 1.1em;
-            margin: 8px 0;
-        }
-
-        .logs-section {
-            background: #1e1e1e;
-            border-radius: 15px;
-            padding: 20px;
-            margin-top: 30px;
-        }
-
-        .logs-header {
-            color: white;
-            font-size: 1.3em;
-            font-weight: bold;
-            margin-bottom: 15px;
-        }
-
-        .logs-container {
-            background: #000;
-            border-radius: 10px;
-            padding: 15px;
-            height: 250px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
+            color: #666;
             font-size: 0.9em;
-            color: #00ff00;
+            line-height: 1.6;
         }
-
-        .log-entry {
-            margin-bottom: 5px;
-            line-height: 1.4;
+        .countdown-msg {
+            color: #856404;
+            font-weight: bold;
+            margin-top: 10px;
+            font-size: 1.1em;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 Control Bot T3</h1>
-            <p>Sistema de Scrapping Automático</p>
+            <h1>🤖 ALPHA-3</h1>
+            <p>Control de Automatización</p>
         </div>
-
-        <div class="main-content">
-            <!-- Configuración -->
-            <div class="config-section">
-                <h2>⚙️ Configuración Actual</h2>
-                <div class="config-grid">
-                    <div class="config-item">
-                        <div class="config-label">PC ID</div>
-                        <div class="config-value" id="pcId">Cargando...</div>
-                    </div>
-                    <div class="config-item">
-                        <div class="config-label">Tipo de Worker</div>
-                        <div class="config-value" id="workerType">Cargando...</div>
-                    </div>
-                    <div class="config-item">
-                        <div class="config-label">Backend URL</div>
-                        <div class="config-value" id="backendUrl">Cargando...</div>
-                    </div>
-                    <div class="config-item">
-                        <div class="config-label">API Key</div>
-                        <div class="config-value" id="apiKey">Cargando...</div>
-                    </div>
-                </div>
+        <div class="config-box">
+            <div class="config-item">
+                <span class="config-label">PC ID:</span>
+                <span class="config-value" id="pcId">Cargando...</span>
             </div>
-
-            <!-- Estado -->
-            <div class="status-card stopped" id="statusCard">
-                <h3>Estado del Bot</h3>
-                <div class="status-value stopped" id="botStatus">🔴 DETENIDO</div>
-                <div class="uptime" id="uptime">00:00:00</div>
-                <div id="countdownSection" style="display: none;">
-                    <div class="countdown" id="countdown">30</div>
-                    <p style="font-size: 1.2em; color: #856404; font-weight: bold;">🖥️ ABRE EL SISTEMA T3 AHORA</p>
-                </div>
+            <div class="config-item">
+                <span class="config-label">Worker Type:</span>
+                <span class="config-value" id="workerType">Cargando...</span>
             </div>
-
-            <!-- Controles -->
-            <div class="controls">
-                <button class="btn btn-start" id="startBtn" onclick="startBot()">🚀 INICIAR BOT</button>
-                <button class="btn btn-stop" id="stopBtn" onclick="stopBot()" disabled>🛑 DETENER</button>
+            <div class="config-item">
+                <span class="config-label">Backend:</span>
+                <span class="config-value" id="backendUrl">Cargando...</span>
             </div>
-
-            <!-- Instrucciones -->
-            <div class="instructions">
-                <h3>📋 Instrucciones</h3>
-                <p>1️⃣ Presiona "INICIAR BOT"</p>
-                <p>2️⃣ Tienes 30 segundos para abrir T3</p>
-                <p>3️⃣ Deja T3 maximizado y visible</p>
-                <p>4️⃣ El bot comenzará automáticamente</p>
+            <div class="config-item">
+                <span class="config-label">API Key:</span>
+                <span class="config-value" id="apiKey">Cargando...</span>
             </div>
-
-            <!-- Logs -->
-            <div class="logs-section">
-                <div class="logs-header">📄 Registro de Actividad</div>
-                <div class="logs-container" id="logsContainer">
-                    <div class="log-entry">Sistema listo para iniciar...</div>
-                </div>
+        </div>
+        <div class="status-box" id="statusBox">
+            <div class="status-text stopped" id="statusText">🔴 DETENIDO</div>
+            <div id="countdownSection" style="display: none;">
+                <div class="countdown" id="countdown">30</div>
+                <div class="countdown-msg">🖥️ Abre el Sistema T3</div>
             </div>
+        </div>
+        <div class="controls">
+            <button class="btn btn-start" id="startBtn" onclick="startBot()">🚀 INICIAR</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopBot()" disabled>🛑 PARAR</button>
+        </div>
+        <div class="info-text">
+            <p>Asegúrate de tener el Sistema T3 listo antes de iniciar</p>
         </div>
     </div>
-
     <script>
         let countdownInterval = null;
         let countdownValue = 30;
-
-        // Cargar configuración al inicio
         loadConfig();
-
-        // Actualizar estado cada 2 segundos
-        setInterval(updateStatus, 2000);
+        setInterval(updateStatus, 1000);
         updateStatus();
-
         async function loadConfig() {
             try {
                 const response = await fetch('/api/config');
                 const data = await response.json();
-
                 document.getElementById('pcId').textContent = data.config.PC_ID;
                 document.getElementById('workerType').textContent = data.config.WORKER_TYPE;
                 document.getElementById('backendUrl').textContent = data.config.BACKEND_URL;
                 document.getElementById('apiKey').textContent = data.config.API_KEY;
             } catch (error) {
                 console.error('Error cargando configuración:', error);
-                document.getElementById('pcId').textContent = 'Error';
-                document.getElementById('workerType').textContent = 'Error';
-                document.getElementById('backendUrl').textContent = 'Error';
-                document.getElementById('apiKey').textContent = 'Error';
             }
         }
-
         async function updateStatus() {
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
-
                 updateStatusDisplay(data.status);
-                document.getElementById('uptime').textContent = data.uptime || '00:00:00';
-
-                // Actualizar logs
-                const logsContainer = document.getElementById('logsContainer');
-                logsContainer.innerHTML = '';
-
-                data.logs.forEach(log => {
-                    const logEntry = document.createElement('div');
-                    logEntry.className = 'log-entry';
-                    logEntry.textContent = log;
-                    logsContainer.appendChild(logEntry);
-                });
-
-                // Scroll al final
-                logsContainer.scrollTop = logsContainer.scrollHeight;
-
             } catch (error) {
                 console.error('Error actualizando estado:', error);
             }
         }
-
         function updateStatusDisplay(status) {
-            const statusCard = document.getElementById('statusCard');
-            const botStatus = document.getElementById('botStatus');
+            const statusBox = document.getElementById('statusBox');
+            const statusText = document.getElementById('statusText');
             const startBtn = document.getElementById('startBtn');
             const stopBtn = document.getElementById('stopBtn');
             const countdownSection = document.getElementById('countdownSection');
-
-            // Limpiar clases
-            statusCard.className = 'status-card';
-            botStatus.className = 'status-value';
-
+            statusBox.className = 'status-box';
+            statusText.className = 'status-text';
             switch(status) {
                 case 'ejecutando':
-                    statusCard.classList.add('running');
-                    botStatus.classList.add('running');
-                    botStatus.textContent = '🟢 EJECUTANDO';
+                    statusBox.classList.add('running');
+                    statusText.classList.add('running');
+                    statusText.textContent = '�� EJECUTANDO';
                     startBtn.disabled = true;
                     stopBtn.disabled = false;
                     countdownSection.style.display = 'none';
                     clearInterval(countdownInterval);
                     break;
-
                 case 'esperando':
-                    statusCard.classList.add('waiting');
-                    botStatus.classList.add('waiting');
-                    botStatus.textContent = '⏳ PREPARANDO...';
+                    statusBox.classList.add('waiting');
+                    statusText.classList.add('waiting');
+                    statusText.textContent = '⏳ PREPARANDO...';
                     startBtn.disabled = true;
                     stopBtn.disabled = false;
                     countdownSection.style.display = 'block';
                     startCountdown();
                     break;
-
-                case 'error':
-                    statusCard.classList.add('stopped');
-                    botStatus.classList.add('stopped');
-                    botStatus.textContent = '❌ ERROR';
+                default:
+                    statusBox.classList.add('stopped');
+                    statusText.classList.add('stopped');
+                    statusText.textContent = '🔴 DETENIDO';
                     startBtn.disabled = false;
                     stopBtn.disabled = true;
                     countdownSection.style.display = 'none';
                     clearInterval(countdownInterval);
-                    break;
-
-                default: // detenido
-                    statusCard.classList.add('stopped');
-                    botStatus.classList.add('stopped');
-                    botStatus.textContent = '🔴 DETENIDO';
-                    startBtn.disabled = false;
-                    stopBtn.disabled = true;
-                    countdownSection.style.display = 'none';
-                    clearInterval(countdownInterval);
-                    break;
             }
         }
-
         function startCountdown() {
             if (countdownInterval) return;
-
             countdownValue = 30;
             countdownInterval = setInterval(() => {
                 document.getElementById('countdown').textContent = countdownValue;
                 countdownValue--;
-
                 if (countdownValue < 0) {
                     clearInterval(countdownInterval);
                     countdownInterval = null;
                 }
             }, 1000);
         }
-
         async function startBot() {
             try {
                 const response = await fetch('/api/start', { method: 'POST' });
                 const data = await response.json();
-
-                if (!data.success) {
-                    alert('Error: ' + data.message);
-                }
+                if (!data.success) alert('Error: ' + data.message);
             } catch (error) {
-                alert('Error iniciando bot: ' + error.message);
+                alert('Error: ' + error.message);
             }
         }
-
         async function stopBot() {
-            if (confirm('¿Detener el bot?')) {
-                try {
-                    const response = await fetch('/api/stop', { method: 'POST' });
-                    const data = await response.json();
-
-                    if (!data.success) {
-                        alert('Error: ' + data.message);
-                    }
-                } catch (error) {
-                    alert('Error deteniendo bot: ' + error.message);
-                }
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const data = await response.json();
+                if (!data.success) alert('Error: ' + data.message);
+            } catch (error) {
+                alert('Error: ' + error.message);
             }
         }
     </script>

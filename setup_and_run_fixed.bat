@@ -243,7 +243,7 @@ if "!NEW_PC_ID!"=="" set "NEW_PC_ID=!CURRENT_PC_ID!"
 REM --- Configurar WORKER_TYPE ---
 echo.
 echo WORKER_TYPE actual: !CURRENT_WORKER_TYPE!
-echo Tipos disponibles: deudas, movimientos
+echo Tipos disponibles: deudas, movimientos, pin
 set /p "NEW_WORKER_TYPE=Nuevo tipo [!CURRENT_WORKER_TYPE!]: "
 if "!NEW_WORKER_TYPE!"=="" set "NEW_WORKER_TYPE=!CURRENT_WORKER_TYPE!"
 

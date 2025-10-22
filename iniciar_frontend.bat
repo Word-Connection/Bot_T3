@@ -47,6 +47,12 @@ echo.
 echo 🚀 El navegador se abrira automaticamente en:
 echo 📱 http://localhost:5555
 echo.
+echo ✨ CARACTERISTICAS:
+echo    - Interfaz simple y limpia
+echo    - Muestra configuracion del worker
+echo    - Botones instantaneos
+echo    - Contador de inicio (30 segundos)
+echo.
 echo ⚠️  IMPORTANTE:
 echo    - NO cierres esta ventana
 echo    - Usa el navegador para controlar el bot
