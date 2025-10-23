@@ -51,6 +51,19 @@
     "x": 37,
     "y": 981
   },
+
+  "fraude_section": {
+    "x": 877,
+    "y": 412
+  },
+  "fraude_copy": {
+    "x": 921,
+    "y": 423
+  },
+  "close_fraude_btn": {
+    "x": 1246,
+    "y": 332
+  },
   "nombre_cliente_btn": {
     "x": 504,
     "y": 111

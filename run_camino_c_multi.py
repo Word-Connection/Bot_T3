@@ -507,6 +507,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     log_path = log_file or Path('camino_c_copias.log')
     shot_dir = screenshot_dir or Path('capturas_camino_c')
     shot_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Variable para almacenar el score obtenido (disponible en todo el scope)
+    score_value = "No encontrado"
 
     print(f"Iniciando en {start_delay}s...")
     time.sleep(start_delay)
@@ -649,6 +652,88 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         x,y = _xy(conf,'seleccionar_btn')
         _click(x,y,'seleccionar_btn', _step_delay(step_delays,6,base_delay))
         
+        # NUEVO: Validación de fraude
+        print("[CaminoC] Validando si hay fraude...")
+        time.sleep(1.5)
+        
+        # Click en fraude_section
+        fx, fy = _xy(conf, 'fraude_section')
+        if fx or fy:
+            print(f"[CaminoC] Click en fraude_section ({fx},{fy})")
+            _click(fx, fy, 'fraude_section', 0.5)
+            
+            # Right-click en fraude_section para abrir menú contextual
+            print(f"[CaminoC] Right-click en fraude_section ({fx},{fy})")
+            pg.click(fx, fy, button='right')
+            time.sleep(0.5)
+            
+            # Click en fraude_copy para copiar el texto
+            fcx, fcy = _xy(conf, 'fraude_copy')
+            if fcx or fcy:
+                print(f"[CaminoC] Click en fraude_copy ({fcx},{fcy})")
+                _click(fcx, fcy, 'fraude_copy', 0.5)
+                time.sleep(0.5)
+                
+                # Leer el texto del clipboard
+                fraude_text = ""
+                if pyperclip:
+                    try:
+                        fraude_text = pyperclip.paste()
+                    except Exception as e:
+                        print(f"[CaminoC] Error al leer clipboard (fraude): {e}")
+                
+                fraude_text_clean = (fraude_text or '').strip().lower()
+                print(f"[CaminoC] Texto copiado: '{fraude_text_clean}'")
+                
+                # Verificar si contiene la palabra "fraude"
+                if 'fraude' in fraude_text_clean:
+                    print("[CaminoC] FRAUDE DETECTADO - Cerrando y volviendo a home")
+                    
+                    # Cerrar con close_fraude_btn
+                    cbx, cby = _xy(conf, 'close_fraude_btn')
+                    if cbx or cby:
+                        print(f"[CaminoC] Click en close_fraude_btn ({cbx},{cby})")
+                        _click(cbx, cby, 'close_fraude_btn', 0.5)
+                    
+                    # Cerrar 2 tabs consecutivos
+                    ctx, cty = _xy(conf, 'close_tab_btn')
+                    if ctx or cty:
+                        for i in range(1, 3):
+                            print(f"[CaminoC] Click en close_tab_btn {i}/2 ({ctx},{cty})")
+                            _click(ctx, cty, f'close_tab_btn_{i}', 0.5)
+                    else:
+                        print("[CaminoC] ADVERTENCIA: close_tab_btn no definido en coordenadas")
+                    
+                    # Volver a home
+                    hx, hy = _xy(conf, 'home_area')
+                    if hx or hy:
+                        print(f"[CaminoC] Click en home_area ({hx},{hy})")
+                        _click(hx, hy, 'home_area', 0.5)
+                    
+                    # Devolver JSON con marcadores indicando fraude
+                    result = {
+                        "dni": dni,
+                        "score": "FRAUDE",
+                        "fraude": True,
+                        "etapa": "fraude_detectado",
+                        "info": "Caso de fraude detectado en la consulta",
+                        "success": True,
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    
+                    print("===JSON_RESULT_START===")
+                    print(json.dumps(result))
+                    print("===JSON_RESULT_END===")
+                    
+                    print("[CaminoC] Finalizado - Fraude detectado")
+                    return
+                else:
+                    print("[CaminoC] No se detectó fraude, continuando con flujo normal")
+            else:
+                print("[CaminoC] ADVERTENCIA: fraude_copy no definido en coordenadas")
+        else:
+            print("[CaminoC] ADVERTENCIA: fraude_section no definido en coordenadas")
+        
         # Validar si el registro es estable o corrupto
         validation_result = _validate_selected_record_c(conf, base_delay)
         
@@ -706,8 +791,10 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         # Extraer primer número
         m = re.search(r'\d+', copied_txt)
         if m:
-            print(f"Score obtenido: {m.group(0)}")
+            score_value = m.group(0)
+            print(f"Score obtenido: {score_value}")
         else:
+            score_value = "No encontrado"
             print("Score obtenido: <sin numero>")
         _append_log(log_path, dni, 'SCORE', copied_txt)
     else:
@@ -759,6 +846,18 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     # Limpiar portapapeles al final para evitar contaminación entre consultas
     _clear_clipboard()
 
+    # Devolver JSON con el resultado
+    result = {
+        "dni": dni,
+        "score": score_value,
+        "success": True,
+        "timestamp": int(time.time() * 1000)
+    }
+    
+    print("===JSON_RESULT_START===")
+    print(json.dumps(result))
+    print("===JSON_RESULT_END===")
+    
     print('[CaminoC] Finalizado.')
 
 
