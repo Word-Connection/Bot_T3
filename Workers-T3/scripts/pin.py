@@ -148,6 +148,10 @@ def main():
         "info": f"Teléfono {telefono} validado correctamente",
         "timestamp": int(time.time() * 1000)
     }
+    print("\n" + "="*80)
+    print("[PIN.PY] ENVIANDO UPDATE PARCIAL - VALIDACIÓN")
+    print(f"[PIN.PY] Datos que se enviarán: {json.dumps(validacion_update, indent=2)}")
+    print("="*80 + "\n")
     print("===JSON_PARTIAL_START===")
     print(json.dumps(validacion_update))
     print("===JSON_PARTIAL_END===")
@@ -166,6 +170,10 @@ def main():
             "info": f"Iniciando envío de PIN para teléfono {telefono}",
             "timestamp": int(time.time() * 1000)
         }
+        print("\n" + "="*80)
+        print("[PIN.PY] ENVIANDO UPDATE PARCIAL - INICIANDO ENVÍO")
+        print(f"[PIN.PY] Datos que se enviarán: {json.dumps(iniciando_update, indent=2)}")
+        print("="*80 + "\n")
         print("===JSON_PARTIAL_START===")
         print(json.dumps(iniciando_update))
         print("===JSON_PARTIAL_END===")
@@ -187,13 +195,17 @@ def main():
         
         # Log del resultado
         if resultado_analisis["estado"] == "exitoso":
-            logging.info(f"✅ PIN enviado exitosamente para teléfono {telefono}")
-            print(f"✅ PIN enviado correctamente para teléfono {telefono}")
+            logging.info(f"[OK] PIN enviado exitosamente para teléfono {telefono}")
+            print(f"[OK] PIN enviado correctamente para teléfono {telefono}")
         else:
-            logging.error(f"❌ Error enviando PIN para teléfono {telefono}")
-            print(f"❌ Error enviando PIN para teléfono {telefono}")
+            logging.error(f"[ERROR] Error enviando PIN para teléfono {telefono}")
+            print(f"[ERROR] Error enviando PIN para teléfono {telefono}")
         
         # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
+        print("\n" + "="*80)
+        print("[PIN.PY] ENVIANDO RESULTADO FINAL")
+        print(f"[PIN.PY] Datos del resultado final: {json.dumps(resultado_final, indent=2)}")
+        print("="*80 + "\n")
         print("===JSON_RESULT_START===")
         print(json.dumps(resultado_final))
         print("===JSON_RESULT_END===")
@@ -205,7 +217,7 @@ def main():
     except Exception as e:
         error_msg = f"Error en pin.py: {str(e)}"
         logging.error(error_msg)
-        print(f"❌ {error_msg}")
+        print(f"[ERROR] {error_msg}")
         
         # Resultado de error
         resultado_error = {
@@ -216,6 +228,10 @@ def main():
         }
         
         # ===== ENVIAR RESULTADO DE ERROR CON MARCADORES =====
+        print("\n" + "="*80)
+        print("[PIN.PY] ENVIANDO RESULTADO DE ERROR")
+        print(f"[PIN.PY] Datos del error: {json.dumps(resultado_error, indent=2)}")
+        print("="*80 + "\n")
         print("===JSON_RESULT_START===")
         print(json.dumps(resultado_error))
         print("===JSON_RESULT_END===")
