@@ -26,6 +26,18 @@ def main():
     stages.append({
         "info": f"DNI {dni} validado correctamente"
     })
+    
+    # ===== ENVIAR UPDATE PARCIAL: DNI VALIDADO =====
+    validacion_update = {
+        "dni": dni,
+        "etapa": "validacion",
+        "info": f"DNI {dni} validado correctamente",
+        "timestamp": int(time.time() * 1000)
+    }
+    print("===JSON_PARTIAL_START===")
+    print(json.dumps(validacion_update))
+    print("===JSON_PARTIAL_END===")
+    sys.stdout.flush()
 
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
@@ -48,6 +60,18 @@ def main():
         stages.append({
             "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema"
         })
+        
+        # ===== ENVIAR UPDATE PARCIAL: BÚSQUEDA DIRECTA =====
+        busqueda_update = {
+            "dni": dni,
+            "etapa": "busqueda_directa",
+            "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema",
+            "timestamp": int(time.time() * 1000)
+        }
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(busqueda_update))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
         
         # NUEVO: Crear CSV temporal vacío (solo headers) para activar modo búsqueda directa
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
@@ -84,6 +108,18 @@ def main():
                 writer.writerow(clean_row)
             tmp_csv = tmp.name
 
+    # ===== ENVIAR UPDATE PARCIAL: INICIANDO SCRAPING =====
+    scraping_update = {
+        "dni": dni,
+        "etapa": "iniciando_scraping",
+        "info": f"Iniciando extracción de movimientos para DNI {dni}",
+        "timestamp": int(time.time() * 1000)
+    }
+    print("===JSON_PARTIAL_START===")
+    print(json.dumps(scraping_update))
+    print("===JSON_PARTIAL_END===")
+    sys.stdout.flush()
+    
     # Ejecutar run_camino_b_multi.py
     script_path = Path(__file__).parent / '../../run_camino_b_multi.py'
     coords_path = Path(__file__).parent / '../../camino_b_coords_multi.json'
@@ -140,6 +176,7 @@ def main():
     total_movimientos = 0
     ids_from_busqueda_directa = []
     busqueda_directa_detected = False
+    lineas_procesadas_count = 0
     
     if log_path.exists():
         with log_path.open('r', encoding='utf-8') as f:
@@ -157,6 +194,21 @@ def main():
                         if service_id and service_id.lower() != 'desconocido':
                             if service_id not in ids_from_busqueda_directa:
                                 ids_from_busqueda_directa.append(service_id)
+                                lineas_procesadas_count += 1
+                                
+                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA ENCONTRADA =====
+                                linea_update = {
+                                    "dni": dni,
+                                    "etapa": "procesando_linea",
+                                    "info": f"Línea {service_id} encontrada y procesada",
+                                    "linea_actual": service_id,
+                                    "lineas_procesadas": lineas_procesadas_count,
+                                    "timestamp": int(time.time() * 1000)
+                                }
+                                print("===JSON_PARTIAL_START===")
+                                print(json.dumps(linea_update))
+                                print("===JSON_PARTIAL_END===")
+                                sys.stdout.flush()
                     continue
                 
                 # Formato normal de log: "service_id  contenido"
@@ -169,6 +221,21 @@ def main():
                         if service_id and content:
                             if service_id not in movimientos_por_linea:
                                 movimientos_por_linea[service_id] = []
+                                lineas_procesadas_count += 1
+                                
+                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA PROCESADA =====
+                                linea_update = {
+                                    "dni": dni,
+                                    "etapa": "procesando_linea",
+                                    "info": f"Procesando línea {service_id}",
+                                    "linea_actual": service_id,
+                                    "lineas_procesadas": lineas_procesadas_count,
+                                    "timestamp": int(time.time() * 1000)
+                                }
+                                print("===JSON_PARTIAL_START===")
+                                print(json.dumps(linea_update))
+                                print("===JSON_PARTIAL_END===")
+                                sys.stdout.flush()
                             
                             # Si el contenido no es "No Tiene Pedido", procesarlo
                             if content != "No Tiene Pedido" and content != "." and content != "No Tiene Pedido (base de datos)":
@@ -193,10 +260,38 @@ def main():
         stages.append({
             "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados"
         })
+        
+        # ===== ENVIAR UPDATE PARCIAL: PROCESAMIENTO =====
+        procesamiento_update = {
+            "dni": dni,
+            "etapa": "procesamiento",
+            "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados",
+            "lineas_procesadas": len(ids),
+            "movimientos_encontrados": total_movimientos,
+            "timestamp": int(time.time() * 1000)
+        }
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(procesamiento_update))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
     else:
         stages.append({
             "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos"
         })
+        
+        # ===== ENVIAR UPDATE PARCIAL: SIN MOVIMIENTOS =====
+        sin_movimientos_update = {
+            "dni": dni,
+            "etapa": "procesamiento",
+            "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos",
+            "lineas_procesadas": len(ids),
+            "movimientos_encontrados": 0,
+            "timestamp": int(time.time() * 1000)
+        }
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(sin_movimientos_update))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
 
     # Etapa 3+: Resumen de movimientos por línea
     stage_count = 3
@@ -245,7 +340,12 @@ def main():
         })
 
     result = {"dni": dni, "stages": stages}
+    
+    # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
+    print("===JSON_RESULT_START===")
     print(json.dumps(result))
+    print("===JSON_RESULT_END===")
+    sys.stdout.flush()
 
 if __name__ == "__main__":
     main()
