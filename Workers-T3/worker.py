@@ -364,17 +364,11 @@ def process_task(task: dict) -> bool:
                     output_lines.append(line.strip())
                     line_text = line.strip()
                     
-                    if line_text:
-                        logger.info(f"[REALTIME] Línea detectada: {safe_str(line_text, 50)}...")
-                    
                     # DETECTAR JSON PARCIALES DEL SCRIPT
                     if "===JSON_PARTIAL_START===" in line_text:
                         # Iniciar captura de JSON parcial
                         json_buffer = []
                         capturing_partial = True
-                        print("\n" + "="*80)
-                        print("[WORKER.PY] DETECTADO INICIO DE JSON PARCIAL DEL SCRIPT")
-                        print("="*80 + "\n")
                         logger.info(f"[PARCIAL] Detectado inicio de JSON parcial")
                         
                         # Leer líneas hasta encontrar el final
@@ -389,29 +383,14 @@ def process_task(task: dict) -> bool:
                                 
                                 if "===JSON_PARTIAL_END===" in json_line_text:
                                     capturing_partial = False
-                                    print("\n" + "="*80)
-                                    print("[WORKER.PY] DETECTADO FIN DE JSON PARCIAL")
-                                    print("="*80 + "\n")
-                                    logger.info(f"[PARCIAL] Detectado fin de JSON parcial")
                                     
                                     # Parsear y enviar el JSON parcial
                                     try:
                                         json_text = '\n'.join(json_buffer)
-                                        print("\n" + "="*80)
-                                        print("[WORKER.PY] PARSEANDO JSON PARCIAL RECIBIDO DEL SCRIPT")
-                                        print(f"[WORKER.PY] JSON text capturado:\n{json_text}")
-                                        print("="*80 + "\n")
-                                        
                                         partial_data = json.loads(json_text)
                                         
-                                        print("\n" + "="*80)
-                                        print("[WORKER.PY] JSON PARCIAL PARSEADO EXITOSAMENTE")
-                                        print(f"[WORKER.PY] Datos parseados:")
-                                        print(json.dumps(partial_data, indent=2, ensure_ascii=False))
-                                        print("="*80 + "\n")
-                                        
                                         etapa = partial_data.get("etapa", "")
-                                        logger.info(f"[PARCIAL] JSON parseado: etapa={etapa}")
+                                        logger.info(f"[PARCIAL] Parseado: etapa={etapa}")
                                         
                                         # Enviar update parcial
                                         send_partial_update(task_id, partial_data, status="running")
@@ -419,18 +398,11 @@ def process_task(task: dict) -> bool:
                                         # Marcar flags según la etapa
                                         if etapa == "score_obtenido":
                                             score_sent = True
-                                            logger.info(f"[PARCIAL] Score enviado desde JSON parcial")
                                         elif etapa == "buscando_deudas":
                                             searching_sent = True
-                                            logger.info(f"[PARCIAL] Update 'buscando deudas' enviado desde JSON parcial")
                                         
                                     except Exception as json_err:
-                                        print("\n" + "="*80)
-                                        print("[WORKER.PY] ERROR PARSEANDO JSON PARCIAL")
-                                        print(f"[WORKER.PY] Error: {json_err}")
-                                        print(f"[WORKER.PY] JSON text que causó el error:\n{json_text}")
-                                        print("="*80 + "\n")
-                                        logger.error(f"[PARCIAL] Error parseando JSON parcial: {json_err}")
+                                        logger.error(f"[PARCIAL] Error parseando JSON: {json_err}")
                                     
                                     break
                                 else:
@@ -449,7 +421,7 @@ def process_task(task: dict) -> bool:
                             score_match = re.search(r'score[:\s]*(\d+)', line_text, re.IGNORECASE)
                             if score_match:
                                 score_val = int(score_match.group(1))
-                                logger.info(f"[REALTIME] Score {score_val} detectado INMEDIATAMENTE")
+                                logger.info(f"[SCORE] Detectado: {score_val}")
                                 import base64, glob
                                 base_dir = os.path.dirname(__file__)
                                 capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
@@ -464,8 +436,11 @@ def process_task(task: dict) -> bool:
                                         try:
                                             with open(latest_image, 'rb') as img_file:
                                                 img_data = img_file.read()
-                                                screenshot_b64 = base64.b64encode(img_data).decode()
+                                                img_size_bytes = len(img_data)
+                                                screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
+                                                b64_size = len(screenshot_b64)
                                                 logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
+                                                logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
                                             break
                                         except Exception as img_e:
                                             logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
@@ -478,8 +453,11 @@ def process_task(task: dict) -> bool:
                                         try:
                                             with open(latest_any, 'rb') as img_file:
                                                 img_data = img_file.read()
-                                                screenshot_b64 = base64.b64encode(img_data).decode()
+                                                img_size_bytes = len(img_data)
+                                                screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
+                                                b64_size = len(screenshot_b64)
                                                 logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
+                                                logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
                                         except Exception as img_e:
                                             logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
                                 # Enviar solo un update de score_obtenido, siempre con imagen si está disponible
@@ -493,23 +471,11 @@ def process_task(task: dict) -> bool:
                                 if screenshot_b64:
                                     score_update["image"] = screenshot_b64
                                 send_partial_update(task_id, score_update, status="running")
-                                logger.info(f"[SCORE] Enviado score {score_val} para DNI {input_data} {'con imagen' if screenshot_b64 else 'sin imagen'}")
                                 score_sent = True
-                                # Si el score está en el rango de deudas, continuar con updates de búsqueda
-                                if 80 <= score_val <= 89:
-                                    time.sleep(2)
-                                    search_update = {
-                                        "dni": input_data,
-                                        "score": score_val,
-                                        "etapa": "buscando_deudas",
-                                        "info": "Buscando deudas...",
-                                        "timestamp": int(time.time() * 1000)
-                                    }
-                                    send_partial_update(task_id, search_update, status="running")
-                                    logger.info(f"[BÚSQUEDA] Enviado mensaje 'Buscando deudas...' para DNI {input_data}")
-                                    searching_sent = True
+                                # Si el score está en el rango de deudas, el script ya enviará el update de "buscando_deudas"
+                                # No es necesario enviarlo aquí ni hacer sleep
                         except Exception as e:
-                            logger.warning(f"[SCORE] Error procesando score en tiempo real: {e}")
+                            logger.warning(f"[SCORE] Error: {e}")
                 
                 except queue.Empty:
                     # No hay líneas en la cola, continuar esperando
@@ -582,49 +548,17 @@ def process_task(task: dict) -> bool:
             start_marker = "===JSON_RESULT_START==="
             end_marker = "===JSON_RESULT_END==="
             
-            print("\n" + "="*80)
-            print("[WORKER.PY] BUSCANDO RESULTADO JSON EN OUTPUT DEL SCRIPT")
-            print(f"[WORKER.PY] Buscando marcadores: {start_marker} ... {end_marker}")
-            print("="*80 + "\n")
-            
             start_pos = output.find(start_marker)
             if start_pos != -1:
-                print("\n" + "="*80)
-                print("[WORKER.PY] MARCADOR DE INICIO ENCONTRADO")
-                print(f"[WORKER.PY] Posición: {start_pos}")
-                print("="*80 + "\n")
-                
                 # Encontrar la posición después del marcador de inicio
                 json_start = output.find('\n', start_pos) + 1
                 end_pos = output.find(end_marker, json_start)
                 
                 if end_pos != -1:
-                    print("\n" + "="*80)
-                    print("[WORKER.PY] MARCADOR DE FIN ENCONTRADO")
-                    print(f"[WORKER.PY] Posición: {end_pos}")
-                    print("="*80 + "\n")
-                    
                     json_text = output[json_start:end_pos].strip()
-                    
-                    print("\n" + "="*80)
-                    print("[WORKER.PY] JSON EXTRAÍDO DEL OUTPUT")
-                    print(f"[WORKER.PY] JSON text:\n{json_text}")
-                    print("="*80 + "\n")
-                    
                     data = json.loads(json_text)
-                    
-                    print("\n" + "="*80)
-                    print("[WORKER.PY] JSON PARSEADO EXITOSAMENTE")
-                    print(f"[WORKER.PY] Datos parseados:")
-                    print(json.dumps(data, indent=2, ensure_ascii=False))
-                    print("="*80 + "\n")
-                    
-                    logger.info(f"[JSON] Parseado correctamente usando marcadores")
+                    logger.info(f"[JSON] Resultado parseado correctamente")
                 else:
-                    print("\n" + "="*80)
-                    print("[WORKER.PY] MARCADOR DE FIN NO ENCONTRADO - USANDO FALLBACK")
-                    print("="*80 + "\n")
-                    
                     # Fallback: buscar desde el marcador hasta el final
                     json_text = output[json_start:].strip()
                     # Intentar encontrar el primer JSON completo
@@ -632,12 +566,8 @@ def process_task(task: dict) -> bool:
                     if first_brace != -1:
                         json_text = json_text[first_brace:]
                         data = json.loads(json_text)
-                        logger.info(f"[JSON] Parseado usando marcador de inicio (sin marcador de fin)")
+                        logger.info(f"[JSON] Resultado parseado (sin marcador fin)")
             else:
-                print("\n" + "="*80)
-                print("[WORKER.PY] MARCADORES NO ENCONTRADOS - USANDO MÉTODO ANTIGUO")
-                print("="*80 + "\n")
-                
                 # Fallback al método antiguo si no hay marcadores
                 logger.warning(f"[WARN] No se encontraron marcadores JSON, usando fallback")
                 pos = output.find('{')
@@ -832,27 +762,14 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
             print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
             return True
         else:
-            # Solo tiene score básico (sin Camino A)
+            # Solo tiene score básico (sin Camino A) - enviar tal cual viene del script
             score_val = data.get("score", "No encontrado")
             
-            final_data = {
-                "dni": dni,
-                "score": score_val,
-                "etapa": "solo_score",
-                "info": f"Score {score_val} - No requiere análisis de deudas",
-                "success": True,
-                "timestamp": int(time.time() * 1000)
-            }
+            print(f"[RESULTADO FINAL] JSON del script (sin modificar):")
+            print(json.dumps(data, indent=2, ensure_ascii=False))
             
-            print(f"[RESULTADO FINAL] SOLO_SCORE:")
-            print(f"  score: {score_val}")
-            print(f"  info: No se obtuvieron datos de Camino A (solo score disponible)")
-            
-            print(f"\n[JSON ENVIADO AL BACKEND]:")
-            print(json.dumps(final_data, indent=2, ensure_ascii=False))
-            
-            # Enviar resultado final
-            send_result = send_partial_update(task_id, final_data, status="completed")
+            # Enviar resultado final TAL CUAL viene del script
+            send_result = send_partial_update(task_id, data, status="completed")
             print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
             
             print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
@@ -961,20 +878,13 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     """Envía actualización parcial al backend por WebSocket o HTTP."""
     partial_data["status"] = status
     
-    # Log detallado del update parcial (sin imagen para no llenar consola)
-    print(f"\n{'='*80}")
-    print(f"[UPDATE PARCIAL] Task ID: {task_id}")
-    print(f"[UPDATE PARCIAL] Status: {status}")
-    print(f"[UPDATE PARCIAL] Datos enviados:")
+    # Log compacto del update
+    etapa = partial_data.get("etapa", "")
+    info = partial_data.get("info", "")
+    has_image = "image" in partial_data
+    img_indicator = " [+IMG]" if has_image else ""
     
-    # Crear copia sin imagen para logging
-    log_data = partial_data.copy()
-    if "image" in log_data:
-        img_size = len(log_data["image"]) if log_data["image"] else 0
-        log_data["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
-    
-    print(json.dumps(log_data, indent=2, ensure_ascii=False))
-    print(f"{'='*80}\n")
+    logger.info(f"[UPDATE] {task_id} | {status} | {etapa}: {info}{img_indicator}")
     
     # Intentar enviar por WebSocket primero (más rápido)
     if ws_connected and ws_connection:
@@ -984,52 +894,21 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
                 "task_id": task_id,
                 "partial_data": partial_data
             }
-            print("\n" + "="*80)
-            print("[WORKER.PY] ENVIANDO VÍA WEBSOCKET")
-            print(f"[WORKER.PY] Mensaje WebSocket completo:")
-            # Crear copia del mensaje sin imagen para logging
-            log_message = message.copy()
-            if "partial_data" in log_message and "image" in log_message["partial_data"]:
-                img_size = len(log_message["partial_data"]["image"]) if log_message["partial_data"]["image"] else 0
-                log_message["partial_data"]["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
-            print(json.dumps(log_message, indent=2, ensure_ascii=False))
-            print("="*80 + "\n")
-            
             ws_connection.send(json.dumps(message))
-            logger.info(f"[WS-UPDATE] Actualización enviada por WebSocket para {task_id} (status={status})")
+            logger.info(f"[WS] Enviado correctamente")
             return True
         except Exception as e:
-            logger.warning(f"[WS-UPDATE] Error enviando por WebSocket: {e}, usando HTTP como fallback")
+            logger.warning(f"[WS] Error: {e}, usando HTTP fallback")
     
     # Fallback a HTTP si WebSocket no está disponible
     payload = {"task_id": task_id, "partial_data": partial_data}
-    
-    print("\n" + "="*80)
-    print("[WORKER.PY] ENVIANDO VÍA HTTP (FALLBACK)")
-    print(f"[WORKER.PY] URL: {BACKEND}/workers/task_update")
-    print(f"[WORKER.PY] Payload HTTP completo:")
-    # Crear copia del payload sin imagen para logging
-    log_payload = payload.copy()
-    if "partial_data" in log_payload and "image" in log_payload["partial_data"]:
-        img_size = len(log_payload["partial_data"]["image"]) if log_payload["partial_data"]["image"] else 0
-        log_payload["partial_data"]["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
-    print(json.dumps(log_payload, indent=2, ensure_ascii=False))
-    print("="*80 + "\n")
-    
     result = make_request("POST", "/workers/task_update", payload)
+    
     if result and result.get("status") == "ok":
-        print("\n" + "="*80)
-        print("[WORKER.PY] RESPUESTA DEL BACKEND (HTTP)")
-        print(f"[WORKER.PY] Resultado: {json.dumps(result, indent=2)}")
-        print("="*80 + "\n")
-        logger.info(f"[HTTP-UPDATE] Actualización enviada para {task_id} (status={status})")
+        logger.info(f"[HTTP] Enviado correctamente")
         return True
     
-    print("\n" + "="*80)
-    print("[WORKER.PY] ERROR EN RESPUESTA DEL BACKEND")
-    print(f"[WORKER.PY] Resultado recibido: {result}")
-    print("="*80 + "\n")
-    logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
+    logger.error(f"[ERROR] Fallo enviando actualización")
     return False
 
 
