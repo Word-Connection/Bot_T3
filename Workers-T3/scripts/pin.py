@@ -97,11 +97,25 @@ def analyze_pin_result(process):
     if stderr:
         logging.info(f"STDERR: {stderr}")
     
-    # Si el código de salida es 0, considerarlo exitoso
+    # Intentar parsear el JSON del resultado
+    mensaje_default = "pin enviado"
     if process.returncode == 0:
+        # Buscar JSON entre marcadores
+        try:
+            if "===JSON_RESULT_START===" in stdout and "===JSON_RESULT_END===" in stdout:
+                start_idx = stdout.find("===JSON_RESULT_START===")
+                end_idx = stdout.find("===JSON_RESULT_END===")
+                if start_idx != -1 and end_idx != -1:
+                    json_text = stdout[start_idx + len("===JSON_RESULT_START==="):end_idx].strip()
+                    result_data = json.loads(json_text)
+                    mensaje_default = result_data.get("mensaje", mensaje_default)
+                    logging.info(f"Mensaje del Camino D: {mensaje_default}")
+        except Exception as e:
+            logging.warning(f"No se pudo parsear JSON del Camino D: {e}")
+        
         return {
             "estado": "exitoso",
-            "mensaje": "pin enviado"
+            "mensaje": mensaje_default
         }
     else:
         return {
@@ -126,11 +140,36 @@ def main():
     logging.info("Iniciando pin.py")
     logging.info(f"Procesando envío de PIN para teléfono {telefono}")
     
+    # ===== ENVIAR UPDATE PARCIAL: VALIDACIÓN =====
+    import time
+    validacion_update = {
+        "telefono": telefono,
+        "etapa": "validacion",
+        "info": f"Teléfono {telefono} validado correctamente",
+        "timestamp": int(time.time() * 1000)
+    }
+    print("===JSON_PARTIAL_START===")
+    print(json.dumps(validacion_update))
+    print("===JSON_PARTIAL_END===")
+    sys.stdout.flush()
+    
     try:
         # Configurar directorios
         project_root = get_project_root()
         
         print(f"Iniciando envío de PIN para teléfono {telefono}")
+        
+        # ===== ENVIAR UPDATE PARCIAL: INICIANDO ENVÍO =====
+        iniciando_update = {
+            "telefono": telefono,
+            "etapa": "enviando_pin",
+            "info": f"Iniciando envío de PIN para teléfono {telefono}",
+            "timestamp": int(time.time() * 1000)
+        }
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(iniciando_update))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
         
         # Ejecutar Camino D
         process = execute_camino_d(telefono, project_root)
@@ -143,7 +182,7 @@ def main():
             "telefono": telefono,
             "estado": resultado_analisis["estado"],
             "mensaje": resultado_analisis["mensaje"],
-            "timestamp": __import__('datetime').datetime.now().isoformat()
+            "timestamp": int(time.time() * 1000)
         }
         
         # Log del resultado
@@ -154,8 +193,11 @@ def main():
             logging.error(f"❌ Error enviando PIN para teléfono {telefono}")
             print(f"❌ Error enviando PIN para teléfono {telefono}")
         
-        # Imprimir resultado como JSON para que el worker lo pueda procesar
-        print("RESULTADO_JSON:" + json.dumps(resultado_final))
+        # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
+        print("===JSON_RESULT_START===")
+        print(json.dumps(resultado_final))
+        print("===JSON_RESULT_END===")
+        sys.stdout.flush()
         
         # Salir con código apropiado
         sys.exit(0 if resultado_analisis["estado"] == "exitoso" else 1)
@@ -169,11 +211,15 @@ def main():
         resultado_error = {
             "telefono": telefono,
             "estado": "error",
-            "mensaje": "error en script",
-            "timestamp": __import__('datetime').datetime.now().isoformat()
+            "mensaje": str(e),
+            "timestamp": int(time.time() * 1000)
         }
         
-        print("RESULTADO_JSON:" + json.dumps(resultado_error))
+        # ===== ENVIAR RESULTADO DE ERROR CON MARCADORES =====
+        print("===JSON_RESULT_START===")
+        print(json.dumps(resultado_error))
+        print("===JSON_RESULT_END===")
+        sys.stdout.flush()
         sys.exit(1)
 
 if __name__ == "__main__":

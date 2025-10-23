@@ -642,6 +642,8 @@ def process_task(task: dict) -> bool:
         # Procesar resultado según el tipo de worker
         if TIPO == "deudas":
             return process_deudas_result(task_id, input_data, data)
+        elif TIPO == "pin":
+            return process_pin_operation(task_id, input_data, data)
         else:
             return process_movimientos_result(task_id, input_data, data)
 

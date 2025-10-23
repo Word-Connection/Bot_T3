@@ -151,11 +151,20 @@ def run(dni: str, coords_path: Path, enter_times_override: int | None = None):
         print(f"[CaminoD] Enter {i+1}/{enter_times}")
         _press_enter(enter_delay)
 
-    result = {"dni": dni, "success": True, "entered": enter_times}
-    try:
-        print(json.dumps(result, ensure_ascii=False))
-    except Exception as e:
-        print(f"[CaminoD] No se pudo emitir JSON final: {e}")
+    print(f"[CaminoD] Proceso completado exitosamente")
+    
+    # Emitir resultado final con marcadores
+    result = {
+        "dni": dni, 
+        "success": True, 
+        "entered": enter_times,
+        "mensaje": "Envío exitoso"
+    }
+    
+    print("===JSON_RESULT_START===")
+    print(json.dumps(result, ensure_ascii=False))
+    print("===JSON_RESULT_END===")
+    sys.stdout.flush()
 
 # ---------------------------------------------------------------------------
 # CLI
