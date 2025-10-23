@@ -243,9 +243,8 @@ def process_task(task: dict) -> bool:
         base_dir = os.path.dirname(__file__)
         
         if is_pin_operation:
-            # Para PIN: ejecutar directamente Camino D y no enviar updates parciales
-            script_path = os.path.abspath(os.path.join(base_dir, '..', 'run_camino_d_multi.py'))
-            coords_path = os.path.abspath(os.path.join(base_dir, '..', 'camino_d_coords_multi.json'))
+            # Para PIN: ejecutar el script pin.py que maneja el envío y los updates
+            script_path = os.path.join(base_dir, 'scripts', 'pin.py')
         else:
             script_path = os.path.join(base_dir, 'scripts', f"{TIPO}.py")
         
@@ -266,59 +265,17 @@ def process_task(task: dict) -> bool:
             python_executable = sys.executable
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
         
-        # No enviar updates parciales para PIN
-        if not is_pin_operation:
-            operation_msg = f"Iniciando automatización para {data_label} {input_data}"
-            send_partial_update(task_id, {"info": operation_msg}, status="running")
+        # Enviar update inicial
+        operation_msg = f"Iniciando automatización para {data_label} {input_data}"
+        send_partial_update(task_id, {"info": operation_msg}, status="running")
         
-        # Ejecutar script - método simple SOLO para PIN, complejo para DEUDAS y MOVIMIENTOS
+        # Timeout según tipo de operación
         if is_pin_operation:
             timeout = 120  # 2 minutos para PIN
         else:
             timeout = 900 if TIPO == "deudas" else 800  # 15 min para deudas, 13+ min para movimientos
         
-        # MÉTODO SIMPLE: Ejecutar y esperar resultado (SOLO PIN)
-        if is_pin_operation:
-            try:
-                if is_pin_operation:
-                    cmd = [python_executable, script_path, '--dni', input_data, '--coords', coords_path]
-                else:
-                    # Para deudas, simplemente pasar el DNI
-                    cmd = [python_executable, script_path, input_data]
-                
-                logger.info(f"[SIMPLE] Ejecutando script y esperando resultado...")
-                run_res = subprocess.run(
-                    cmd,
-                    cwd=os.path.dirname(script_path),
-                    text=True,
-                    capture_output=True,
-                    timeout=timeout
-                )
-            except subprocess.TimeoutExpired:
-                logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
-                stats["scraping_errors"] += 1
-                send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
-                return False
-            except Exception as e:
-                logger.error(f"[ERROR] Error ejecutando script: {e}")
-                stats["scraping_errors"] += 1
-                send_partial_update(task_id, {"info": f"Error: {str(e)}"}, status="error")
-                return False
-
-            if run_res.returncode != 0:
-                error_msg = f"Script falló con código {run_res.returncode}"
-                logger.error(f"[ERROR] {error_msg}")
-                logger.debug(f"[STDOUT]: {safe_str(run_res.stdout,500)}")
-                logger.debug(f"[STDERR]: {safe_str(run_res.stderr,500)}")
-                stats["scraping_errors"] += 1
-                send_partial_update(task_id, {"info": error_msg}, status="error")
-                return False
-
-            # Para PIN, no hay más que hacer
-            return True
-
-        # MÉTODO COMPLEJO CON TIEMPO REAL: Para DEUDAS y MOVIMIENTOS
-        # Continuar con Popen y lectura en tiempo real
+        # MÉTODO COMPLEJO CON TIEMPO REAL: Para TODOS los tipos (DEUDAS, MOVIMIENTOS y PIN)
         # Usar Popen para leer output en tiempo real con unbuffered
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
@@ -415,6 +372,9 @@ def process_task(task: dict) -> bool:
                         # Iniciar captura de JSON parcial
                         json_buffer = []
                         capturing_partial = True
+                        print("\n" + "="*80)
+                        print("[WORKER.PY] DETECTADO INICIO DE JSON PARCIAL DEL SCRIPT")
+                        print("="*80 + "\n")
                         logger.info(f"[PARCIAL] Detectado inicio de JSON parcial")
                         
                         # Leer líneas hasta encontrar el final
@@ -429,12 +389,26 @@ def process_task(task: dict) -> bool:
                                 
                                 if "===JSON_PARTIAL_END===" in json_line_text:
                                     capturing_partial = False
+                                    print("\n" + "="*80)
+                                    print("[WORKER.PY] DETECTADO FIN DE JSON PARCIAL")
+                                    print("="*80 + "\n")
                                     logger.info(f"[PARCIAL] Detectado fin de JSON parcial")
                                     
                                     # Parsear y enviar el JSON parcial
                                     try:
                                         json_text = '\n'.join(json_buffer)
+                                        print("\n" + "="*80)
+                                        print("[WORKER.PY] PARSEANDO JSON PARCIAL RECIBIDO DEL SCRIPT")
+                                        print(f"[WORKER.PY] JSON text capturado:\n{json_text}")
+                                        print("="*80 + "\n")
+                                        
                                         partial_data = json.loads(json_text)
+                                        
+                                        print("\n" + "="*80)
+                                        print("[WORKER.PY] JSON PARCIAL PARSEADO EXITOSAMENTE")
+                                        print(f"[WORKER.PY] Datos parseados:")
+                                        print(json.dumps(partial_data, indent=2, ensure_ascii=False))
+                                        print("="*80 + "\n")
                                         
                                         etapa = partial_data.get("etapa", "")
                                         logger.info(f"[PARCIAL] JSON parseado: etapa={etapa}")
@@ -451,6 +425,11 @@ def process_task(task: dict) -> bool:
                                             logger.info(f"[PARCIAL] Update 'buscando deudas' enviado desde JSON parcial")
                                         
                                     except Exception as json_err:
+                                        print("\n" + "="*80)
+                                        print("[WORKER.PY] ERROR PARSEANDO JSON PARCIAL")
+                                        print(f"[WORKER.PY] Error: {json_err}")
+                                        print(f"[WORKER.PY] JSON text que causó el error:\n{json_text}")
+                                        print("="*80 + "\n")
                                         logger.error(f"[PARCIAL] Error parseando JSON parcial: {json_err}")
                                     
                                     break
@@ -603,17 +582,49 @@ def process_task(task: dict) -> bool:
             start_marker = "===JSON_RESULT_START==="
             end_marker = "===JSON_RESULT_END==="
             
+            print("\n" + "="*80)
+            print("[WORKER.PY] BUSCANDO RESULTADO JSON EN OUTPUT DEL SCRIPT")
+            print(f"[WORKER.PY] Buscando marcadores: {start_marker} ... {end_marker}")
+            print("="*80 + "\n")
+            
             start_pos = output.find(start_marker)
             if start_pos != -1:
+                print("\n" + "="*80)
+                print("[WORKER.PY] MARCADOR DE INICIO ENCONTRADO")
+                print(f"[WORKER.PY] Posición: {start_pos}")
+                print("="*80 + "\n")
+                
                 # Encontrar la posición después del marcador de inicio
                 json_start = output.find('\n', start_pos) + 1
                 end_pos = output.find(end_marker, json_start)
                 
                 if end_pos != -1:
+                    print("\n" + "="*80)
+                    print("[WORKER.PY] MARCADOR DE FIN ENCONTRADO")
+                    print(f"[WORKER.PY] Posición: {end_pos}")
+                    print("="*80 + "\n")
+                    
                     json_text = output[json_start:end_pos].strip()
+                    
+                    print("\n" + "="*80)
+                    print("[WORKER.PY] JSON EXTRAÍDO DEL OUTPUT")
+                    print(f"[WORKER.PY] JSON text:\n{json_text}")
+                    print("="*80 + "\n")
+                    
                     data = json.loads(json_text)
+                    
+                    print("\n" + "="*80)
+                    print("[WORKER.PY] JSON PARSEADO EXITOSAMENTE")
+                    print(f"[WORKER.PY] Datos parseados:")
+                    print(json.dumps(data, indent=2, ensure_ascii=False))
+                    print("="*80 + "\n")
+                    
                     logger.info(f"[JSON] Parseado correctamente usando marcadores")
                 else:
+                    print("\n" + "="*80)
+                    print("[WORKER.PY] MARCADOR DE FIN NO ENCONTRADO - USANDO FALLBACK")
+                    print("="*80 + "\n")
+                    
                     # Fallback: buscar desde el marcador hasta el final
                     json_text = output[json_start:].strip()
                     # Intentar encontrar el primer JSON completo
@@ -623,6 +634,10 @@ def process_task(task: dict) -> bool:
                         data = json.loads(json_text)
                         logger.info(f"[JSON] Parseado usando marcador de inicio (sin marcador de fin)")
             else:
+                print("\n" + "="*80)
+                print("[WORKER.PY] MARCADORES NO ENCONTRADOS - USANDO MÉTODO ANTIGUO")
+                print("="*80 + "\n")
+                
                 # Fallback al método antiguo si no hay marcadores
                 logger.warning(f"[WARN] No se encontraron marcadores JSON, usando fallback")
                 pos = output.find('{')
@@ -897,6 +912,14 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
 def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
     """Procesa resultado del script de envío de PIN."""
     try:
+        print("\n" + "="*80)
+        print("[WORKER.PY] PROCESANDO RESULTADO DE PIN")
+        print(f"[WORKER.PY] Task ID: {task_id}")
+        print(f"[WORKER.PY] Teléfono: {telefono}")
+        print(f"[WORKER.PY] Datos recibidos del script pin.py:")
+        print(json.dumps(data, indent=2))
+        print("="*80 + "\n")
+        
         estado = data.get("estado", "error")
         mensaje = data.get("mensaje", "Estado desconocido")
         
@@ -913,6 +936,14 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
             "info": mensaje,
             "timestamp": int(time.time() * 1000)
         }
+        
+        print("\n" + "="*80)
+        print("[WORKER.PY] ENVIANDO RESULTADO FINAL AL BACKEND")
+        print(f"[WORKER.PY] Task ID: {task_id}")
+        print(f"[WORKER.PY] Status: {'completed' if pin_enviado else 'error'}")
+        print(f"[WORKER.PY] Datos que se enviarán al backend:")
+        print(json.dumps(final_data, indent=2))
+        print("="*80 + "\n")
         
         status = "completed" if pin_enviado else "error"
         send_partial_update(task_id, final_data, status=status)
@@ -953,6 +984,17 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
                 "task_id": task_id,
                 "partial_data": partial_data
             }
+            print("\n" + "="*80)
+            print("[WORKER.PY] ENVIANDO VÍA WEBSOCKET")
+            print(f"[WORKER.PY] Mensaje WebSocket completo:")
+            # Crear copia del mensaje sin imagen para logging
+            log_message = message.copy()
+            if "partial_data" in log_message and "image" in log_message["partial_data"]:
+                img_size = len(log_message["partial_data"]["image"]) if log_message["partial_data"]["image"] else 0
+                log_message["partial_data"]["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
+            print(json.dumps(log_message, indent=2, ensure_ascii=False))
+            print("="*80 + "\n")
+            
             ws_connection.send(json.dumps(message))
             logger.info(f"[WS-UPDATE] Actualización enviada por WebSocket para {task_id} (status={status})")
             return True
@@ -961,10 +1003,32 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     
     # Fallback a HTTP si WebSocket no está disponible
     payload = {"task_id": task_id, "partial_data": partial_data}
+    
+    print("\n" + "="*80)
+    print("[WORKER.PY] ENVIANDO VÍA HTTP (FALLBACK)")
+    print(f"[WORKER.PY] URL: {BACKEND}/workers/task_update")
+    print(f"[WORKER.PY] Payload HTTP completo:")
+    # Crear copia del payload sin imagen para logging
+    log_payload = payload.copy()
+    if "partial_data" in log_payload and "image" in log_payload["partial_data"]:
+        img_size = len(log_payload["partial_data"]["image"]) if log_payload["partial_data"]["image"] else 0
+        log_payload["partial_data"]["image"] = f"<imagen base64 de {img_size} caracteres omitida>"
+    print(json.dumps(log_payload, indent=2, ensure_ascii=False))
+    print("="*80 + "\n")
+    
     result = make_request("POST", "/workers/task_update", payload)
     if result and result.get("status") == "ok":
+        print("\n" + "="*80)
+        print("[WORKER.PY] RESPUESTA DEL BACKEND (HTTP)")
+        print(f"[WORKER.PY] Resultado: {json.dumps(result, indent=2)}")
+        print("="*80 + "\n")
         logger.info(f"[HTTP-UPDATE] Actualización enviada para {task_id} (status={status})")
         return True
+    
+    print("\n" + "="*80)
+    print("[WORKER.PY] ERROR EN RESPUESTA DEL BACKEND")
+    print(f"[WORKER.PY] Resultado recibido: {result}")
+    print("="*80 + "\n")
     logger.error(f"[ERROR] Fallo enviando actualización para {task_id}")
     return False
 

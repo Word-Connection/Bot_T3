@@ -533,6 +533,20 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         x,y = _xy(conf,'dni_field'); _click(x,y,'dni_field', 0.2); _type(dni, _step_delay(step_delays,3,base_delay))
     _press_enter(_step_delay(step_delays,4,post_enter))
     
+    # NUEVO: Solo para DNI de 7 u 8 dígitos, hacer click en no_cuit_field
+    dni_length = len(dni.strip()) if isinstance(dni, str) else 0
+    if not is_cuit and dni_length in (7, 8):
+        print(f"[CaminoC] DNI de {dni_length} dígitos detectado, ejecutando paso no_cuit_field")
+        x, y = _xy(conf, 'no_cuit_field')
+        if x or y:
+            # Primer click
+            _click(x, y, 'no_cuit_field (click 1)', 0.5)
+            # Segundo click después de 0.5s
+            _click(x, y, 'no_cuit_field (click 2)', 0.5)
+            print("[CaminoC] Paso no_cuit_field completado")
+        else:
+            print("[CaminoC] ADVERTENCIA: no_cuit_field no definido en coordenadas")
+    
     # NUEVO: Validación de cliente creado/no creado
     print("[CaminoC] Validando si cliente está creado...")
     time.sleep(2.5)

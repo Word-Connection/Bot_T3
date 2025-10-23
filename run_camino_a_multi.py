@@ -111,16 +111,16 @@ def _clear_clipboard():
         except Exception as e:
             print(f"[CaminoJulian] Error al limpiar clipboard: {e}")
 
-def _parse_fa_ids_from_table(table_text: str) -> List[str]:
+def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
     """
-    Parsea la tabla copiada y extrae los IDs de FA.
+    Parsea la tabla copiada y extrae los IDs de FA junto con el CUIT si existe.
     
     Formato esperado:
-    ID    Tipo de Documento    ...    ID del FA    ...
-    41823096    Documento Nacional...    67089208    ...
-    41823096    Documento Nacional...    65263199    ...
+    ID    Tipo de Documento    ...    ID del FA    ...    Tipo ID Compañía    ...
+    41823096    Documento Nacional...    67089208    ...    CUIT    ...
+    41823096    Documento Nacional...    65263199    ...    (vacío)    ...
     
-    Retorna lista de IDs de FA únicos en orden de aparición.
+    Retorna lista de diccionarios con: {"id_fa": "...", "cuit": "CUIT" o ""}
     """
     lines = table_text.strip().split('\n')
     if len(lines) < 2:
@@ -130,7 +130,7 @@ def _parse_fa_ids_from_table(table_text: str) -> List[str]:
     # Primera línea es header
     header = lines[0]
     
-    # Buscar la posición de "ID del FA" en el header
+    # Buscar la posición de "ID del FA" y "Tipo ID Compañía" en el header
     # Dividir por tabulaciones o múltiples espacios
     header_parts = re.split(r'\t+|\s{2,}', header)
     
@@ -141,10 +141,21 @@ def _parse_fa_ids_from_table(table_text: str) -> List[str]:
         print(f"[CaminoJulian] Header parts: {header_parts}")
         return []
     
-    print(f"[CaminoJulian] ID del FA está en la columna {fa_index}")
+    # Buscar columna de CUIT (puede no existir)
+    cuit_index = None
+    for idx, part in enumerate(header_parts):
+        if 'Tipo ID Compa' in part or 'Tipo ID Compañía' in part:
+            cuit_index = idx
+            break
     
-    # Extraer IDs de FA de cada línea de datos
-    fa_ids = []
+    print(f"[CaminoJulian] ID del FA está en la columna {fa_index}")
+    if cuit_index is not None:
+        print(f"[CaminoJulian] Tipo ID Compañía está en la columna {cuit_index}")
+    else:
+        print(f"[CaminoJulian] WARN: No se encontró columna 'Tipo ID Compañía'")
+    
+    # Extraer IDs de FA y CUIT de cada línea de datos
+    fa_data_list = []
     for i, line in enumerate(lines[1:], start=1):
         if not line.strip():
             continue
@@ -155,15 +166,29 @@ def _parse_fa_ids_from_table(table_text: str) -> List[str]:
         if len(parts) > fa_index:
             fa_id = parts[fa_index].strip()
             if fa_id and fa_id.isdigit():
-                fa_ids.append(fa_id)
-                print(f"[CaminoJulian] Registro {i}: ID FA = {fa_id}")
+                # Extraer CUIT si existe
+                tiene_cuit = ""
+                if cuit_index is not None and len(parts) > cuit_index:
+                    cuit_value = parts[cuit_index].strip().upper()
+                    if cuit_value == "CUIT":
+                        tiene_cuit = "CUIT"
+                
+                fa_data_list.append({
+                    "id_fa": fa_id,
+                    "cuit": tiene_cuit
+                })
+                
+                if tiene_cuit:
+                    print(f"[CaminoJulian] Registro {i}: ID FA = {fa_id} (TIENE CUIT)")
+                else:
+                    print(f"[CaminoJulian] Registro {i}: ID FA = {fa_id}")
             else:
                 print(f"[CaminoJulian] WARN: Registro {i} sin ID FA válido: '{fa_id}'")
         else:
             print(f"[CaminoJulian] WARN: Registro {i} no tiene suficientes columnas")
     
-    print(f"[CaminoJulian] Total IDs de FA encontrados: {len(fa_ids)}")
-    return fa_ids
+    print(f"[CaminoJulian] Total IDs de FA encontrados: {len(fa_data_list)}")
+    return fa_data_list
 
 def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     print(f'[CaminoJulian] Iniciado para DNI={dni}')
@@ -228,18 +253,18 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     x, y = _xy(conf, 'copiado_btn')
     _click(x, y, 'copiado_btn', 0.5)  # Espera extra para copiar
     
-    # Paso 11: Leer clipboard y parsear IDs de FA
+    # Paso 11: Leer clipboard y parsear IDs de FA con CUIT
     table_text = _get_clipboard_text()
     print(f"[CaminoJulian] Tabla copiada ({len(table_text)} caracteres)")
     
-    fa_ids = _parse_fa_ids_from_table(table_text)
+    fa_data_list = _parse_fa_ids_from_table(table_text)
     
-    if not fa_ids:
+    if not fa_data_list:
         print(f"[CaminoJulian] WARN: No se encontraron IDs de FA")
         print(json.dumps(results))
         return
     
-    print(f"[CaminoJulian] Se procesarán {len(fa_ids)} registros")
+    print(f"[CaminoJulian] Se procesarán {len(fa_data_list)} registros")
     
     # Paso 11: Click en close_tab_btn
     x, y = _xy(conf, 'close_tab_btn')
@@ -249,8 +274,14 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     id_area_x, id_area_y = _xy(conf, 'id_area')
     offset_y = 19  # Offset vertical por registro
     
-    for idx, fa_id in enumerate(fa_ids):
-        print(f"[CaminoJulian] ===== Procesando registro {idx + 1}/{len(fa_ids)}: ID FA {fa_id} =====")
+    for idx, fa_data in enumerate(fa_data_list):
+        fa_id = fa_data["id_fa"]
+        tiene_cuit = fa_data["cuit"]
+        
+        if tiene_cuit:
+            print(f"[CaminoJulian] ===== Procesando registro {idx + 1}/{len(fa_data_list)}: ID FA {fa_id} (TIENE CUIT) =====")
+        else:
+            print(f"[CaminoJulian] ===== Procesando registro {idx + 1}/{len(fa_data_list)}: ID FA {fa_id} =====")
         
         # Limpiar portapapeles antes de cada registro
         _clear_clipboard()
@@ -294,18 +325,25 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
         saldo_text = _get_clipboard_text()
         print(f"[CaminoJulian] Saldo copiado para ID FA {fa_id}: '{saldo_text}'")
         
-        # Guardar resultado
-        results["fa_saldos"].append({
+        # Guardar resultado con CUIT si aplica
+        fa_result = {
             "id_fa": fa_id,
             "saldo": saldo_text.strip()
-        })
+        }
+        
+        # Agregar CUIT si existe
+        if tiene_cuit:
+            fa_result["cuit"] = tiene_cuit
+            print(f"[CaminoJulian] Registro con CUIT agregado")
+        
+        results["fa_saldos"].append(fa_result)
         
         # 12g: Click en close_tab_btn
         close_x, close_y = _xy(conf, 'close_tab_btn')
         _click(close_x, close_y, 'close_tab_btn', base_delay)
         
         # Si es el último registro, hacer clicks adicionales y ir a home
-        if idx == len(fa_ids) - 1:
+        if idx == len(fa_data_list) - 1:
             print(f"[CaminoJulian] Último registro - cerrando pestañas adicionales")
             # Repetir close_tab_btn 3 veces más
             for i in range(3):
@@ -320,7 +358,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     print(f"[CaminoJulian] ===== RESULTADOS FINALES =====")
     print(json.dumps(results, indent=2))
     
-    print(f"[CaminoJulian] Finalizado. Procesados {len(fa_ids)} registros")
+    print(f"[CaminoJulian] Finalizado. Procesados {len(fa_data_list)} registros")
 
 def main():
     import argparse
