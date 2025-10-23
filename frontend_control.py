@@ -23,6 +23,9 @@ class BotController:
         self.worker_logs = []
         self.start_time = None
         self.config = self.load_config()
+        self.countdown_thread = None
+        self.countdown_cancelled = False
+        self.countdown_remaining = 0
         self.setup_routes()
         
     def load_config(self):
@@ -54,7 +57,8 @@ class BotController:
                 'status': self.worker_status,
                 'start_time': self.start_time.isoformat() if self.start_time else None,
                 'logs': self.worker_logs[-10:],  # Últimos 10 logs
-                'uptime': self.get_uptime()
+                'uptime': self.get_uptime(),
+                'countdown': self.countdown_remaining
             })
         
         @self.app.route('/api/start', methods=['POST'])
@@ -62,13 +66,19 @@ class BotController:
             if self.worker_status == "ejecutando":
                 return jsonify({'success': False, 'message': 'El bot ya está ejecutándose'})
             
+            if self.worker_status == "esperando":
+                return jsonify({'success': False, 'message': 'El bot ya está iniciándose'})
+            
             # Iniciar countdown de 30 segundos
             self.worker_status = "esperando"
+            self.countdown_cancelled = False
+            self.countdown_remaining = 30
             self.add_log("⏳ Iniciando bot en 30 segundos...")
             self.add_log("🖥️ ABRE EL SISTEMA T3 AHORA y dejalo maximizado")
             
             # Usar threading para el delay
-            threading.Thread(target=self.delayed_start, daemon=True).start()
+            self.countdown_thread = threading.Thread(target=self.delayed_start, daemon=True)
+            self.countdown_thread.start()
             
             return jsonify({'success': True, 'message': 'Bot iniciando en 30 segundos'})
         
@@ -77,6 +87,15 @@ class BotController:
             if self.worker_status == "detenido":
                 return jsonify({'success': False, 'message': 'El bot ya está detenido'})
             
+            # Cancelar countdown si está esperando
+            if self.worker_status == "esperando":
+                self.countdown_cancelled = True
+                self.countdown_remaining = 0
+                self.worker_status = "detenido"
+                self.add_log("🛑 Inicio cancelado")
+                return jsonify({'success': True, 'message': 'Inicio cancelado'})
+            
+            # Detener worker si está ejecutando
             self.stop_worker_process()
             return jsonify({'success': True, 'message': 'Bot detenido'})
         
@@ -87,12 +106,21 @@ class BotController:
     def delayed_start(self):
         """Inicia el worker después de 30 segundos"""
         for i in range(30, 0, -1):
-            if self.worker_status != "esperando":  # Si se cancela
+            if self.countdown_cancelled or self.worker_status != "esperando":
+                self.add_log("🛑 Countdown cancelado")
+                self.countdown_remaining = 0
                 return
-            self.add_log(f"⏱️ Iniciando en {i} segundos... (Prepara el sistema T3)")
+            
+            self.countdown_remaining = i
+            
+            # Log cada 10 segundos o los últimos 5
+            if i % 10 == 0 or i <= 5:
+                self.add_log(f"⏱️ Iniciando en {i} segundos... (Prepara el sistema T3)")
+            
             time.sleep(1)
         
-        if self.worker_status == "esperando":
+        if self.worker_status == "esperando" and not self.countdown_cancelled:
+            self.countdown_remaining = 0
             self.start_worker_process()
     
     def start_worker_process(self):
@@ -139,21 +167,46 @@ class BotController:
             self.worker_status = "error"
     
     def stop_worker_process(self):
-        """Detiene el proceso del worker"""
+        """Detiene el proceso del worker de forma robusta"""
         if self.worker_process:
             try:
+                self.add_log("🛑 Deteniendo bot...")
+                
+                # Intentar terminar gracefully primero
                 self.worker_process.terminate()
-                self.worker_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.worker_process.kill()
+                
+                try:
+                    # Esperar hasta 3 segundos
+                    self.worker_process.wait(timeout=3)
+                    self.add_log("✅ Bot detenido correctamente")
+                    
+                except subprocess.TimeoutExpired:
+                    # Si no responde, forzar cierre
+                    self.add_log("⚠️ Forzando cierre del bot...")
+                    self.worker_process.kill()
+                    
+                    try:
+                        self.worker_process.wait(timeout=2)
+                        self.add_log("✅ Bot forzado a cerrar")
+                    except:
+                        self.add_log("⚠️ Proceso puede seguir activo")
+                
             except Exception as e:
                 self.add_log(f"⚠️ Error al detener: {str(e)}")
+                
+                # Último intento: kill directo
+                try:
+                    if self.worker_process.poll() is None:  # Si aún está vivo
+                        self.worker_process.kill()
+                        self.add_log("🔴 Proceso eliminado forzosamente")
+                except:
+                    pass
             
-            self.worker_process = None
+            finally:
+                self.worker_process = None
         
         self.worker_status = "detenido"
         self.start_time = None
-        self.add_log("🛑 Bot detenido")
     
     def monitor_worker(self):
         """Monitorea la salida del worker"""
