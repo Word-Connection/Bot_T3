@@ -835,6 +835,55 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         print('[CaminoC] Region no definida; captura completa')
         _capture_full(shot_path)
 
+    # ===== NUEVO: Extracción de DNI real si es CUIT y score en rango 80-89 =====
+    dni_real_extraido = None
+    if is_cuit and score_value.isdigit():
+        score_int = int(score_value)
+        if 80 <= score_int <= 89:
+            print(f"[CaminoC] CUIT detectado con score {score_int} (rango 80-89)")
+            print("[CaminoC] Extrayendo DNI real para Camino A...")
+            
+            # Paso 1: Doble click y luego click derecho en extra_cuit
+            ex_x, ex_y = _xy(conf, 'extra_cuit')
+            if ex_x or ex_y:
+                # Primero doble click
+                print(f"[CaminoC] Doble click en extra_cuit ({ex_x}, {ex_y})")
+                pg.moveTo(ex_x, ex_y, duration=0.15)
+                time.sleep(0.2)
+                pg.doubleClick()
+                time.sleep(0.5)
+                
+                # Luego click derecho en la misma posición
+                print(f"[CaminoC] Click derecho en extra_cuit ({ex_x}, {ex_y})")
+                pg.click(ex_x, ex_y, button='right')
+                time.sleep(0.3)
+                
+                # Paso 2: Click en extra_cuit_copy para copiar el DNI
+                copy_x, copy_y = _xy(conf, 'extra_cuit_copy')
+                if copy_x or copy_y:
+                    # Limpiar portapapeles antes de copiar
+                    _clear_clipboard()
+                    time.sleep(0.2)
+                    
+                    _click(copy_x, copy_y, 'extra_cuit_copy', 0.5)
+                    time.sleep(0.5)
+                    
+                    # Leer el DNI del portapapeles
+                    dni_clipboard = _get_clipboard_text().strip()
+                    
+                    # Extraer solo números del clipboard
+                    dni_numerico = re.sub(r'\D', '', dni_clipboard)
+                    
+                    if dni_numerico and len(dni_numerico) >= 7:
+                        dni_real_extraido = dni_numerico
+                        print(f"[CaminoC] DNI real extraído: {dni_real_extraido}")
+                    else:
+                        print(f"[CaminoC] ADVERTENCIA: DNI extraído inválido: '{dni_clipboard}'")
+                else:
+                    print("[CaminoC] ADVERTENCIA: extra_cuit_copy no definido en coordenadas")
+            else:
+                print("[CaminoC] ADVERTENCIA: extra_cuit no definido en coordenadas")
+
     # Cerrar y Home (ahora left-click x5)
     x,y = _xy(conf,'close_tab_btn')
     _multi_click(x, y, 'close_tab_btn (left x5)', times=5, button='left', interval=0.3)
@@ -853,6 +902,11 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         "success": True,
         "timestamp": int(time.time() * 1000)
     }
+    
+    # Agregar dni_real si fue extraído
+    if dni_real_extraido:
+        result["dni_real"] = dni_real_extraido
+        print(f"[CaminoC] DNI real agregado al resultado: {dni_real_extraido}")
     
     print("===JSON_RESULT_START===")
     print(json.dumps(result))

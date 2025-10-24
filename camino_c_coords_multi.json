@@ -47,6 +47,14 @@
     "x": 1325,
     "y": 180
   },
+  "extra_cuit": {
+    "x": 888,
+    "y": 173
+  },
+  "extra_cuit_copy": {
+    "x": 937,
+    "y": 262
+  },
   "seleccionar_btn": {
     "x": 37,
     "y": 981

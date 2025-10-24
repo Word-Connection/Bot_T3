@@ -1016,6 +1016,86 @@ def run(
         _type(service_id, _step_delay(step_delays,1,0.5))
         # Paso 3 Enter
         _press_enter(_step_delay(step_delays,2,0.5))
+        
+        # ===== VALIDACIÓN TEMPRANA: Verificar si la línea tiene movimientos =====
+        print(f"[MultiB] Validando si la línea tiene movimientos...")
+        time.sleep(post_enter_delay)  # Esperar a que cargue la línea
+        
+        # Coordenadas para validación (mismas que en _collect_movimientos_uno_por_uno)
+        id_servicio_coords = conf.get('id_servicio', {})
+        id_copy_coords = conf.get('id_copy', {})
+        
+        id_servicio_x = id_servicio_coords.get('x', 307)
+        id_servicio_y = id_servicio_coords.get('y', 275)
+        id_copy_x = id_copy_coords.get('x', 338)
+        id_copy_y = id_copy_coords.get('y', 310)
+        
+        # Limpiar portapapeles
+        print("[MultiB] Portapapeles limpiado con pyperclip")
+        _clear_clipboard()
+        time.sleep(0.2)
+        
+        # Left-click para seleccionar fila
+        print(f"[MultiB] Left-click para seleccionar fila en ({id_servicio_x}, {id_servicio_y})")
+        pg.moveTo(id_servicio_x, id_servicio_y, duration=0.15)
+        time.sleep(0.2)
+        pg.click()
+        time.sleep(0.3)
+        
+        # Right-click para menu contextual
+        print(f"[MultiB] Right-click para menu contextual en ({id_servicio_x}, {id_servicio_y})")
+        pg.rightClick()
+        time.sleep(0.3)
+        
+        # Click en Copiar
+        print(f"[MultiB] Click en Copiar ({id_copy_x}, {id_copy_y})")
+        pg.moveTo(id_copy_x, id_copy_y, duration=0.1)
+        time.sleep(0.1)
+        pg.click()
+        time.sleep(0.5)
+        
+        # Leer clipboard para validar formato
+        clipboard_validation = _get_clipboard_text().strip()
+        
+        # Verificar si tiene el formato esperado (debe tener al menos 2 líneas: header + datos)
+        tiene_movimientos = False
+        if clipboard_validation:
+            lines_validation = clipboard_validation.split('\n')
+            if len(lines_validation) > 1:
+                # Parsear la línea de datos
+                data_line_validation = lines_validation[1].strip()
+                parts_validation = re.split(r'\t+|\s{2,}', data_line_validation)
+                parts_validation = [p.strip() for p in parts_validation if p.strip()]
+                
+                # Verificar que tenga al menos 3 campos (Acción, Producto, ID servicio)
+                if len(parts_validation) >= 3:
+                    id_servicio_validation = parts_validation[2] if len(parts_validation) > 2 else ""
+                    # Verificar que el ID tenga números de al menos 4 dígitos
+                    if id_servicio_validation:
+                        numbers = re.findall(r'\d+', id_servicio_validation)
+                        for num in numbers:
+                            if len(num) >= 4:
+                                tiene_movimientos = True
+                                break
+        
+        if not tiene_movimientos:
+            print(f"[MultiB] ⚠️ La línea NO tiene movimientos (formato no esperado)")
+            print(f"[MultiB] Clipboard recibido: {clipboard_validation[:100] if clipboard_validation else 'VACÍO'}")
+            
+            # Marcar como "No Tiene Movimientos" y continuar con la siguiente línea
+            log_line = f"{service_id}  No Tiene Movimientos (línea vacía)"
+            with open(log_path, 'a', encoding='utf-8', errors='replace') as lf:
+                lf.write(log_line + '\n')
+            print(f"[MultiB] Log: {log_line}")
+            
+            # NO cerrar pestaña porque aún no se abrió ninguna
+            # Ir directamente a limpieza de campos y continuar con la siguiente línea
+            # (el continue saltará al final del loop donde está la limpieza)
+            
+            continue  # Saltar al siguiente service_id (pasará por la limpieza al final del loop)
+        
+        print(f"[MultiB] ✓ La línea tiene movimientos. Continuando con el flujo normal...")
+        
         # Paso 4 Primera fila (doble click con intervalo configurable)
         fx, fy = _xy(conf,'first_row')
         dbl_int = float(os.getenv('FIRST_ROW_DBLCLICK_INTERVAL','0.5'))
