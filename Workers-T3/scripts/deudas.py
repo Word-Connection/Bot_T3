@@ -262,9 +262,17 @@ def main():
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
                 if os.path.exists(script_a):
+                    # Determinar qué DNI usar para Camino A
+                    # Si camino_c_json tiene "dni_real" (extraído para CUIT), usarlo
+                    # Si no, usar el dni original
+                    dni_para_camino_a = camino_c_json.get("dni_real", dni)
+                    
+                    if dni_para_camino_a != dni:
+                        print(f"[CaminoA] Usando DNI real extraído: {dni_para_camino_a} (original: {dni})", file=sys.stderr)
+                    
                     # Simplificar comando: solo pasar --dni como cuando se ejecuta manualmente
                     # El script usará el DEFAULT_COORDS_FILE si no se especifica --coords
-                    cmd_a = [sys.executable, script_a, '--dni', dni]
+                    cmd_a = [sys.executable, script_a, '--dni', dni_para_camino_a]
                     
                     # Ejecutar Camino A de forma simple - solo esperar resultado
                     print(f"[CaminoA] Iniciando ejecución del Camino A...", flush=True)
