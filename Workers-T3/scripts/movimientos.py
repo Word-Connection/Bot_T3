@@ -15,15 +15,18 @@ def fake_image(text: str) -> str:
 
 def main():
     if len(sys.argv) < 2:
-        error_result = {"error": "DNI requerido", "stages": [{"info": "Error: DNI requerido"}]}
-        print("===JSON_RESULT_START===")
-        print(json.dumps(error_result, ensure_ascii=False))
-        print("===JSON_RESULT_END===")
-        sys.stdout.flush()
+        print(json.dumps({"error": "DNI requerido"}))
         sys.exit(1)
 
     dni = sys.argv[1]
 
+    stages = []
+
+    # Etapa 1: Validación de DNI
+    stages.append({
+        "info": f"DNI {dni} validado correctamente"
+    })
+    
     # ===== ENVIAR UPDATE PARCIAL: DNI VALIDADO =====
     validacion_update = {
         "dni": dni,
@@ -32,18 +35,14 @@ def main():
         "timestamp": int(time.time() * 1000)
     }
     print("===JSON_PARTIAL_START===")
-    print(json.dumps(validacion_update, ensure_ascii=False))
+    print(json.dumps(validacion_update))
     print("===JSON_PARTIAL_END===")
     sys.stdout.flush()
 
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
     if not csv_main.exists():
-        error_result = {"error": "CSV principal no encontrado", "dni": dni, "stages": [{"info": "Error: CSV principal no encontrado"}]}
-        print("===JSON_RESULT_START===")
-        print(json.dumps(error_result, ensure_ascii=False))
-        print("===JSON_RESULT_END===")
-        sys.stdout.flush()
+        print(json.dumps({"error": "CSV principal no encontrado"}))
         sys.exit(1)
 
     # Leer CSV y obtener líneas para el DNI
@@ -58,6 +57,10 @@ def main():
                 rows_for_dni.append(row)
 
     if not rows_for_dni:
+        stages.append({
+            "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema"
+        })
+        
         # ===== ENVIAR UPDATE PARCIAL: BÚSQUEDA DIRECTA =====
         busqueda_update = {
             "dni": dni,
@@ -66,7 +69,7 @@ def main():
             "timestamp": int(time.time() * 1000)
         }
         print("===JSON_PARTIAL_START===")
-        print(json.dumps(busqueda_update, ensure_ascii=False))
+        print(json.dumps(busqueda_update))
         print("===JSON_PARTIAL_END===")
         sys.stdout.flush()
         
@@ -129,12 +132,11 @@ def main():
 
 
         if not venv_python.exists():
-            error_msg = f"Error: No se encuentra Python del venv en {venv_python}"
-            result = {"dni": dni, "stages": [{"info": error_msg}], "success": False}
-            print("===JSON_RESULT_START===")
-            print(json.dumps(result, ensure_ascii=False))
-            print("===JSON_RESULT_END===")
-            sys.stdout.flush()
+            stages.append({
+                "info": f"Error: No se encuentra Python del venv en {venv_python}"
+            })
+            result = {"dni": dni, "stages": stages}
+            print(json.dumps(result))
             return
 
         python_exe = str(venv_python)
@@ -148,39 +150,19 @@ def main():
         ], capture_output=True, text=True, timeout=600)  # 10 min timeout
 
         if result_proc.returncode != 0:
-            # Capturar stderr y extraer las partes importantes del error
-            error_msg = result_proc.stderr if result_proc.stderr else "Sin mensaje de error"
-            
-            # DEBUG: Imprimir error completo en stderr para debugging
-            print(f"DEBUG ERROR COMPLETO:\n{error_msg}", file=sys.stderr)
-            
-            # Estrategia: Mostrar últimas 20 líneas del error (las más relevantes)
-            error_lines = error_msg.strip().split('\n')
-            if len(error_lines) > 20:
-                # Tomar las últimas 20 líneas que suelen tener el error real
-                error_msg = '\n'.join(error_lines[-20:])
-            
-            # Si aún es muy largo, limitar a 2000 chars (suficiente para traceback completo)
-            if len(error_msg) > 2000:
-                error_msg = error_msg[-2000:]
-            
-            # Solo enviar el stage de error, no toda la lista (ya se enviaron los parciales)
-            error_stage = {"info": f"Error ejecutando camino b:\n{error_msg}"}
-            result = {"dni": dni, "stages": [error_stage], "success": False}
-            print("===JSON_RESULT_START===")
-            print(json.dumps(result, ensure_ascii=False))
-            print("===JSON_RESULT_END===")
-            sys.stdout.flush()
+            stages.append({
+                "info": f"Error ejecutando camino b: {result_proc.stderr[:200]}"
+            })
+            result = {"dni": dni, "stages": stages}
+            print(json.dumps(result))
             return
 
     except subprocess.TimeoutExpired:
-        # Solo enviar el stage de timeout
-        timeout_stage = {"info": "Timeout ejecutando camino b"}
-        result = {"dni": dni, "stages": [timeout_stage], "success": False}
-        print("===JSON_RESULT_START===")
-        print(json.dumps(result, ensure_ascii=False))
-        print("===JSON_RESULT_END===")
-        sys.stdout.flush()
+        stages.append({
+            "info": "Timeout ejecutando camino b"
+        })
+        result = {"dni": dni, "stages": stages}
+        print(json.dumps(result))
         return
     finally:
         # Limpiar CSV temporal
@@ -224,7 +206,7 @@ def main():
                                     "timestamp": int(time.time() * 1000)
                                 }
                                 print("===JSON_PARTIAL_START===")
-                                print(json.dumps(linea_update, ensure_ascii=False))
+                                print(json.dumps(linea_update))
                                 print("===JSON_PARTIAL_END===")
                                 sys.stdout.flush()
                     continue
@@ -251,7 +233,7 @@ def main():
                                     "timestamp": int(time.time() * 1000)
                                 }
                                 print("===JSON_PARTIAL_START===")
-                                print(json.dumps(linea_update, ensure_ascii=False))
+                                print(json.dumps(linea_update))
                                 print("===JSON_PARTIAL_END===")
                                 sys.stdout.flush()
                             
@@ -273,9 +255,12 @@ def main():
         ids = ids_from_busqueda_directa
         print(f"DEBUG: Búsqueda directa detectada, usando {len(ids)} IDs del log: {ids}", file=sys.stderr)
 
-    # Etapa 2: Información de procesamiento (ya enviada como update parcial)
-    # No necesitamos agregar a stages porque ya se envió en tiempo real
+    # Etapa 2: Información de procesamiento
     if total_movimientos > 0:
+        stages.append({
+            "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados"
+        })
+        
         # ===== ENVIAR UPDATE PARCIAL: PROCESAMIENTO =====
         procesamiento_update = {
             "dni": dni,
@@ -286,10 +271,14 @@ def main():
             "timestamp": int(time.time() * 1000)
         }
         print("===JSON_PARTIAL_START===")
-        print(json.dumps(procesamiento_update, ensure_ascii=False))
+        print(json.dumps(procesamiento_update))
         print("===JSON_PARTIAL_END===")
         sys.stdout.flush()
     else:
+        stages.append({
+            "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos"
+        })
+        
         # ===== ENVIAR UPDATE PARCIAL: SIN MOVIMIENTOS =====
         sin_movimientos_update = {
             "dni": dni,
@@ -300,37 +289,61 @@ def main():
             "timestamp": int(time.time() * 1000)
         }
         print("===JSON_PARTIAL_START===")
-        print(json.dumps(sin_movimientos_update, ensure_ascii=False))
+        print(json.dumps(sin_movimientos_update))
         print("===JSON_PARTIAL_END===")
         sys.stdout.flush()
 
-    # Contar movimientos activos totales
+    # Etapa 3+: Resumen de movimientos por línea
+    stage_count = 3
     movimientos_activos = 0
-    for service_id in ids:
+    
+    for service_id in ids[:5]:  # Mostrar máximo 5 líneas para no saturar
         if service_id in movimientos_por_linea and movimientos_por_linea[service_id]:
             movimientos = movimientos_por_linea[service_id]
             if movimientos and movimientos[0] != "No Tiene Pedido":
+                # Mostrar el primer movimiento real
+                primer_mov = movimientos[0]
                 count_movs = len([m for m in movimientos if m != "No Tiene Pedido"])
+                stages.append({
+                    "info": f"Línea {service_id}: {count_movs} movimiento(s) - Último: {primer_mov[:50]}..."
+                })
                 movimientos_activos += count_movs
-
-    # Mensaje final de completado
-    if movimientos_activos > 0:
-        final_msg = f"COMPLETADO: {movimientos_activos} movimientos totales encontrados para DNI {dni}"
-    else:
-        final_msg = f"COMPLETADO: No hay movimientos activos para DNI {dni}"
+            else:
+                stages.append({
+                    "info": f"Línea {service_id}: Sin movimientos activos"
+                })
+        else:
+            stages.append({
+                "info": f"Línea {service_id}: No procesada o sin datos"
+        })
+        stage_count += 1
+        
+        # Limitar a 5 líneas para no saturar el frontend
+        if stage_count >= 8:
+            break
     
-    # Solo enviar el stage final de completado (los demás ya se enviaron como parciales)
-    result = {
-        "dni": dni, 
-        "stages": [{"info": final_msg}],
-        "success": True,
-        "lineas_procesadas": len(ids),
-        "movimientos_totales": movimientos_activos
-    }
+    # Si hay más líneas, mostrar resumen
+    if len(ids) > 5:
+        restantes = len(ids) - 5
+        stages.append({
+            "info": f"+ {restantes} líneas adicionales procesadas"
+        })
+
+    # Etapa final: Resumen total
+    if movimientos_activos > 0:
+        stages.append({
+            "info": f"COMPLETADO: {movimientos_activos} movimientos totales encontrados para DNI {dni}"
+        })
+    else:
+        stages.append({
+            "info": f"COMPLETADO: No hay movimientos activos para DNI {dni}"
+        })
+
+    result = {"dni": dni, "stages": stages}
     
     # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
     print("===JSON_RESULT_START===")
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result))
     print("===JSON_RESULT_END===")
     sys.stdout.flush()
 

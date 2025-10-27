@@ -223,6 +223,9 @@ def get_task() -> Optional[dict]:
 def process_task(task: dict) -> bool:
     task_id = task["task_id"]
     
+    logger.info(f"[TAREA-INICIO] ===== PROCESANDO TAREA {task_id} =====")
+    logger.info(f"[TAREA-DATA] Datos completos de la tarea: {json.dumps(task, ensure_ascii=False)}")
+    
     # Detectar si es operación de PIN
     is_pin_operation = "operacion" in task and task.get("operacion") == "pin"
     
@@ -250,6 +253,9 @@ def process_task(task: dict) -> bool:
         
         if not os.path.exists(script_path):
             logger.error(f"[ERROR] Script no encontrado: {script_path}")
+            logger.error(f"[ERROR] Directorio base: {base_dir}")
+            logger.error(f"[ERROR] Directorio actual: {os.getcwd()}")
+            logger.error(f"[ERROR] Contenido del directorio scripts: {os.listdir(os.path.join(base_dir, 'scripts'))}")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": f"Script no encontrado: {os.path.basename(script_path)}"}, status="error")
             return False
@@ -264,6 +270,9 @@ def process_task(task: dict) -> bool:
         else:
             python_executable = sys.executable
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
+        
+        logger.info(f"[WORKER] Verificando Python ejecutable existe: {os.path.exists(python_executable)}")
+        logger.info(f"[WORKER] Comando a ejecutar: {python_executable} -u {script_path} {input_data}")
         
         # Enviar update inicial
         operation_msg = f"Iniciando automatización para {data_label} {input_data}"
@@ -281,18 +290,31 @@ def process_task(task: dict) -> bool:
         env['PYTHONUNBUFFERED'] = '1'
         env['PYTHONIOENCODING'] = 'utf-8'  # Forzar UTF-8 en subprocess
 
-        process = subprocess.Popen(
-            [python_executable, '-u', script_path, input_data],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            # NO cambiar cwd para que las rutas relativas funcionen
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            bufsize=0,
-            universal_newlines=True,
-            env=env
-        )
+        logger.info(f"[SUBPROCESS] Creando proceso para task {task_id}...")
+        logger.info(f"[SUBPROCESS] Python: {python_executable}")
+        logger.info(f"[SUBPROCESS] Script: {script_path}")
+        logger.info(f"[SUBPROCESS] Input: {input_data}")
+        logger.info(f"[SUBPROCESS] Timeout configurado: {timeout}s")
+        
+        try:
+            process = subprocess.Popen(
+                [python_executable, '-u', script_path, input_data],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                # NO cambiar cwd para que las rutas relativas funcionen
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                bufsize=0,
+                universal_newlines=True,
+                env=env
+            )
+            logger.info(f"[SUBPROCESS] Proceso creado exitosamente. PID: {process.pid}")
+        except Exception as subprocess_error:
+            logger.error(f"[SUBPROCESS-ERROR] Error creando subprocess: {subprocess_error}", exc_info=True)
+            stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": f"Error iniciando proceso: {subprocess_error}"}, status="error")
+            return False
 
         output_lines = []
         stderr_lines = []
@@ -495,12 +517,21 @@ def process_task(task: dict) -> bool:
         except subprocess.TimeoutExpired:
             process.kill()
             logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
+            logger.error(f"[TIMEOUT] Task ID: {task_id} | Input: {input_data}")
+            logger.error(f"[TIMEOUT] Última línea recibida hace {time.time() - last_line_time:.1f}s")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
             return False
         except Exception as e:
-            logger.error(f"[ERROR] Error durante ejecución en tiempo real: {e}")
-            process.kill()
+            logger.error(f"[ERROR] Error durante ejecución en tiempo real: {e}", exc_info=True)
+            logger.error(f"[ERROR] Task ID: {task_id} | Input: {input_data}")
+            logger.error(f"[ERROR] Script: {script_path}")
+            logger.error(f"[ERROR] PID del proceso: {process.pid if 'process' in locals() else 'N/A'}")
+            if 'process' in locals():
+                try:
+                    process.kill()
+                except:
+                    pass
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": f"Error durante procesamiento: {str(e)}"}, status="error")
             return False
@@ -595,11 +626,19 @@ def process_task(task: dict) -> bool:
 
     except subprocess.TimeoutExpired:
         logger.error(f"[ERROR] Timeout ejecutando script para {task_id}")
+        logger.error(f"[ERROR] Input data: {input_data}")
+        logger.error(f"[ERROR] Script path: {script_path if 'script_path' in locals() else 'N/A'}")
         stats["scraping_errors"] += 1
         send_partial_update(task_id, {"info": "Timeout"}, status="error")
         return False
     except Exception as e:
-        logger.error(f"[ERROR] Excepción procesando {task_id}: {e}", exc_info=True)
+        logger.error(f"[ERROR] ===== EXCEPCIÓN FATAL PROCESANDO {task_id} =====")
+        logger.error(f"[ERROR] Tipo de excepción: {type(e).__name__}")
+        logger.error(f"[ERROR] Mensaje: {e}", exc_info=True)
+        logger.error(f"[ERROR] Input data: {input_data if 'input_data' in locals() else 'N/A'}")
+        logger.error(f"[ERROR] Script path: {script_path if 'script_path' in locals() else 'N/A'}")
+        logger.error(f"[ERROR] Python executable: {python_executable if 'python_executable' in locals() else 'N/A'}")
+        logger.error(f"[ERROR] Task data completa: {json.dumps(task, ensure_ascii=False)}")
         stats["scraping_errors"] += 1
         send_partial_update(task_id, {"info": f"Excepción: {e}"}, status="error")
         return False
