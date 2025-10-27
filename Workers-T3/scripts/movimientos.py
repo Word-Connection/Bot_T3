@@ -179,14 +179,14 @@ def main():
     lineas_procesadas_count = 0
     
     if log_path.exists():
+        print(f"[LOG] Intentando leer log en: {log_path}", file=sys.stderr)
         with log_path.open('r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                
+                print(f"[LOG] Línea del log: {line}", file=sys.stderr)
                 # Detectar formato de búsqueda directa: "DNI_29940807  Pos1 | ID Servicio: 2944834762 | Fecha: ..."
                 if line.startswith('DNI_') and '| ID Servicio:' in line:
                     busqueda_directa_detected = True
-                    # Extraer el ID de servicio
                     import re
                     match = re.search(r'ID Servicio:\s*(\S+)', line)
                     if match:
@@ -195,8 +195,7 @@ def main():
                             if service_id not in ids_from_busqueda_directa:
                                 ids_from_busqueda_directa.append(service_id)
                                 lineas_procesadas_count += 1
-                                
-                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA ENCONTRADA =====
+                                print(f"[LOG] ID de servicio detectado: {service_id}", file=sys.stderr)
                                 linea_update = {
                                     "dni": dni,
                                     "etapa": "procesando_linea",
@@ -210,20 +209,18 @@ def main():
                                 print("===JSON_PARTIAL_END===")
                                 sys.stdout.flush()
                     continue
-                
                 # Formato normal de log: "service_id  contenido"
                 if '  ' in line:
                     parts = line.split('  ', 1)
+                    print(f"[LOG] Partes de la línea: {parts}", file=sys.stderr)
                     if len(parts) == 2:
                         service_id = parts[0].strip()
                         content = parts[1].strip()
-                        
+                        print(f"[LOG] Procesando service_id: {service_id}, content: {content}", file=sys.stderr)
                         if service_id and content:
                             if service_id not in movimientos_por_linea:
                                 movimientos_por_linea[service_id] = []
                                 lineas_procesadas_count += 1
-                                
-                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA PROCESADA =====
                                 linea_update = {
                                     "dni": dni,
                                     "etapa": "procesando_linea",
@@ -236,19 +233,22 @@ def main():
                                 print(json.dumps(linea_update))
                                 print("===JSON_PARTIAL_END===")
                                 sys.stdout.flush()
-                            
-                            # Si el contenido no es "No Tiene Pedido", procesarlo
                             if content != "No Tiene Pedido" and content != "." and content != "No Tiene Pedido (base de datos)":
-                                # Dividir por líneas si hay múltiples movimientos
                                 lines = content.replace('\\n', '\n').split('\n')
+                                print(f"[LOG] Movimientos detectados: {lines}", file=sys.stderr)
                                 for mov_line in lines:
                                     mov_line = mov_line.strip()
                                     if mov_line and mov_line != "No Tiene Pedido":
                                         movimientos_por_linea[service_id].append(mov_line)
                                         total_movimientos += 1
                             else:
-                                # Registrar que no tiene pedidos
                                 movimientos_por_linea[service_id].append("No Tiene Pedido")
+                        else:
+                            print(f"[ERROR] service_id o content vacío en línea: {line}", file=sys.stderr)
+                    else:
+                        print(f"[ERROR] Línea no tiene dos partes separadas por doble espacio: {line}", file=sys.stderr)
+    else:
+        print(f"[ERROR] No existe el log en: {log_path}", file=sys.stderr)
 
     # Si se detectó búsqueda directa, usar esos IDs en lugar de los del CSV
     if busqueda_directa_detected and ids_from_busqueda_directa:
@@ -346,6 +346,3 @@ def main():
     print(json.dumps(result))
     print("===JSON_RESULT_END===")
     sys.stdout.flush()
-
-if __name__ == "__main__":
-    main()

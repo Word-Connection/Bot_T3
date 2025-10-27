@@ -599,17 +599,17 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     
     if not has_valid_id:
         print("[CaminoC] No se encontró ID válido (sin números de 4+ dígitos)")
-        print("CLIENTE NO CREADO")
+        print("CLIENTE NO ENCONTRADO")
         
         # Imprimir score para que deudas.py lo detecte
-        print("Score obtenido: CLIENTE NO CREADO")
+        print("Score obtenido: CLIENTE NO ENCONTRADO")
         
         # Devolver JSON estructurado para el worker con marcadores
         result = {
             "dni": dni,
-            "score": "CLIENTE NO CREADO",
-            "etapa": "cliente_no_creado",
-            "info": "Cliente no creado - No se encontró ID válido",
+            "score": "CLIENTE NO ENCONTRADO",
+            "etapa": "cliente_no_encontrado",
+            "info": "Cliente no encontrado - No se encontró ID válido",
             "success": True,
             "timestamp": int(time.time() * 1000)
         }
