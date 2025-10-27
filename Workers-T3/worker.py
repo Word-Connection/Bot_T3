@@ -73,21 +73,16 @@ PC_ID = args.pc_id
 TIPO = args.tipo
 BACKEND = args.backend
 PROCESS_DELAY = args.delay
-POLL_INTERVAL = args.poll_interval  # Deprecated, no longer used
+POLL_INTERVAL = args.poll_interval
 API_KEY = args.api_key
 TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
 VALID_TASK_TYPES = ["deudas", "movimientos", "pin"]
-
 
 # WebSocket globals
 ws_connected = False
 ws_connection = None
 task_queue = []
 task_queue_lock = threading.Lock()
-control_state = {
-    "paused": False,
-    "stopped": False
-}
 
 stats = {
     "tasks_completed": 0,
@@ -177,31 +172,29 @@ def send_heartbeat() -> bool:
     logger.error("[ERROR] Fallo en registro de PC")
     return False
 
-
-# get_task is now only called on WebSocket trigger, not polling
 def get_task() -> Optional[dict]:
-    logger.info("[WS] Intentando obtener tarea...")
+    logger.info("[POLL] Intentando obtener tarea...")
     payload = {"pc_id": PC_ID, "tipo": TIPO}
     result = make_request("POST", "/workers/get_task", payload)
     if not result:
         return None
     if result.get("status") == "ok":
         task = result.get("task")
-        # PIN priority logic
+        
+        # Determinar si es tarea PIN o normal
         is_pin_task = "operacion" in task and task.get("operacion") == "pin"
-        if TIPO == "pin":
-            if not is_pin_task:
-                logger.warning(f"[RECHAZO] Worker PIN recibió tarea no-PIN, rechazando")
-                return None
-        else:
-            # Workers de deudas/movimientos deben ejecutar PIN antes que las de su tipo
-            if is_pin_task:
-                logger.info(f"[PRIORIDAD] Worker {TIPO} ejecutando tarea PIN")
-            elif task.get("tipo") != TIPO:
-                logger.warning(f"[RECHAZO] Worker {TIPO} recibió tarea de tipo {task.get('tipo')}, rechazando")
-                return None
-        # Validaciones
+        task_type = "pin" if is_pin_task else TIPO
+        
+        # VALIDACIÓN: Rechazar tareas que no sean del tipo de este worker
+        if TIPO == "pin" and not is_pin_task:
+            logger.warning(f"[RECHAZO] Worker PIN recibió tarea {TIPO}, rechazando")
+            return None
+        elif TIPO != "pin" and is_pin_task:
+            logger.warning(f"[RECHAZO] Worker {TIPO} recibió tarea PIN, rechazando")
+            return None
+        
         if is_pin_task:
+            # Para PIN, validar teléfono
             telefono = task.get("telefono", "")
             if not validate_telefono(telefono):
                 logger.error(f"[ERROR] Teléfono inválido: {telefono}")
@@ -209,12 +202,14 @@ def get_task() -> Optional[dict]:
             logger.info("===== NUEVA TAREA =====")
             logger.info(f"[TAREA] ID={task['task_id']} Teléfono={telefono} Tipo=PIN")
         else:
+            # Para tareas normales, validar DNI
             dni = task.get("datos", "")
             if not validate_dni(dni):
                 logger.error(f"[ERROR] DNI inválido: {dni}")
                 return None
             logger.info("===== NUEVA TAREA =====")
             logger.info(f"[TAREA] ID={task['task_id']} DNI={dni} Tipo={TIPO}")
+        
         return task
     elif result.get("status") == "empty":
         logger.info("[VACÍO] No hay tareas disponibles")
@@ -957,26 +952,19 @@ def task_done(task_id: str, execution_time: int, success: bool = True) -> bool:
 # -----------------------------
 def on_ws_message(ws, message):
     """Callback cuando se recibe un mensaje del WebSocket"""
-    global task_queue, task_queue_lock, control_state
+    global task_queue, task_queue_lock
     try:
         data = json.loads(message)
         msg_type = data.get("type")
+        
         if msg_type == "connected":
             logger.info(f"[WS] {data.get('message', 'Conectado')}")
         elif msg_type == "new_task":
+            # Nueva tarea disponible - obtenerla usando get_task()
             logger.info(f"[WS] Notificación de nueva tarea recibida")
+            # Trigger para obtener tarea inmediatamente
             with task_queue_lock:
                 task_queue.append({"trigger": "fetch"})
-        elif msg_type == "control":
-            # Remote control command (pause, resume, stop)
-            command = data.get("command")
-            logger.info(f"[WS] Comando de control recibido: {command}")
-            if command == "pause":
-                control_state["paused"] = True
-            elif command == "resume":
-                control_state["paused"] = False
-            elif command == "stop":
-                control_state["stopped"] = True
         else:
             logger.debug(f"[WS] Mensaje recibido: {data}")
     except json.JSONDecodeError as e:
@@ -1047,7 +1035,11 @@ def main_loop():
     worker_type_display = "PIN" if TIPO == "pin" else TIPO.upper()
     logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Modo: WebSocket")
     logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}")
+    
+    # Crear directorio de logs
     os.makedirs("logs", exist_ok=True)
+    
+    # Registro inicial
     for attempt in range(5):
         if register_pc():
             break
@@ -1056,51 +1048,81 @@ def main_loop():
     else:
         logger.error("[ERROR] No se pudo registrar después de 5 intentos. Terminando.")
         sys.exit(1)
+    
+    # Conectar WebSocket
     logger.info("[WS] Iniciando conexión WebSocket...")
     if not connect_websocket():
-        logger.error("[WS] No se pudo conectar al WebSocket. Terminando.")
-        sys.exit(1)
-    logger.info("[WS] Conectado exitosamente. Esperando tareas...")
+        logger.error("[WS] No se pudo conectar al WebSocket. Intentando con polling como fallback...")
+        use_websocket = False
+    else:
+        logger.info("[WS] Conectado exitosamente. Esperando tareas...")
+        use_websocket = True
+    
     last_stats_log = time.time()
+    last_reconnect_attempt = time.time()
     last_heartbeat = time.time()
+    last_task_poll = time.time()  # Para hacer polling periódico
+    
     while True:
         try:
-            # Remote control: pause/stop
-            if control_state["stopped"]:
-                logger.info("[CONTROL] Worker detenido remotamente (stop)")
-                break
-            if control_state["paused"]:
-                logger.info("[CONTROL] Worker pausado remotamente (pause)")
-                time.sleep(1)
-                continue
-            # Heartbeat
+            # Enviar heartbeat cada 30 segundos
             if time.time() - last_heartbeat > 30:
                 send_heartbeat()
                 last_heartbeat = time.time()
-            # Stats reporting (WebSocket)
+            
             if time.time() - last_stats_log > 60:
-                send_stats_update()
                 log_stats()
                 last_stats_log = time.time()
-            # Obtener tarea solo por trigger WebSocket
-            trigger = get_task_from_queue()
-            if trigger:
-                logger.debug("[WS] Trigger recibido, obteniendo tarea...")
-                task = get_task()
+            
+            # Reconectar WebSocket si se desconectó
+            if use_websocket and not ws_connected and time.time() - last_reconnect_attempt > 10:
+                logger.warning("[WS] Intentando reconectar...")
+                if connect_websocket():
+                    logger.info("[WS] Reconectado exitosamente")
+                last_reconnect_attempt = time.time()
+            
+            # Obtener tarea (WebSocket + polling híbrido)
+            task = None
+            
+            if use_websocket:
+                # Revisar si hay notificación de nueva tarea por WebSocket
+                trigger = get_task_from_queue()
+                if trigger:
+                    # Hay notificación, obtener tarea inmediatamente
+                    logger.debug("[WS] Trigger recibido, obteniendo tarea...")
+                    task = get_task()
+                
+                # IMPORTANTE: También hacer polling cada 5 segundos por si acaso
+                # el WebSocket no está funcionando correctamente o no se reciben notificaciones
+                if not task and time.time() - last_task_poll > 5:
+                    task = get_task()
+                    last_task_poll = time.time()
+                
+                # Si no hay tarea, esperar un poco
                 if not task:
                     time.sleep(0.5)
                     continue
-                start_time = time.time()
-                success = process_task(task)
-                execution_time = int(time.time() - start_time)
-                if success:
-                    stats["tasks_completed"] += 1
-                    logger.info(f"[COMPLETADO] Tarea {task['task_id']} procesada exitosamente")
-                else:
-                    stats["tasks_failed"] += 1
-                    logger.error(f"[FALLIDA] Tarea {task['task_id']} falló")
             else:
-                time.sleep(0.2)
+                # Fallback a polling si WebSocket falló
+                task = get_task()
+                if not task:
+                    time.sleep(POLL_INTERVAL)
+                    continue
+            
+            # Procesar tarea
+            start_time = time.time()
+            success = process_task(task)
+            execution_time = int(time.time() - start_time)
+            
+            # No llamar a task_done - el backend lo hace automáticamente
+            # cuando recibe el update con status="completed"
+            if success:
+                stats["tasks_completed"] += 1
+                logger.info(f"[COMPLETADO] Tarea {task['task_id']} procesada exitosamente")
+            else:
+                stats["tasks_failed"] += 1
+                logger.error(f"[FALLIDA] Tarea {task['task_id']} falló")
+        
         except KeyboardInterrupt:
             logger.info("[DETENIDO] Worker detenido por usuario")
             if ws_connection:
@@ -1111,20 +1133,6 @@ def main_loop():
             logger.error(f"[ERROR] Inesperado en loop principal: {e}")
             stats["connection_errors"] += 1
             time.sleep(1)
-# Periodic stats reporting via WebSocket
-def send_stats_update():
-    if ws_connected and ws_connection:
-        try:
-            stats_payload = {
-                "type": "worker_stats",
-                "pc_id": PC_ID,
-                "stats": stats,
-                "timestamp": int(time.time() * 1000)
-            }
-            ws_connection.send(json.dumps(stats_payload))
-            logger.info(f"[WS] Stats enviados correctamente")
-        except Exception as e:
-            logger.warning(f"[WS] Error enviando stats: {e}")
 
 
 # -----------------------------
