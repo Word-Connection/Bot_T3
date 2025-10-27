@@ -35,7 +35,7 @@ def main():
         "timestamp": int(time.time() * 1000)
     }
     print("===JSON_PARTIAL_START===")
-    print(json.dumps(validacion_update))
+    print(json.dumps(validacion_update, ensure_ascii=False))
     print("===JSON_PARTIAL_END===")
     sys.stdout.flush()
 
@@ -69,7 +69,7 @@ def main():
             "timestamp": int(time.time() * 1000)
         }
         print("===JSON_PARTIAL_START===")
-        print(json.dumps(busqueda_update))
+        print(json.dumps(busqueda_update, ensure_ascii=False))
         print("===JSON_PARTIAL_END===")
         sys.stdout.flush()
         
@@ -116,7 +116,7 @@ def main():
         "timestamp": int(time.time() * 1000)
     }
     print("===JSON_PARTIAL_START===")
-    print(json.dumps(scraping_update))
+    print(json.dumps(scraping_update, ensure_ascii=False))
     print("===JSON_PARTIAL_END===")
     sys.stdout.flush()
     
@@ -150,12 +150,17 @@ def main():
         ], capture_output=True, text=True, timeout=600)  # 10 min timeout
 
         if result_proc.returncode != 0:
+            # Capturar stderr completo para debugging, limitando a 1000 chars para evitar JSONs gigantes
+            error_msg = result_proc.stderr if result_proc.stderr else "Sin mensaje de error"
+            if len(error_msg) > 1000:
+                error_msg = error_msg[:997] + "..."
+            
             stages.append({
-                "info": f"Error ejecutando camino b: {result_proc.stderr[:200]}"
+                "info": f"Error ejecutando camino b: {error_msg}"
             })
             result = {"dni": dni, "stages": stages}
             print("===JSON_RESULT_START===")
-            print(json.dumps(result))
+            print(json.dumps(result, ensure_ascii=False))
             print("===JSON_RESULT_END===")
             sys.stdout.flush()
             return
@@ -166,7 +171,7 @@ def main():
         })
         result = {"dni": dni, "stages": stages}
         print("===JSON_RESULT_START===")
-        print(json.dumps(result))
+        print(json.dumps(result, ensure_ascii=False))
         print("===JSON_RESULT_END===")
         sys.stdout.flush()
         return
@@ -349,7 +354,7 @@ def main():
     
     # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
     print("===JSON_RESULT_START===")
-    print(json.dumps(result))
+    print(json.dumps(result, ensure_ascii=False))
     print("===JSON_RESULT_END===")
     sys.stdout.flush()
 

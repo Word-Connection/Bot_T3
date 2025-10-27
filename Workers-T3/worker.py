@@ -832,7 +832,11 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
 
 
 def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
-    """Procesa resultado del script de movimientos (múltiples stages)."""
+    """Procesa resultado del script de movimientos.
+    
+    IMPORTANTE: Los updates parciales ya fueron enviados en tiempo real por el worker.
+    Esta función solo necesita validar el resultado y marcar como completed.
+    """
     try:
         stages = data.get("stages", [])
         
@@ -841,32 +845,26 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
             send_partial_update(task_id, {"info": "Sin resultados encontrados"}, status="error")
             return False
         
-        logger.info(f"[WORKER] Procesando {len(stages)} stages para {dni}")
+        logger.info(f"[WORKER] Resultado final recibido: {len(stages)} stages para {dni}")
         
-        # Enviar cada stage como actualización parcial
-        for i, stage_data in enumerate(stages, 1):
-            info = stage_data.get("info", "")
-            
-            # Truncar mensajes muy largos
-            if len(info) > 200:
-                info = info[:197] + "..."
-            
-            partial_data = {
-                "dni": dni,
-                "etapa": i,
-                "info": info,
-                "total_etapas": len(stages)
-            }
-            
-            # Último stage marca como completed
-            status = "completed" if i == len(stages) else "running"
-            send_partial_update(task_id, partial_data, status=status)
-            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info[:50]}...")
-            
-            # Pequeña pausa entre stages para no saturar el backend
-            if i < len(stages):
-                time.sleep(random.uniform(0.1, 0.3))  # Más rápido: 0.1-0.3s
+        # Los updates parciales ya se enviaron en tiempo real
+        # Solo enviar el update final de completed con el último stage
+        last_stage = stages[-1]
+        info = last_stage.get("info", "Procesamiento completado")
         
+        # Truncar mensajes muy largos
+        if len(info) > 200:
+            info = info[:197] + "..."
+        
+        final_data = {
+            "dni": dni,
+            "etapa": len(stages),
+            "info": info,
+            "total_etapas": len(stages)
+        }
+        
+        # Enviar solo el update final como completed
+        send_partial_update(task_id, final_data, status="completed")
         logger.info(f"[OK] Procesamiento movimientos de {task_id} completado | {len(stages)} etapas")
         return True
         
