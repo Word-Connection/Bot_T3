@@ -279,6 +279,7 @@ def process_task(task: dict) -> bool:
         # Usar Popen para leer output en tiempo real con unbuffered
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
+        env['PYTHONIOENCODING'] = 'utf-8'  # Forzar UTF-8 en subprocess
 
         process = subprocess.Popen(
             [python_executable, '-u', script_path, input_data],
