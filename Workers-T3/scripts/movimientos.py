@@ -346,3 +346,7 @@ def main():
     print(json.dumps(result))
     print("===JSON_RESULT_END===")
     sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()
