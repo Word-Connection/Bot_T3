@@ -181,17 +181,36 @@ def get_task() -> Optional[dict]:
     if result.get("status") == "ok":
         task = result.get("task")
         
-        # Determinar si es tarea PIN o normal
-        is_pin_task = "operacion" in task and task.get("operacion") == "pin"
-        task_type = "pin" if is_pin_task else TIPO
+        # LOG: Datos completos de la tarea recibida
+        logger.info(f"[TAREA-RECIBIDA] Datos completos: {json.dumps(task, ensure_ascii=False)}")
         
-        # VALIDACIÓN: Rechazar tareas que no sean del tipo de este worker
-        if TIPO == "pin" and not is_pin_task:
-            logger.warning(f"[RECHAZO] Worker PIN recibió tarea {TIPO}, rechazando")
-            return None
-        elif TIPO != "pin" and is_pin_task:
-            logger.warning(f"[RECHAZO] Worker {TIPO} recibió tarea PIN, rechazando")
-            return None
+        # Determinar el tipo REAL de la tarea basado en sus campos
+        is_pin_task = "operacion" in task and task.get("operacion") == "pin"
+        
+        # Obtener el tipo de la tarea desde el backend (campo 'tipo' en la tarea)
+        task_tipo = task.get("tipo", "")
+        
+        logger.info(f"[TAREA-TIPO] Worker esperaba: '{TIPO}' | Tarea tiene tipo: '{task_tipo}' | Es PIN: {is_pin_task}")
+        
+        # VALIDACIÓN: Verificar que la tarea sea del tipo correcto para este worker
+        if TIPO == "pin":
+            # Worker de PIN solo acepta tareas con operacion=pin
+            if not is_pin_task:
+                logger.warning(f"[RECHAZO] Worker PIN recibió tarea tipo '{task_tipo}' (no es PIN), rechazando")
+                logger.warning(f"[RECHAZO] Task ID: {task.get('task_id')}")
+                return None
+        elif TIPO == "movimientos":
+            # Worker de movimientos solo acepta tareas tipo movimientos
+            if task_tipo != "movimientos" and not (task_tipo == "" and "datos" in task and not is_pin_task):
+                logger.warning(f"[RECHAZO] Worker MOVIMIENTOS recibió tarea tipo '{task_tipo}', rechazando")
+                logger.warning(f"[RECHAZO] Task ID: {task.get('task_id')}")
+                return None
+        elif TIPO == "deudas":
+            # Worker de deudas solo acepta tareas tipo deudas
+            if task_tipo != "deudas" and not (task_tipo == "" and "datos" in task and not is_pin_task):
+                logger.warning(f"[RECHAZO] Worker DEUDAS recibió tarea tipo '{task_tipo}', rechazando")
+                logger.warning(f"[RECHAZO] Task ID: {task.get('task_id')}")
+                return None
         
         if is_pin_task:
             # Para PIN, validar teléfono
@@ -208,7 +227,7 @@ def get_task() -> Optional[dict]:
                 logger.error(f"[ERROR] DNI inválido: {dni}")
                 return None
             logger.info("===== NUEVA TAREA =====")
-            logger.info(f"[TAREA] ID={task['task_id']} DNI={dni} Tipo={TIPO}")
+            logger.info(f"[TAREA] ID={task['task_id']} DNI={dni} Tipo={task_tipo or TIPO}")
         
         return task
     elif result.get("status") == "empty":
