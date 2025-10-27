@@ -148,13 +148,21 @@ def main():
         ], capture_output=True, text=True, timeout=600)  # 10 min timeout
 
         if result_proc.returncode != 0:
-            # Capturar stderr completo para debugging, limitando a 1000 chars
+            # Capturar stderr y extraer las partes importantes del error
             error_msg = result_proc.stderr if result_proc.stderr else "Sin mensaje de error"
-            if len(error_msg) > 1000:
-                error_msg = error_msg[:997] + "..."
+            
+            # Estrategia: Mostrar últimas 20 líneas del error (las más relevantes)
+            error_lines = error_msg.strip().split('\n')
+            if len(error_lines) > 20:
+                # Tomar las últimas 20 líneas que suelen tener el error real
+                error_msg = '\n'.join(error_lines[-20:])
+            
+            # Si aún es muy largo, limitar a 2000 chars (suficiente para traceback completo)
+            if len(error_msg) > 2000:
+                error_msg = error_msg[-2000:]
             
             # Solo enviar el stage de error, no toda la lista (ya se enviaron los parciales)
-            error_stage = {"info": f"Error ejecutando camino b: {error_msg}"}
+            error_stage = {"info": f"Error ejecutando camino b:\n{error_msg}"}
             result = {"dni": dni, "stages": [error_stage], "success": False}
             print("===JSON_RESULT_START===")
             print(json.dumps(result, ensure_ascii=False))
