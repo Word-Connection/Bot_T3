@@ -154,7 +154,10 @@ def main():
                 "info": f"Error ejecutando camino b: {result_proc.stderr[:200]}"
             })
             result = {"dni": dni, "stages": stages}
+            print("===JSON_RESULT_START===")
             print(json.dumps(result))
+            print("===JSON_RESULT_END===")
+            sys.stdout.flush()
             return
 
     except subprocess.TimeoutExpired:
@@ -162,7 +165,10 @@ def main():
             "info": "Timeout ejecutando camino b"
         })
         result = {"dni": dni, "stages": stages}
+        print("===JSON_RESULT_START===")
         print(json.dumps(result))
+        print("===JSON_RESULT_END===")
+        sys.stdout.flush()
         return
     finally:
         # Limpiar CSV temporal

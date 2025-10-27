@@ -625,8 +625,7 @@ def process_task(task: dict) -> bool:
                     data = json.loads(output[pos:])
         except Exception as e:
             logger.warning(f"[WARN] No se pudo parsear JSON de salida: {e}")
-            logger.error(f"[ERROR] Output que causó el error:\n{output}")
-            logger.debug(f"[DEBUG] Output (primeros 500 chars):\n{output[:500]}")
+            logger.debug(f"[DEBUG] Output completo:\n{output[:500]}")
             send_partial_update(task_id, {"info": "Error parseando resultado"}, status="error")
             return False
 
