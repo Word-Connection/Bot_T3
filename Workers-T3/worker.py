@@ -280,10 +280,6 @@ def process_task(task: dict) -> bool:
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
 
-        logger.info(f"[EJECUTANDO] Comando: {python_executable} -u {script_path} {input_data}")
-        logger.info(f"[EJECUTANDO] Script existe: {os.path.exists(script_path)}")
-        logger.info(f"[EJECUTANDO] Python existe: {os.path.exists(python_executable)}")
-
         process = subprocess.Popen(
             [python_executable, '-u', script_path, input_data],
             stdout=subprocess.PIPE,
@@ -296,22 +292,6 @@ def process_task(task: dict) -> bool:
             universal_newlines=True,
             env=env
         )
-        
-        logger.info(f"[PROCESO] PID: {process.pid}")
-        logger.info(f"[PROCESO] Proceso iniciado, esperando output...")
-        
-        # Verificar que el proceso no murió inmediatamente
-        time.sleep(0.5)
-        if process.poll() is not None:
-            # El proceso ya terminó
-            logger.error(f"[ERROR] Proceso terminó inmediatamente con código {process.returncode}")
-            stderr_immediate = process.stderr.read() if process.stderr else ""
-            stdout_immediate = process.stdout.read() if process.stdout else ""
-            logger.error(f"[ERROR] STDERR inmediato: {stderr_immediate[:500]}")
-            logger.error(f"[ERROR] STDOUT inmediato: {stdout_immediate[:500]}")
-            stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": f"Script falló al iniciar (código {process.returncode})"}, status="error")
-            return False
 
         output_lines = []
         stderr_lines = []
@@ -326,29 +306,19 @@ def process_task(task: dict) -> bool:
             # Función para leer stdout en un hilo separado
             def read_output(pipe, out_queue):
                 try:
-                    line_count = 0
                     for line in iter(pipe.readline, ''):
                         if line:
                             out_queue.put(line)
-                            line_count += 1
-                            if line_count == 1:
-                                logger.info(f"[THREAD] Primera línea leída del pipe")
-                            if line_count % 10 == 0:
-                                logger.info(f"[THREAD] {line_count} líneas leídas hasta ahora")
-                    logger.info(f"[THREAD] Lectura completada. Total líneas: {line_count}")
                 except Exception as e:
-                    logger.error(f"[THREAD] Error leyendo output: {e}")
+                    logger.error(f"[ERROR] Error leyendo output: {e}")
                 finally:
                     out_queue.put(None)  # Señal de fin
-                    logger.info(f"[THREAD] Señal de fin enviada a la cola")
             
             # Crear cola y hilo para lectura no bloqueante
             output_queue = queue.Queue()
             reader_thread = threading.Thread(target=read_output, args=(process.stdout, output_queue))
             reader_thread.daemon = True
             reader_thread.start()
-            
-            logger.info(f"[THREAD] Hilo lector iniciado")
             
             start_time = time.time()
             last_line_time = start_time
@@ -374,25 +344,14 @@ def process_task(task: dict) -> bool:
                 # Verificar si el proceso terminó
                 if process.poll() is not None:
                     # Leer líneas restantes de la cola
-                    logger.info(f"[PROCESO] Terminado con código {process.returncode}, leyendo líneas restantes...")
-                    logger.info(f"[THREAD] Hilo lector vivo: {reader_thread.is_alive()}")
-                    
-                    # Esperar a que el hilo termine de leer (máximo 5 segundos)
-                    reader_thread.join(timeout=5.0)
-                    logger.info(f"[THREAD] Después de join - Hilo vivo: {reader_thread.is_alive()}")
-                    
-                    lines_read = 0
-                    while True:
+                    while not output_queue.empty():
                         try:
-                            line = output_queue.get(timeout=0.1)
-                            if line is None:  # Señal de fin
-                                break
-                            output_lines.append(line.strip())
-                            lines_read += 1
+                            line = output_queue.get_nowait()
+                            if line is not None:
+                                output_lines.append(line.strip())
                         except queue.Empty:
                             break
-                    logger.info(f"[PROCESO] {lines_read} líneas adicionales leídas de la cola")
-                    logger.info(f"[PROCESO] Total de líneas capturadas: {len(output_lines)}")
+                    logger.info(f"[PROCESO] Proceso terminado con código {process.returncode}")
                     break
                 
                 # Intentar leer línea de la cola con timeout
@@ -556,12 +515,6 @@ def process_task(task: dict) -> bool:
         output = '\n'.join([line for line in output_lines if line])
         stderr_output = '\n'.join([line for line in stderr_lines if line])
         
-        # DEBUG: Log de estadísticas del output
-        logger.info(f"[OUTPUT] Total líneas stdout: {len(output_lines)}")
-        logger.info(f"[OUTPUT] Total líneas stderr: {len(stderr_lines)}")
-        logger.info(f"[OUTPUT] Longitud output combinado: {len(output)} chars")
-        logger.info(f"[OUTPUT] Returncode: {process.returncode}")
-        
         # Verificar returncode
         if process.returncode is None:
             error_msg = "Proceso no terminó correctamente (returncode None)"
@@ -584,9 +537,6 @@ def process_task(task: dict) -> bool:
         
         if not output:
             logger.error(f"[ERROR] Script no produjo output")
-            logger.error(f"[DEBUG] Líneas capturadas en output_lines: {len(output_lines)}")
-            logger.error(f"[DEBUG] Primeras 10 líneas raw: {output_lines[:10]}")
-            logger.error(f"[DEBUG] STDERR: {stderr_output[:500] if stderr_output else 'VACÍO'}")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Script no produjo resultados"}, status="error")
             return False
@@ -832,11 +782,7 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
 
 
 def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
-    """Procesa resultado del script de movimientos.
-    
-    IMPORTANTE: Los updates parciales ya fueron enviados en tiempo real por el worker.
-    Esta función solo necesita validar el resultado y marcar como completed.
-    """
+    """Procesa resultado del script de movimientos (múltiples stages)."""
     try:
         stages = data.get("stages", [])
         
@@ -845,26 +791,32 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
             send_partial_update(task_id, {"info": "Sin resultados encontrados"}, status="error")
             return False
         
-        logger.info(f"[WORKER] Resultado final recibido: {len(stages)} stages para {dni}")
+        logger.info(f"[WORKER] Procesando {len(stages)} stages para {dni}")
         
-        # Los updates parciales ya se enviaron en tiempo real
-        # Solo enviar el update final de completed con el último stage
-        last_stage = stages[-1]
-        info = last_stage.get("info", "Procesamiento completado")
+        # Enviar cada stage como actualización parcial
+        for i, stage_data in enumerate(stages, 1):
+            info = stage_data.get("info", "")
+            
+            # Truncar mensajes muy largos
+            if len(info) > 200:
+                info = info[:197] + "..."
+            
+            partial_data = {
+                "dni": dni,
+                "etapa": i,
+                "info": info,
+                "total_etapas": len(stages)
+            }
+            
+            # Último stage marca como completed
+            status = "completed" if i == len(stages) else "running"
+            send_partial_update(task_id, partial_data, status=status)
+            logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info[:50]}...")
+            
+            # Pequeña pausa entre stages para no saturar el backend
+            if i < len(stages):
+                time.sleep(random.uniform(0.1, 0.3))  # Más rápido: 0.1-0.3s
         
-        # Truncar mensajes muy largos
-        if len(info) > 200:
-            info = info[:197] + "..."
-        
-        final_data = {
-            "dni": dni,
-            "etapa": len(stages),
-            "info": info,
-            "total_etapas": len(stages)
-        }
-        
-        # Enviar solo el update final como completed
-        send_partial_update(task_id, final_data, status="completed")
         logger.info(f"[OK] Procesamiento movimientos de {task_id} completado | {len(stages)} etapas")
         return True
         
