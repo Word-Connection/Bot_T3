@@ -43,6 +43,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+# Configurar codificación UTF-8 para evitar errores con caracteres especiales (✓, etc.)
+if sys.stdout.encoding != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import pyautogui as pg
 import platform
 import ctypes
@@ -1518,6 +1524,8 @@ if __name__ == '__main__':
             prefer_click_actividad_tab=bool(getattr(args, 'prefer_click_actividad_tab', False)),
             use_ctrl_pagedown=bool(getattr(args, 'use_ctrl_pagedown', False)),
             focus_general_then_keys=bool(getattr(args, 'focus_general_then_keys', False)),
+            nav_stabilize_delay=float(getattr(args, 'nav_stabilize_delay', 0.15)),
+            single_id=args.single_id if args.single_id else None,
         )
     except KeyboardInterrupt:
         print('Interrumpido por usuario')

@@ -884,7 +884,12 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     has_image = "image" in partial_data
     img_indicator = " [+IMG]" if has_image else ""
     
-    logger.info(f"[UPDATE] {task_id} | {status} | {etapa}: {info}{img_indicator}")
+    # Si es un error y el mensaje es muy largo, mostrar completo en log aparte
+    if status in ["error", "completed"] and len(info) > 200 and "Error" in info:
+        logger.info(f"[UPDATE] {task_id} | {status} | {etapa}: (ver detalles abajo)")
+        logger.info(f"[ERROR_DETAIL] {task_id}:\n{info}")
+    else:
+        logger.info(f"[UPDATE] {task_id} | {status} | {etapa}: {info}{img_indicator}")
     
     # Intentar enviar por WebSocket primero (más rápido)
     if ws_connected and ws_connection:
