@@ -280,6 +280,10 @@ def process_task(task: dict) -> bool:
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
 
+        logger.info(f"[EJECUTANDO] Comando: {python_executable} -u {script_path} {input_data}")
+        logger.info(f"[EJECUTANDO] Script existe: {os.path.exists(script_path)}")
+        logger.info(f"[EJECUTANDO] Python existe: {os.path.exists(python_executable)}")
+
         process = subprocess.Popen(
             [python_executable, '-u', script_path, input_data],
             stdout=subprocess.PIPE,
@@ -292,6 +296,22 @@ def process_task(task: dict) -> bool:
             universal_newlines=True,
             env=env
         )
+        
+        logger.info(f"[PROCESO] PID: {process.pid}")
+        logger.info(f"[PROCESO] Proceso iniciado, esperando output...")
+        
+        # Verificar que el proceso no murió inmediatamente
+        time.sleep(0.5)
+        if process.poll() is not None:
+            # El proceso ya terminó
+            logger.error(f"[ERROR] Proceso terminó inmediatamente con código {process.returncode}")
+            stderr_immediate = process.stderr.read() if process.stderr else ""
+            stdout_immediate = process.stdout.read() if process.stdout else ""
+            logger.error(f"[ERROR] STDERR inmediato: {stderr_immediate[:500]}")
+            logger.error(f"[ERROR] STDOUT inmediato: {stdout_immediate[:500]}")
+            stats["scraping_errors"] += 1
+            send_partial_update(task_id, {"info": f"Script falló al iniciar (código {process.returncode})"}, status="error")
+            return False
 
         output_lines = []
         stderr_lines = []
@@ -306,19 +326,29 @@ def process_task(task: dict) -> bool:
             # Función para leer stdout en un hilo separado
             def read_output(pipe, out_queue):
                 try:
+                    line_count = 0
                     for line in iter(pipe.readline, ''):
                         if line:
                             out_queue.put(line)
+                            line_count += 1
+                            if line_count == 1:
+                                logger.info(f"[THREAD] Primera línea leída del pipe")
+                            if line_count % 10 == 0:
+                                logger.info(f"[THREAD] {line_count} líneas leídas hasta ahora")
+                    logger.info(f"[THREAD] Lectura completada. Total líneas: {line_count}")
                 except Exception as e:
-                    logger.error(f"[ERROR] Error leyendo output: {e}")
+                    logger.error(f"[THREAD] Error leyendo output: {e}")
                 finally:
                     out_queue.put(None)  # Señal de fin
+                    logger.info(f"[THREAD] Señal de fin enviada a la cola")
             
             # Crear cola y hilo para lectura no bloqueante
             output_queue = queue.Queue()
             reader_thread = threading.Thread(target=read_output, args=(process.stdout, output_queue))
             reader_thread.daemon = True
             reader_thread.start()
+            
+            logger.info(f"[THREAD] Hilo lector iniciado")
             
             start_time = time.time()
             last_line_time = start_time
@@ -345,6 +375,12 @@ def process_task(task: dict) -> bool:
                 if process.poll() is not None:
                     # Leer líneas restantes de la cola
                     logger.info(f"[PROCESO] Terminado con código {process.returncode}, leyendo líneas restantes...")
+                    logger.info(f"[THREAD] Hilo lector vivo: {reader_thread.is_alive()}")
+                    
+                    # Esperar a que el hilo termine de leer (máximo 5 segundos)
+                    reader_thread.join(timeout=5.0)
+                    logger.info(f"[THREAD] Después de join - Hilo vivo: {reader_thread.is_alive()}")
+                    
                     lines_read = 0
                     while True:
                         try:
