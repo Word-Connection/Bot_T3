@@ -344,14 +344,19 @@ def process_task(task: dict) -> bool:
                 # Verificar si el proceso terminó
                 if process.poll() is not None:
                     # Leer líneas restantes de la cola
-                    while not output_queue.empty():
+                    logger.info(f"[PROCESO] Terminado con código {process.returncode}, leyendo líneas restantes...")
+                    lines_read = 0
+                    while True:
                         try:
-                            line = output_queue.get_nowait()
-                            if line is not None:
-                                output_lines.append(line.strip())
+                            line = output_queue.get(timeout=0.1)
+                            if line is None:  # Señal de fin
+                                break
+                            output_lines.append(line.strip())
+                            lines_read += 1
                         except queue.Empty:
                             break
-                    logger.info(f"[PROCESO] Proceso terminado con código {process.returncode}")
+                    logger.info(f"[PROCESO] {lines_read} líneas adicionales leídas de la cola")
+                    logger.info(f"[PROCESO] Total de líneas capturadas: {len(output_lines)}")
                     break
                 
                 # Intentar leer línea de la cola con timeout
@@ -515,6 +520,12 @@ def process_task(task: dict) -> bool:
         output = '\n'.join([line for line in output_lines if line])
         stderr_output = '\n'.join([line for line in stderr_lines if line])
         
+        # DEBUG: Log de estadísticas del output
+        logger.info(f"[OUTPUT] Total líneas stdout: {len(output_lines)}")
+        logger.info(f"[OUTPUT] Total líneas stderr: {len(stderr_lines)}")
+        logger.info(f"[OUTPUT] Longitud output combinado: {len(output)} chars")
+        logger.info(f"[OUTPUT] Returncode: {process.returncode}")
+        
         # Verificar returncode
         if process.returncode is None:
             error_msg = "Proceso no terminó correctamente (returncode None)"
@@ -537,6 +548,9 @@ def process_task(task: dict) -> bool:
         
         if not output:
             logger.error(f"[ERROR] Script no produjo output")
+            logger.error(f"[DEBUG] Líneas capturadas en output_lines: {len(output_lines)}")
+            logger.error(f"[DEBUG] Primeras 10 líneas raw: {output_lines[:10]}")
+            logger.error(f"[DEBUG] STDERR: {stderr_output[:500] if stderr_output else 'VACÍO'}")
             stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Script no produjo resultados"}, status="error")
             return False
