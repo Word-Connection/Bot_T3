@@ -599,37 +599,63 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     
     if not has_valid_id:
         print("[CaminoC] No se encontró ID válido (sin números de 4+ dígitos)")
-        print("CLIENTE NO ENCONTRADO")
-        
+        print("CLIENTE NO CREADO")
+
         # Imprimir score para que deudas.py lo detecte
-        print("Score obtenido: CLIENTE NO ENCONTRADO")
-        
+        print("Score obtenido: CLIENTE NO CREADO")
+
+        # Captura de región score o mitad superior si no está definida
+        shot_dir.mkdir(parents=True, exist_ok=True)
+        shot_path = shot_dir / f"cliente_no_creado_{dni}_{int(time.time())}.png"
+        rx, ry, rw, rh = _resolve_screenshot_region(conf)
+        ok = False
+        if rw and rh:
+            ok = _capture_region(rx, ry, rw, rh, shot_path)
+        else:
+            # Si no hay región definida, tomar mitad superior de la pantalla principal
+            try:
+                import pyautogui
+                screen_w, screen_h = pyautogui.size()
+                rx, ry, rw, rh = 0, 0, screen_w, screen_h // 2
+                ok = _capture_region(rx, ry, rw, rh, shot_path)
+            except Exception as e:
+                print(f"[CaminoC] Error obteniendo tamaño de pantalla: {e}")
+        img_base64 = ""
+        if ok and shot_path.exists():
+            try:
+                import base64
+                with open(shot_path, "rb") as f:
+                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
+            except Exception as e:
+                print(f"[CaminoC] Error codificando imagen: {e}")
+
         # Devolver JSON estructurado para el worker con marcadores
         result = {
             "dni": dni,
-            "score": "CLIENTE NO ENCONTRADO",
-            "etapa": "cliente_no_encontrado",
-            "info": "Cliente no encontrado - No se encontró ID válido",
+            "score": "CLIENTE NO CREADO",
+            "etapa": "cliente_no_creado",
+            "info": "Cliente no creado, verifiquelo en la imagen",
             "success": True,
-            "timestamp": int(time.time() * 1000)
+            "timestamp": int(time.time() * 1000),
+            "image": img_base64
         }
-        
+
         # Imprimir con marcadores para que el worker lo parsee correctamente
         print("===JSON_RESULT_START===")
         print(json.dumps(result))
         print("===JSON_RESULT_END===")
-        
+
         # Cerrar tab y volver a home antes de terminar
         print("[CaminoC] Cerrando tab y volviendo a home...")
         x,y = _xy(conf,'close_tab_btn')
         if x or y:
             _multi_click(x, y, 'close_tab_btn (left x5)', times=5, button='left', interval=0.3)
-        
+
         hx, hy = _xy(conf,'home_area')
         if hx or hy:
             time.sleep(0.5)
             _click(hx, hy, 'home_area', base_delay)
-        
+
         print("[CaminoC] Finalizado - Cliente no creado")
         return
     
