@@ -1,4 +1,7 @@
 """Camino Julian - Extracción de saldos por ID de FA
+ID    Personal ID Type    Personal ID Number    First Name    Last Name    Phone    Role    FA ID    FA Name    Company ID Type    Company ID Number    Account ID    Account Name    Customer ID    Customer Alias    
+239661114    Documento Nacional Identidad    28901874    ANDREA VALERIA    GONZALEZ    2320495899    Titular    526684017    ANDREA VALERIA GONZALEZ                    397453742    ANDREA VALERIA GONZALEZ    
+239661114    Documento Nacional Identidad    28901874    ANDREA VALERIA    GONZALEZ    2320495899    Titular    525644992    ANDREA VALERIA GONZALEZ                    396642635    ANDREA VALERIA GONZALEZ    
 
 Flujo:
 1) Click en cliente_section
@@ -111,6 +114,299 @@ def _clear_clipboard():
         except Exception as e:
             print(f"[CaminoJulian] Error al limpiar clipboard: {e}")
 
+def _execute_falla_flow(conf: Dict[str, Any], base_delay: float):
+    """Ejecuta el flujo alternativo cuando no se encuentran IDs de FA.
+    Aplica las mismas medidas, validaciones y reintentos que el código original.
+    
+    Pasos del flujo FALLA:
+    1. fa_cobranza_btn
+    2. fa_cobranza_etapa
+    3. fa_cobranza_actual
+    4. fa_cobranza_buscar
+    5. fa_seleccion (right-click) → fa_seleccion_copy + validación "Actual"
+    6. fa_deuda (doble-click → right-click → copy)
+    7. fa_area_copy (right-click → copy)
+    8. close_tab_btn
+    9. resumen_facturacion_btn
+    10. cuenta_financiera_btn + validación + contador N
+    11. mostrar_lista_btn
+    12. copy_area (copiar N ítems con offsets)
+    13. close_tab_btn (4 veces)
+    14. home_area
+    """
+    print(f"[CaminoJulian-FALLA] Iniciando flujo alternativo...")
+    
+    # Parámetros de configuración (igual que en el código original)
+    cf_row_step = int(conf.get('cf_row_step', 20))
+    copy_left_x = conf.get('copy_area_left_x', 94)
+    cf_count_x = int(conf.get('cf_count_x', 373))
+    
+    # ===== SECCIÓN FA COBRANZA =====
+    
+    # 1. Click en fa_cobranza_btn
+    x, y = _xy(conf, 'fa_cobranza_btn')
+    _click(x, y, 'fa_cobranza_btn', base_delay)
+    
+    # 2. Click en fa_cobranza_etapa
+    x, y = _xy(conf, 'fa_cobranza_etapa')
+    _click(x, y, 'fa_cobranza_etapa', base_delay)
+    
+    # 3. Click en fa_cobranza_actual
+    x, y = _xy(conf, 'fa_cobranza_actual')
+    _click(x, y, 'fa_cobranza_actual', base_delay)
+    
+    # 4. Click en fa_cobranza_buscar
+    x, y = _xy(conf, 'fa_cobranza_buscar')
+    _click(x, y, 'fa_cobranza_buscar', base_delay)
+    
+    # 5. Right-click en fa_seleccion → fa_seleccion_copy con validación
+    x, y = _xy(conf, 'fa_seleccion')
+    if x or y:
+        _right_click(x, y, 'fa_seleccion', base_delay)
+        
+        cx, cy = _xy(conf, 'fa_seleccion_copy')
+        if cx or cy:
+            _click(cx, cy, 'fa_seleccion_copy', base_delay)
+            
+            # Lectura estable del clipboard (2 intentos)
+            seleccion_text = ''
+            for attempt in range(2):
+                time.sleep(0.2)
+                txt = _get_clipboard_text()
+                if txt:
+                    seleccion_text = txt
+                    break
+            
+            print(f"[CaminoJulian-FALLA] fa_seleccion copiado: '{seleccion_text}'")
+            
+            # Si detectamos "Actual", hacer click izquierdo en fa_seleccion
+            if 'actual' in seleccion_text.lower():
+                print(f"[CaminoJulian-FALLA] 'Actual' detectado, seleccionando...")
+                _click(x, y, 'fa_seleccion (left-click)', base_delay)
+                # Espera para que se abra el detalle (como en el código original)
+                time.sleep(3.0)
+    
+    # 6. Doble click en fa_deuda → Right-click → fa_deuda_copy
+    x, y = _xy(conf, 'fa_deuda')
+    deuda_text = ''
+    if x or y:
+        # Primero doble click para seleccionar
+        _double_click(x, y, 'fa_deuda (double-click)', 0.25)
+        time.sleep(0.3)
+        
+        # Luego right-click
+        _right_click(x, y, 'fa_deuda', 0.2)
+        
+        # Click en fa_deuda_copy para copiar
+        cx, cy = _xy(conf, 'fa_deuda_copy')
+        if cx or cy:
+            _click(cx, cy, 'fa_deuda_copy', 0.15)
+            time.sleep(0.1)
+            
+            # Lectura estable del clipboard
+            deuda_text = _get_clipboard_text()
+            print(f"[CaminoJulian-FALLA] fa_deuda copiado: '{deuda_text}'")
+    
+    # 7. Right-click en fa_area_copy → fa_copy
+    x, y = _xy(conf, 'fa_area_copy')
+    fa_id_text = ''
+    if x or y:
+        _right_click(x, y, 'fa_area_copy', base_delay)
+        
+        cx, cy = _xy(conf, 'fa_copy')
+        if cx or cy:
+            _click(cx, cy, 'fa_copy', base_delay)
+            
+            # Lectura estable del clipboard
+            fa_id_text = _get_clipboard_text()
+            print(f"[CaminoJulian-FALLA] fa_area copiado: '{fa_id_text}'")
+    
+    # 7b. Click en close_tab_btn después de fa_area
+    x, y = _xy(conf, 'close_tab_btn')
+    _click(x, y, 'close_tab_btn (después de FA)', base_delay)
+    
+    # ===== SECCIÓN RESUMEN DE FACTURACIÓN - CUENTA FINANCIERA =====
+    
+    # 8. Click en resumen_facturacion_btn
+    x, y = _xy(conf, 'resumen_facturacion_btn')
+    _click(x, y, 'resumen_facturacion_btn', base_delay)
+    
+    # 9. Click en cuenta_financiera_btn
+    bx, by = _xy(conf, 'cuenta_financiera_btn')
+    _click(bx, by, 'cuenta_financiera_btn', base_delay)
+    time.sleep(1.0)  # Espera para que cargue (como en el código original)
+    
+    # 10. Validar apartado "Cuenta Financiera" usando right-click + copy
+    apartado_text = ''
+    if bx or by:
+        # Right-click en la posición de cuenta_financiera_btn
+        pg.click(bx, by, button='right')
+        time.sleep(0.25)
+        
+        # Click en menú contextual para copiar
+        menu_offset_x = conf.get('context_menu_copy_offset_x', 26)
+        menu_offset_y = conf.get('context_menu_copy_offset_y', 12)
+        pg.click(bx + menu_offset_x, by + menu_offset_y)
+        time.sleep(0.12)
+        
+        apartado_text = _get_clipboard_text()
+        print(f"[CaminoJulian-FALLA] Apartado validado: '{apartado_text}'")
+        
+        # Validar que sea "Cuenta Financiera"
+        if not ('cuenta' in apartado_text.lower() and 'financiera' in apartado_text.lower()):
+            print(f"[CaminoJulian-FALLA] ADVERTENCIA: No es 'Cuenta Financiera', abortando...")
+            x, y = _xy(conf, 'close_tab_btn')
+            for i in range(4):
+                _click(x, y, f'close_tab_btn ({i+1}/4)', base_delay)
+            x, y = _xy(conf, 'home_area')
+            _click(x, y, 'home_area', base_delay)
+            return
+    
+    # 11. Leer contador N usando cf_count_x con reintentos
+    count_focus_x = cf_count_x
+    count_focus_y = by
+    
+    # Validador para N (debe ser número entre 1 y 100)
+    def _valid_cf_count(s: str) -> bool:
+        if not s:
+            return False
+        m = re.search(r"\d+", s)
+        if not m:
+            return False
+        try:
+            val = int(m.group(0))
+        except Exception:
+            return False
+        return 1 <= val <= 100
+    
+    # Reintentar hasta 3 veces
+    num_txt = ''
+    for attempt in range(3):
+        # Click en la posición del contador
+        pg.click(count_focus_x, count_focus_y)
+        time.sleep(0.2)
+        
+        # Right-click + copy
+        pg.click(count_focus_x, count_focus_y, button='right')
+        time.sleep(0.5)
+        
+        menu_x = count_focus_x + conf.get('context_menu_copy_offset_x', 26)
+        menu_y = count_focus_y + conf.get('context_menu_copy_offset_y', 12)
+        pg.click(menu_x, menu_y)
+        time.sleep(0.12)
+        
+        num_txt = _get_clipboard_text()
+        
+        if _valid_cf_count(num_txt):
+            break
+        
+        print(f"[CaminoJulian-FALLA] Intento {attempt + 1}/3: '{num_txt}' no válido")
+        time.sleep(0.12)
+    
+    # Parsear N
+    n_to_copy = 1  # Fallback seguro
+    m = re.search(r"\d+", num_txt or '')
+    if m:
+        try:
+            n_candidate = int(m.group(0))
+            if 1 <= n_candidate <= 100:
+                n_to_copy = n_candidate
+        except Exception:
+            pass
+    
+    print(f"[CaminoJulian-FALLA] Items a copiar: N={n_to_copy} (raw='{num_txt}')")
+    
+    # 12. mostrar_lista_btn
+    x, y = _xy(conf, 'mostrar_lista_btn')
+    _click(x, y, 'mostrar_lista_btn', base_delay)
+    time.sleep(0.6)  # Espera para que cargue la lista
+    
+    # 13. copy_area - Copiar N ítems con offsets dinámicos
+    x_copy, y_copy = _xy(conf, 'copy_area')
+    _click(x_copy, y_copy, 'copy_area', 0.2)
+    
+    # Copiar cada ítem (saldo + ID)
+    for row_idx in range(n_to_copy):
+        # Calcular Y con offsets (igual que el código original)
+        if row_idx <= 2:
+            # Items 1-3: usar offset normal
+            row_y = y_copy + (row_idx * cf_row_step)
+        else:
+            # Item 4+: click en extra_saldo, usar altura de item 3
+            extra_saldo_x, extra_saldo_y = _xy(conf, 'extra_saldo')
+            if extra_saldo_x and extra_saldo_y:
+                _click(extra_saldo_x, extra_saldo_y, f'extra_saldo_click_{row_idx}', 0.3)
+                print(f"[CaminoJulian-FALLA] Click en extra_saldo para ítem #{row_idx+1}")
+            # Mantener altura del item 3
+            row_y = y_copy + (2 * cf_row_step)
+        
+        # Copiar saldo
+        pg.click(x_copy, row_y)
+        time.sleep(0.05)
+        
+        # Right-click + copy para saldo
+        pg.click(x_copy, row_y, button='right')
+        time.sleep(0.1)
+        
+        menu_x = x_copy + conf.get('context_menu_copy_offset_x', 26)
+        menu_y = row_y + conf.get('context_menu_copy_offset_y', 12)
+        pg.click(menu_x, menu_y)
+        time.sleep(0.1)
+        
+        saldo_txt = _get_clipboard_text()
+        print(f"[CaminoJulian-FALLA] Item {row_idx+1} - Saldo: '{saldo_txt}'")
+        
+        # Verificar si saldo es 0 (saltar copia de ID)
+        val = None
+        try:
+            # Parsear monto simple
+            s = re.sub(r"[^0-9.,]", "", saldo_txt)
+            if ',' in s and '.' in s:
+                s = s.replace('.', '').replace(',', '.')
+            elif ',' in s:
+                s = s.replace(',', '.')
+            val = float(s) if s else None
+        except Exception:
+            pass
+        
+        if val is not None and abs(val) < 0.0005:
+            print(f"[CaminoJulian-FALLA] Item {row_idx+1} - Saldo es 0, saltando ID")
+            continue
+        
+        # Copiar ID (columna izquierda)
+        pg.click(int(copy_left_x), row_y)
+        time.sleep(0.05)
+        
+        # Right-click + copy para ID
+        pg.click(int(copy_left_x), row_y, button='right')
+        time.sleep(0.1)
+        
+        menu_x = int(copy_left_x) + conf.get('context_menu_copy_offset_x', 26)
+        menu_y = row_y + conf.get('context_menu_copy_offset_y', 12)
+        pg.click(menu_x, menu_y)
+        time.sleep(0.1)
+        
+        id_txt = _get_clipboard_text()
+        print(f"[CaminoJulian-FALLA] Item {row_idx+1} - ID: '{id_txt}'")
+        
+        # Volver a saldo
+        pg.click(x_copy, row_y)
+        time.sleep(0.05)
+    
+    # ===== FINALIZACIÓN =====
+    
+    # 14. Cerrar tabs (4 veces)
+    x, y = _xy(conf, 'close_tab_btn')
+    for i in range(4):
+        _click(x, y, f'close_tab_btn ({i+1}/4)', base_delay)
+    
+    # 15. Ir a home_area
+    x, y = _xy(conf, 'home_area')
+    _click(x, y, 'home_area', base_delay)
+    
+    print(f"[CaminoJulian-FALLA] Flujo alternativo completado")
+
+
 def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
     """
     Parsea la tabla copiada y extrae los IDs de FA junto con el CUIT si existe.
@@ -130,16 +426,21 @@ def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
     # Primera línea es header
     header = lines[0]
     
-    # Buscar la posición de "ID del FA" y "Tipo ID Compañía" en el header
+    # Buscar la posición de "ID del FA" o "FA ID" y "Tipo ID Compañía" en el header
     # Dividir por tabulaciones o múltiples espacios
     header_parts = re.split(r'\t+|\s{2,}', header)
     
+    # Buscar "ID del FA" o "FA ID"
+    fa_index = None
     try:
         fa_index = header_parts.index('ID del FA')
     except ValueError:
-        print(f"[CaminoJulian] ERROR: No se encontró 'ID del FA' en header")
-        print(f"[CaminoJulian] Header parts: {header_parts}")
-        return []
+        try:
+            fa_index = header_parts.index('FA ID')
+        except ValueError:
+            print(f"[CaminoJulian] ERROR: No se encontró 'ID del FA' ni 'FA ID' en header")
+            print(f"[CaminoJulian] Header parts: {header_parts}")
+            return []
     
     # Buscar columna de CUIT (puede no existir)
     cuit_index = None
@@ -261,6 +562,25 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     
     if not fa_data_list:
         print(f"[CaminoJulian] WARN: No se encontraron IDs de FA")
+        print(f"[CaminoJulian] Ejecutando flujo alternativo (FALLA)...")
+        
+        # Cargar coordenadas del archivo FALLA
+        falla_coords_path = coords_path.parent / 'camino_aFALLA_coords_multi.json'
+        if not falla_coords_path.exists():
+            print(f"[CaminoJulian] ERROR: No se encontró archivo {falla_coords_path}")
+            print(json.dumps(results))
+            return
+        
+        try:
+            falla_conf = json.loads(falla_coords_path.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f"[CaminoJulian] ERROR al leer {falla_coords_path}: {e}")
+            print(json.dumps(results))
+            return
+        
+        # Ejecutar flujo alternativo
+        _execute_falla_flow(falla_conf, base_delay)
+        
         print(json.dumps(results))
         return
     
