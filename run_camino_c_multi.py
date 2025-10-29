@@ -1,4 +1,4 @@
-"""Camino C (coordenadas, single DNI).
+"""Camino C (coordenadas, single DNI).  28901874
 
 Comienza igual que Camino A hasta seleccionar_btn; luego:
 - Click en nombre_cliente_btn
@@ -793,6 +793,12 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
 
     # Nombre cliente
     x,y = _xy(conf,'nombre_cliente_btn'); time.sleep(2.5); _click(x,y,'nombre_cliente_btn', _step_delay(step_delays,7,base_delay))
+    
+    # Presionar Enter 1 segundo después para eliminar posible cartel
+    time.sleep(1.0)
+    pg.press('enter')
+    print("[CaminoC] Enter presionado después de nombre_cliente_btn para eliminar cartel")
+    time.sleep(0.5)
 
     # Right-click para menú de copia sobre score_area_page (preferido) o fallback score_area_copy
     px, py = _xy(conf, 'score_area_page')
