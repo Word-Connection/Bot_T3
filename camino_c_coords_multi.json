@@ -76,6 +76,10 @@
     "x": 504,
     "y": 111
   },
+  "press_enter_after_nombre": {
+    "action": "press_enter",
+    "delay": 1
+  },
   "score_area_copy": {
     "x": 981,
     "y": 66
@@ -125,6 +129,7 @@
     "client_id_field",
     "seleccionar_btn",
     "nombre_cliente_btn",
+    "press_enter_after_nombre",
     "score_area",
     "screenshot_region",
     "close_tab_btn",
