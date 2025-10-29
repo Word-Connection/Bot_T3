@@ -1131,291 +1131,108 @@ def run(
         # Las flechas ya se enviaron arriba
         
         # Continuar directo con el siguiente paso
-        # Paso 6 Filtro doble click separado
+        # Paso 6 Filtro - DOBLE CLICK
         fx2, fy2 = _xy(conf,'filtro_btn')
-        _click(fx2, fy2, 'Filtro (1)', _step_delay(step_delays,5,base_step_delay))
-        time.sleep(filter_second_delay)
-        _click(fx2, fy2, 'Filtro (2)', _step_delay(step_delays,6,base_step_delay))
-        # Paso 9 Copia con método mejorado
+        dbl_int_filtro = float(os.getenv('FILTRO_DBLCLICK_INTERVAL','0.5'))
+        _double_click(fx2, fy2, 'Filtro', dbl_int_filtro, _step_delay(step_delays,5,base_step_delay))
+        
+        # Paso 7 Copia con Ctrl+C
         cx, cy = _xy(conf,'copy_area')
-        _click(cx, cy, 'Copy area', 0.5)  # Más tiempo para asegurar selección
+        _click(cx, cy, 'Copy area', 0.5)
         
         # Limpiar portapapeles antes de copiar
         _clear_clipboard()
         time.sleep(0.2)
         
-        # Usar Ctrl izquierdo específicamente + C como lo haces manualmente
-        print("[MultiB] Copiando con Ctrl izquierdo + C...")
-        pg.keyDown('ctrl')
-        time.sleep(0.1)  # Asegurar que Ctrl está presionado
-        pg.press('c')
-        time.sleep(0.3)  # Más tiempo para procesar la copia
-        pg.keyUp('ctrl')
+        # Copiar con Ctrl+C
+        print("[MultiB] Copiando con Ctrl+C...")
+        pg.hotkey('ctrl', 'c')
         
-        copy_wait = 1.0  # Aumentar tiempo de espera
+        # Esperar a que el portapapeles se actualice
+        copy_wait = 1.0
         time.sleep(copy_wait)
         clip_txt = _get_clipboard_text()
         
-        # Si no se copió nada, intentar nuevamente con más énfasis
+        # Si no se copió nada, intentar nuevamente
         if not clip_txt.strip():
             print("[MultiB] Primer intento fallido, reintentando copia...")
             _click(cx, cy, 'Copy area (retry)', 0.5)
             time.sleep(0.3)
-            pg.keyDown('ctrl')
-            time.sleep(0.2)
-            pg.press('c')
-            time.sleep(0.5)  # Aún más tiempo
-            pg.keyUp('ctrl')
+            pg.hotkey('ctrl', 'c')
             time.sleep(copy_wait)
             clip_txt = _get_clipboard_text()
+        
         display_txt = clip_txt.replace('\r',' ').replace('\n',' ').strip()
-        ids_temporales_procesados = False  # Flag para indicar si se procesaron IDs temporales
         
         if not display_txt:
             # vacío directo - NO HAY MOVIMIENTOS EN LA BASE
-            new_info = False
-            log_line = f"{service_id}  No Tiene Pedido (base de datos)"
+            # Usar la Fecha de aplicación del clipboard de validación
+            print(f"[MultiB] No hay movimientos en BD para {service_id}. Extrayendo fecha del clipboard de validación...")
             
-            # NUEVO: Consultar IDs uno por uno y procesarlos TEMPORALMENTE
-            print(f"[MultiB] No hay movimientos en BD para {service_id}. Recolectando IDs...")
-            ids_temporales = _collect_movimientos_uno_por_uno(conf, log_path, service_id, base_step_delay)
+            fecha_aplicacion = ""
+            if clipboard_validation:
+                lines_val = clipboard_validation.split('\n')
+                if len(lines_val) > 1:
+                    data_line_val = lines_val[1].strip()
+                    parts_val = re.split(r'\t+|\s{2,}', data_line_val)
+                    parts_val = [p.strip() for p in parts_val if p.strip()]
+                    # Índice 5 = Fecha de aplicación
+                    if len(parts_val) > 5:
+                        fecha_aplicacion = parts_val[5]
             
-            if len(ids_temporales) > 0:
-                ids_temporales_procesados = True
-                print(f"[MultiB] Se encontraron {len(ids_temporales)} IDs. Procesando cada uno...")
-                
-                # Cerrar la pestaña actual antes de procesar los nuevos IDs
-                bx, by = _xy(conf,'close_tab_btn')
-                _click(bx, by, 'Cerrar pestaña antes de procesar IDs temporales', base_step_delay)
-                
-                # PROCESAR CADA ID TEMPORAL (mismo flujo que IDs normales)
-                for temp_idx, temp_id in enumerate(ids_temporales, start=1):
-                    print(f"[MultiB] Procesando ID temporal {temp_idx}/{len(ids_temporales)}: {temp_id}")
-                    
-                    # Limpiar y escribir el service ID temporal
-                    _click(svc_x, svc_y, f'Service ID field (temp {temp_idx})', 0.5)
-                    time.sleep(0.3)
-                    pg.click()
-                    time.sleep(0.1)
-                    pg.click()
-                    time.sleep(0.2)
-                    pg.press('delete')
-                    time.sleep(0.6)
-                    pg.press('backspace')
-                    time.sleep(0.2)
-                    
-                    # Segundo pase de limpieza
-                    pg.click(svc_x, svc_y)
-                    time.sleep(0.2)
-                    for i in range(3):
-                        pg.press('backspace')
-                        time.sleep(0.1)
-                    time.sleep(0.2)
-                    
-                    # Escribir el ID temporal
-                    pg.typewrite(temp_id, interval=0.08)
-                    time.sleep(0.3)
-                    
-                    # Enter
-                    pg.press('enter')
-                    time.sleep(post_enter_delay)
-                    
-                    # Resto del flujo (doble click primera fila, actividad, filtro, copia)
-                    # Paso 4: primera fila (DOBLE CLICK)
-                    fx, fy = _xy(conf, 'first_row')
-                    pg.moveTo(fx, fy, duration=0.15)
-                    time.sleep(0.2)
-                    pg.doubleClick()
-                    time.sleep(0.3)
-                    
-                    # Paso 5: Actividad (DOBLE CLICK - SIN MOVER MOUSE)
-                    ax, ay = _xy(conf, 'actividad_btn')
-                    pg.moveTo(ax, ay, duration=0.15)
-                    time.sleep(0.2)
-                    pg.doubleClick()
-                    time.sleep(0.3)
-                    
-                    # Navegación con Ctrl+Tab
-                    right_moves_config = conf.get('actividad_right_moves', {})
-                    if right_moves_config:
-                        _try_multiple_navigation_methods_no_mouse(right_moves_config)
-                    else:
-                        for _ in range(2):
-                            pg.hotkey('ctrl', 'tab')
-                            time.sleep(0.8)
-                        time.sleep(0.2)
-                    
-                    # Filtro doble click
-                    fx2, fy2 = _xy(conf, 'filtro_btn')
-                    _click(fx2, fy2, 'Filtro (1)', 0.5)
-                    time.sleep(filter_second_delay)
-                    _click(fx2, fy2, 'Filtro (2)', 0.5)
-                    
-                    # Copiar
-                    cx, cy = _xy(conf, 'copy_area')
-                    _click(cx, cy, 'Copy area', 0.5)
-                    _clear_clipboard()
-                    time.sleep(0.2)
-                    pg.keyDown('ctrl')
-                    time.sleep(0.1)
-                    pg.press('c')
-                    time.sleep(0.3)
-                    pg.keyUp('ctrl')
-                    time.sleep(1.0)
-                    
-                    temp_clip = _get_clipboard_text()
-                    temp_display = temp_clip.replace('\r', ' ').replace('\n', ' ').strip()
-                    
-                    if temp_display:
-                        temp_log = f"{temp_id}  {temp_display}"
-                        _append_log_raw(log_path, temp_log)
-                        print(f"[MultiB] ID temporal {temp_id}: Datos copiados")
-                    else:
-                        _append_log_raw(log_path, f"{temp_id}  No Tiene Pedido")
-                        print(f"[MultiB] ID temporal {temp_id}: Sin datos")
-                    
-                    # Cerrar pestaña
-                    _click(bx, by, f'Cerrar pestaña ID temporal {temp_idx}', base_step_delay)
-                
-                new_info = True  # Se procesaron IDs temporales
-                log_line = f"{service_id}  {len(ids_temporales)} IDs procesados (consulta directa)"
+            if fecha_aplicacion:
+                log_line = f"{service_id}  {fecha_aplicacion}"
+                new_info = True
+                print(f"[MultiB] Fecha extraída del apartado completo: {fecha_aplicacion}")
             else:
-                print(f"[MultiB] No se encontraron IDs para {service_id}")
-                
+                log_line = f"{service_id}  No Tiene Pedido (sin fecha)"
+                new_info = False
+                print(f"[MultiB] No se pudo extraer fecha del apartado completo")
         else:
+            # Hay contenido copiado - verificar si es repetido
             parts = display_txt.split()
             if len(parts) > 1:
                 trailing = ' '.join(parts[1:])
             else:
                 trailing = ''
+            
             if trailing and prev_trailing_part is not None and trailing == prev_trailing_part:
-                # repetido => no hay nuevo - NO HAY MOVIMIENTOS EN LA BASE
-                new_info = False
-                log_line = f"{service_id}  No Tiene Pedido (base de datos - repetido)"
+                # Clipboard repetido - usar fecha del apartado completo
+                print(f"[MultiB] Clipboard repetido para {service_id}. Extrayendo fecha del apartado completo...")
                 
-                # NUEVO: Consultar IDs uno por uno y procesarlos TEMPORALMENTE
-                print(f"[MultiB] Clipboard repetido para {service_id}. Recolectando IDs...")
-                ids_temporales = _collect_movimientos_uno_por_uno(conf, log_path, service_id, base_step_delay)
+                fecha_aplicacion = ""
+                if clipboard_validation:
+                    lines_val = clipboard_validation.split('\n')
+                    if len(lines_val) > 1:
+                        data_line_val = lines_val[1].strip()
+                        parts_val = re.split(r'\t+|\s{2,}', data_line_val)
+                        parts_val = [p.strip() for p in parts_val if p.strip()]
+                        # Índice 5 = Fecha de aplicación
+                        if len(parts_val) > 5:
+                            fecha_aplicacion = parts_val[5]
                 
-                if len(ids_temporales) > 0:
-                    ids_temporales_procesados = True
-                    print(f"[MultiB] Se encontraron {len(ids_temporales)} IDs. Procesando cada uno...")
-                    
-                    # Cerrar la pestaña actual antes de procesar los nuevos IDs
-                    bx, by = _xy(conf,'close_tab_btn')
-                    _click(bx, by, 'Cerrar pestaña antes de procesar IDs temporales', base_step_delay)
-                    
-                    # PROCESAR CADA ID TEMPORAL (mismo flujo que IDs normales)
-                    for temp_idx, temp_id in enumerate(ids_temporales, start=1):
-                        print(f"[MultiB] Procesando ID temporal {temp_idx}/{len(ids_temporales)}: {temp_id}")
-                        
-                        # Limpiar y escribir el service ID temporal
-                        _click(svc_x, svc_y, f'Service ID field (temp {temp_idx})', 0.5)
-                        time.sleep(0.3)
-                        pg.click()
-                        time.sleep(0.1)
-                        pg.click()
-                        time.sleep(0.2)
-                        pg.press('delete')
-                        time.sleep(0.6)
-                        pg.press('backspace')
-                        time.sleep(0.2)
-                        
-                        # Segundo pase de limpieza
-                        pg.click(svc_x, svc_y)
-                        time.sleep(0.2)
-                        for i in range(3):
-                            pg.press('backspace')
-                            time.sleep(0.1)
-                        time.sleep(0.2)
-                        
-                        # Escribir el ID temporal
-                        pg.typewrite(temp_id, interval=0.08)
-                        time.sleep(0.3)
-                        
-                        # Enter
-                        pg.press('enter')
-                        time.sleep(post_enter_delay)
-                        
-                        # Resto del flujo (doble click primera fila, actividad, filtro, copia)
-                        # Paso 4: primera fila (DOBLE CLICK)
-                        fx, fy = _xy(conf, 'first_row')
-                        pg.moveTo(fx, fy, duration=0.15)
-                        time.sleep(0.2)
-                        pg.doubleClick()
-                        time.sleep(0.3)
-                        
-                        # Paso 5: Actividad (DOBLE CLICK - SIN MOVER MOUSE)
-                        ax, ay = _xy(conf, 'actividad_btn')
-                        pg.moveTo(ax, ay, duration=0.15)
-                        time.sleep(0.2)
-                        pg.doubleClick()
-                        time.sleep(0.3)
-                        
-                        # Navegación con Ctrl+Tab
-                        right_moves_config = conf.get('actividad_right_moves', {})
-                        if right_moves_config:
-                            _try_multiple_navigation_methods_no_mouse(right_moves_config)
-                        else:
-                            for _ in range(2):
-                                pg.hotkey('ctrl', 'tab')
-                                time.sleep(0.8)
-                            time.sleep(0.2)
-                        
-                        # Filtro doble click
-                        fx2, fy2 = _xy(conf, 'filtro_btn')
-                        _click(fx2, fy2, 'Filtro (1)', 0.5)
-                        time.sleep(filter_second_delay)
-                        _click(fx2, fy2, 'Filtro (2)', 0.5)
-                        
-                        # Copiar
-                        cx, cy = _xy(conf, 'copy_area')
-                        _click(cx, cy, 'Copy area', 0.5)
-                        _clear_clipboard()
-                        time.sleep(0.2)
-                        pg.keyDown('ctrl')
-                        time.sleep(0.1)
-                        pg.press('c')
-                        time.sleep(0.3)
-                        pg.keyUp('ctrl')
-                        time.sleep(1.0)
-                        
-                        temp_clip = _get_clipboard_text()
-                        temp_display = temp_clip.replace('\r', ' ').replace('\n', ' ').strip()
-                        
-                        if temp_display:
-                            temp_log = f"{temp_id}  {temp_display}"
-                            _append_log_raw(log_path, temp_log)
-                            print(f"[MultiB] ID temporal {temp_id}: Datos copiados")
-                        else:
-                            _append_log_raw(log_path, f"{temp_id}  No Tiene Pedido")
-                            print(f"[MultiB] ID temporal {temp_id}: Sin datos")
-                        
-                        # Cerrar pestaña
-                        _click(bx, by, f'Cerrar pestaña ID temporal {temp_idx}', base_step_delay)
-                    
-                    new_info = True  # Se procesaron IDs temporales
-                    log_line = f"{service_id}  {len(ids_temporales)} IDs procesados (consulta directa)"
+                if fecha_aplicacion:
+                    log_line = f"{service_id}  {fecha_aplicacion}"
+                    new_info = True
+                    print(f"[MultiB] Fecha extraída del apartado completo: {fecha_aplicacion}")
                 else:
-                    print(f"[MultiB] No se encontraron IDs para {service_id}")
-                    
+                    log_line = f"{service_id}  No Tiene Pedido (repetido - sin fecha)"
+                    new_info = False
+                    print(f"[MultiB] No se pudo extraer fecha del apartado completo")
             else:
+                # Contenido nuevo y válido
                 new_info = True
-                log_line = f"{service_id}  {display_txt}"  # incluir service_id antes del contenido
+                log_line = f"{service_id}  {display_txt}"
                 if trailing:
                     prev_trailing_part = trailing
+        
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
         time.sleep(_step_delay(step_delays,7,base_step_delay))
         
-        # Solo cerrar pestaña si NO se procesaron IDs temporales (ya se cerró en el sub-loop)
-        if new_info and not ids_temporales_procesados:
-            bx, by = _xy(conf,'close_tab_btn')
-            _click(bx, by, 'Cerrar pestaña', _step_delay(step_delays,8,base_step_delay))
-        elif not new_info:
-            print('[MultiB] Se omite cerrar pestaña (sin nuevo pedido)')
-        else:
-            print('[MultiB] Se omite cerrar pestaña (ya cerrada en procesamiento temporal)')
+        # SIEMPRE cerrar pestaña
+        bx, by = _xy(conf,'close_tab_btn')
+        _click(bx, by, 'Cerrar pestaña', _step_delay(step_delays,8,base_step_delay))
     # Copia final opcional
     fx_final, fy_final = _xy(conf,'final_copy_area')
     if fx_final or fy_final:
