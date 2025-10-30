@@ -291,17 +291,29 @@ def process_task(task: dict) -> bool:
             logger.info(f"[WORKER] Usando Python actual: {python_executable}")
         
         logger.info(f"[WORKER] Verificando Python ejecutable existe: {os.path.exists(python_executable)}")
-        logger.info(f"[WORKER] Comando a ejecutar: {python_executable} -u {script_path} {input_data}")
+        # Preparar argumentos del comando
+        cmd_args = [python_executable, '-u', script_path, input_data]
+        
+        # Para tareas de deudas y movimientos, pasar los datos completos de la tarea como segundo parámetro JSON
+        if not is_pin_operation:
+            # Serializar la tarea completa como JSON para que el script pueda leer flags como 'admin'
+            task_json = json.dumps(task)
+            cmd_args.append(task_json)
+            logger.info(f"[WORKER] Pasando datos de tarea: admin={task.get('admin', False)}")
+        
+        logger.info(f"[WORKER] Comando a ejecutar: {' '.join(cmd_args[:3])} [datos]...")
         
         # Enviar update inicial
         operation_msg = f"Iniciando automatización para {data_label} {input_data}"
+        if not is_pin_operation and task.get('admin', False):
+            operation_msg += " (MODO ADMINISTRATIVO)"
         send_partial_update(task_id, {"info": operation_msg}, status="running")
         
         # Timeout según tipo de operación
         if is_pin_operation:
             timeout = 120  # 2 minutos para PIN
         else:
-            timeout = 900 if TIPO == "deudas" else 800  # 15 min para deudas, 13+ min para movimientos
+            timeout = 1800 if TIPO == "deudas" else 800  # 30 min para deudas, 13+ min para movimientos
         
         # MÉTODO COMPLEJO CON TIEMPO REAL: Para TODOS los tipos (DEUDAS, MOVIMIENTOS y PIN)
         # Usar Popen para leer output en tiempo real con unbuffered
@@ -313,11 +325,12 @@ def process_task(task: dict) -> bool:
         logger.info(f"[SUBPROCESS] Python: {python_executable}")
         logger.info(f"[SUBPROCESS] Script: {script_path}")
         logger.info(f"[SUBPROCESS] Input: {input_data}")
+        logger.info(f"[SUBPROCESS] Admin Mode: {task.get('admin', False) if not is_pin_operation else 'N/A'}")
         logger.info(f"[SUBPROCESS] Timeout configurado: {timeout}s")
         
         try:
             process = subprocess.Popen(
-                [python_executable, '-u', script_path, input_data],
+                cmd_args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 # NO cambiar cwd para que las rutas relativas funcionen
@@ -364,11 +377,22 @@ def process_task(task: dict) -> bool:
             
             start_time = time.time()
             last_line_time = start_time
-            no_output_timeout = 900  # 15 minutos sin output = timeout
+            last_heartbeat_during_task = start_time  # Para heartbeat durante ejecución
+            no_output_timeout = 1200  # 20 minutos sin output = timeout
             
             while True:
+                # Enviar heartbeat cada 30 segundos DURANTE la ejecución de la tarea
+                current_time = time.time()
+                if current_time - last_heartbeat_during_task > 30:
+                    try:
+                        send_heartbeat()
+                        logger.debug(f"[HEARTBEAT] Enviado durante ejecución de tarea {task_id}")
+                        last_heartbeat_during_task = current_time
+                    except Exception as e:
+                        logger.warning(f"[HEARTBEAT] Error durante tarea: {e}")
+                
                 # Verificar timeout global
-                if time.time() - start_time > timeout:
+                if current_time - start_time > timeout:
                     logger.error(f"[TIMEOUT] Timeout global de {timeout}s excedido")
                     process.kill()
                     stats["scraping_errors"] += 1
@@ -376,7 +400,7 @@ def process_task(task: dict) -> bool:
                     return False
                 
                 # Verificar timeout de inactividad
-                if time.time() - last_line_time > no_output_timeout:
+                if current_time - last_line_time > no_output_timeout:
                     logger.error(f"[TIMEOUT] Sin output por {no_output_timeout}s, considerando proceso bloqueado")
                     process.kill()
                     stats["scraping_errors"] += 1
@@ -396,9 +420,9 @@ def process_task(task: dict) -> bool:
                     logger.info(f"[PROCESO] Proceso terminado con código {process.returncode}")
                     break
                 
-                # Intentar leer línea de la cola con timeout
+                # Intentar leer línea de la cola con timeout más corto para mayor responsividad
                 try:
-                    line = output_queue.get(timeout=0.5)
+                    line = output_queue.get(timeout=0.1)  # Reducido de 0.5 a 0.1 para mayor velocidad
                     if line is None:  # Señal de fin
                         break
                     
@@ -411,12 +435,12 @@ def process_task(task: dict) -> bool:
                         # Iniciar captura de JSON parcial
                         json_buffer = []
                         capturing_partial = True
-                        logger.info(f"[PARCIAL] Detectado inicio de JSON parcial")
+                        logger.info(f"[PARCIAL] 🚀 Iniciando captura de update parcial...")
                         
                         # Leer líneas hasta encontrar el final
                         while capturing_partial:
                             try:
-                                json_line = output_queue.get(timeout=2.0)
+                                json_line = output_queue.get(timeout=1.0)  # Reducido de 2.0 a 1.0
                                 if json_line is None:
                                     break
                                 
@@ -432,9 +456,11 @@ def process_task(task: dict) -> bool:
                                         partial_data = json.loads(json_text)
                                         
                                         etapa = partial_data.get("etapa", "")
-                                        logger.info(f"[PARCIAL] Parseado: etapa={etapa}")
+                                        info_preview = partial_data.get("info", "")[:50] + "..." if len(partial_data.get("info", "")) > 50 else partial_data.get("info", "")
+                                        logger.info(f"[PARCIAL] 📦 Parseado: {etapa} - {info_preview}")
                                         
-                                        # Enviar update parcial
+                                        # Enviar update parcial INMEDIATAMENTE
+                                        logger.info(f"[PARCIAL] ⚡ Enviando al frontend...")
                                         send_partial_update(task_id, partial_data, status="running")
                                         
                                         # Marcar flags según la etapa
@@ -933,8 +959,24 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
         return False
 
 
+def make_request_fast(method: str, endpoint: str, json_data: Optional[dict] = None):
+    """Versión rápida de make_request para updates parciales - sin retries, timeout corto."""
+    url = f"{BACKEND}{endpoint}"
+    headers = {"X-API-KEY": API_KEY}
+    try:
+        if method.upper() == "POST":
+            response = requests.post(url, json=json_data, headers=headers, timeout=3)  # 3 segundos máximo
+        else:
+            response = requests.get(url, headers=headers, timeout=3)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.warning(f"[HTTP-FAST] Error rápido en {method} {endpoint}: {e}")
+        return None
+
+
 def send_partial_update(task_id: str, partial_data: dict, status: str = "running"):
-    """Envía actualización parcial al backend por WebSocket o HTTP."""
+    """Envía actualización parcial al backend por WebSocket o HTTP (optimizado para velocidad)."""
     partial_data["status"] = status
     
     # Log compacto del update
@@ -959,20 +1001,21 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
                 "partial_data": partial_data
             }
             ws_connection.send(json.dumps(message))
-            logger.info(f"[WS] Enviado correctamente")
+            logger.info(f"[WS] ⚡ Enviado inmediatamente")
             return True
         except Exception as e:
-            logger.warning(f"[WS] Error: {e}, usando HTTP fallback")
+            logger.warning(f"[WS] Error: {e}, intentando HTTP rápido")
     
-    # Fallback a HTTP si WebSocket no está disponible
+    # Fallback a HTTP RÁPIDO (sin retries largos)
     payload = {"task_id": task_id, "partial_data": partial_data}
-    result = make_request("POST", "/workers/task_update", payload)
+    result = make_request_fast("POST", "/workers/task_update", payload)
     
     if result and result.get("status") == "ok":
-        logger.info(f"[HTTP] Enviado correctamente")
+        logger.info(f"[HTTP] ⚡ Enviado rápidamente")
         return True
     
-    logger.error(f"[ERROR] Fallo enviando actualización")
+    logger.warning(f"[UPDATE] ⚠️ No se pudo enviar update inmediato (continuará procesando)")
+    # NO bloquear el proceso si el update falla - es mejor continuar
     return False
 
 

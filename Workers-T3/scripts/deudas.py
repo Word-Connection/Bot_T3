@@ -1,15 +1,33 @@
 import sys
 import json
 import base64
-import sys
-import json
-import base64
 import os
 import glob
 import subprocess
 from PIL import Image
 import io
 import time
+
+
+def send_partial_update(dni: str, score: str, etapa: str, info: str, admin_mode: bool = False, extra_data: dict = None):
+    """Envía un update parcial al worker para reenvío inmediato via WebSocket."""
+    update_data = {
+        "dni": dni,
+        "score": score,
+        "etapa": etapa,
+        "info": info,
+        "admin_mode": admin_mode,
+        "timestamp": int(time.time() * 1000)
+    }
+    
+    # Agregar datos extra si se proporcionan
+    if extra_data:
+        update_data.update(extra_data)
+    
+    print("===JSON_PARTIAL_START===")
+    print(json.dumps(update_data))
+    print("===JSON_PARTIAL_END===")
+    sys.stdout.flush()  # Forzar envío inmediato
 
 
 def get_image_base64(image_path: str) -> str:
@@ -123,6 +141,27 @@ def main():
             sys.exit(1)
 
         dni = sys.argv[1]
+        
+        # MODO ADMINISTRATIVO: Leer del segundo parámetro (JSON de la tarea) o variable de entorno como fallback
+        admin_mode = False
+        
+        # Si hay un segundo argumento, intentar parsearlo como JSON para obtener el flag admin
+        if len(sys.argv) >= 3:
+            try:
+                task_data = json.loads(sys.argv[2])
+                admin_mode = bool(task_data.get('admin', False))
+                if admin_mode:
+                    print(f"[ADMIN] MODO ADMINISTRATIVO ACTIVADO VIA TAREA - Se ejecutará Camino A independientemente del score", file=sys.stderr)
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"[WARNING] Error parseando datos de tarea: {e}, usando fallback de variable de entorno", file=sys.stderr)
+                # Fallback a variable de entorno
+                admin_mode = os.getenv('ADMIN_MODE', '0').lower() in ('1', 'true', 'yes', 'on')
+        else:
+            # Fallback a variable de entorno si no hay segundo parámetro
+            admin_mode = os.getenv('ADMIN_MODE', '0').lower() in ('1', 'true', 'yes', 'on')
+        
+        if admin_mode:
+            print(f"[ADMIN] Modo administrativo activo - Camino A se ejecutará independientemente del score", file=sys.stderr)
 
         # Directorio de capturas
         base_dir = os.path.dirname(__file__)
@@ -130,8 +169,17 @@ def main():
 
         # Limpiar capturas previas
         clean_captures_dir(captures_dir)
+        
+        # ===== ENVIAR UPDATE INICIAL =====
+        inicio_msg = f"Iniciando consulta para DNI {dni}"
+        if admin_mode:
+            inicio_msg += " (MODO ADMINISTRATIVO)"
+        send_partial_update(dni, "", "iniciando", inicio_msg, admin_mode)
 
         stages = []
+
+        # ===== ENVIAR UPDATE: OBTENIENDO SCORE =====
+        send_partial_update(dni, "", "obteniendo_score", "Analizando información del cliente...", admin_mode)
 
         # Ejecutar Camino C
         script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_multi.py'))
@@ -158,6 +206,9 @@ def main():
             stderr_output = result_proc.stderr.strip() if result_proc.stderr else "No stderr"
             stdout_output = result_proc.stdout.strip() if result_proc.stdout else "No stdout"
             error_msg = f"Error en Camino C (code {result_proc.returncode})"
+            
+            # ===== ENVIAR UPDATE DE ERROR =====
+            send_partial_update(dni, "", "error_analisis", "Error al analizar la información del cliente", admin_mode)
             
             # Imprimir stderr completo a stderr para que el worker lo capture
             print(f"\n=== STDERR COMPLETO DE CAMINO C ===", file=sys.stderr)
@@ -206,10 +257,6 @@ def main():
         # Extraer el score del JSON del Camino C
         score = camino_c_json.get("score", "No encontrado")
         
-        # ENVIAR SCORE A STDOUT PARA QUE EL WORKER LO DETECTE EN TIEMPO REAL
-        print(f"Score: {score}")
-        sys.stdout.flush()  # FORZAR FLUSH INMEDIATO
-
         # Buscar captura más reciente
         pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
         files = glob.glob(pattern)
@@ -219,6 +266,18 @@ def main():
         if files:
             latest_file = max(files, key=os.path.getctime)
             img_base64 = get_image_base64(latest_file)
+
+        # ===== ENVIAR UPDATE PARCIAL INMEDIATO: SCORE OBTENIDO CON IMAGEN =====
+        extra_data = {}
+        if img_base64:
+            extra_data["image"] = img_base64
+            extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+            
+        send_partial_update(dni, score, "score_obtenido", f"Análisis completado - Score: {score}", admin_mode, extra_data)
+        
+        # ENVIAR SCORE A STDOUT PARA QUE EL WORKER LO DETECTE EN TIEMPO REAL (compatibilidad)
+        print(f"Score: {score}")
+        sys.stdout.flush()
 
         # Etapa con resultado
         stages.append({
@@ -235,26 +294,31 @@ def main():
         except Exception as e:
             score_num = None
 
-        if score_num is not None and 80 <= score_num <= 89:
+        # LÓGICA DE DECISIÓN: Ejecutar Camino A si:
+        # 1. Score está en rango 80-89 (lógica original), O
+        # 2. Modo administrativo está activado (desde tarea o variable entorno)
+        should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) or admin_mode
+        
+        if admin_mode and not (score_num is not None and 80 <= score_num <= 89):
+            print(f"[ADMIN] Forzando ejecución de Camino A por modo administrativo (score: {score})", file=sys.stderr)
+        
+        if should_execute_camino_a:
             # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
-            buscando_update = {
-                "dni": dni,
-                "score": score,
-                "etapa": "buscando_deudas",
-                "info": f"Score {score_num}. Buscando deudas del cliente...",
-                "timestamp": int(time.time() * 1000)
-            }
-            print("===JSON_PARTIAL_START===")
-            print(json.dumps(buscando_update))
-            print("===JSON_PARTIAL_END===")
-            sys.stdout.flush()
+            if admin_mode and not (score_num is not None and 80 <= score_num <= 89):
+                info_msg = "Extrayendo información detallada de deudas..."
+            else:
+                info_msg = "Buscando información detallada de deudas..."
+                
+            # Enviar update usando la función helper
+            send_partial_update(dni, score, "buscando_deudas", info_msg, admin_mode)
             
             # Agregar stage intermedio
             stages.append({
-                "info": f"Score {score_num}. Buscando deudas del cliente...",
+                "info": info_msg,
                 "image": "",
                 "timestamp": int(time.time()),
-                "etapa": "buscando_deudas"
+                "etapa": "buscando_deudas",
+                "admin_mode": admin_mode
             })
             
             try:
@@ -295,6 +359,9 @@ def main():
                     if returncode == 0:
                         print(f"[CaminoA] Camino A completado exitosamente")
                         sys.stdout.flush()
+                        
+                        # ===== ENVIAR UPDATE PARCIAL: EXTRACCIÓN COMPLETADA =====
+                        send_partial_update(dni, score, "extraccion_completada", "Información de deudas extraída - Procesando datos...", admin_mode)
                         
                         # Intentar parsear JSON de Camino A desde stdout
                         camino_a_data = None
@@ -382,6 +449,17 @@ def main():
             # Si no hay Camino A, devolver el JSON del Camino C tal cual
             result = camino_c_json
             print(f"[RESULTADO] Usando JSON del Camino C directamente", file=sys.stderr)
+            
+        # Agregar información del modo administrativo al resultado final
+        result["admin_mode"] = admin_mode
+        if admin_mode:
+            result["admin_info"] = "Ejecutado en modo administrativo - Camino A forzado independientemente del score"
+
+        # ===== ENVIAR UPDATE PARCIAL FINAL: DATOS LISTOS =====
+        has_deudas = bool(final_camino_a and (final_camino_a.get('fa_actual') or final_camino_a.get('cuenta_financiera')))
+        final_info = "Consulta finalizada" + (" - Información de deudas disponible" if has_deudas else " - Información básica disponible")
+        send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, 
+                          {"has_deudas": has_deudas, "success": True})
 
         # ===== MOSTRAR COMPARATIVA: SCRAPING vs BACKEND =====
         print("\n" + "="*80)
