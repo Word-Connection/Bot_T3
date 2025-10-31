@@ -55,6 +55,10 @@
     "x": 888,
     "y": 173
   },
+  "extra_cuit_select_all": {
+    "x": 959,
+    "y": 336
+  },
   "extra_cuit_copy": {
     "x": 937,
     "y": 262

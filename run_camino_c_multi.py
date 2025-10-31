@@ -615,7 +615,8 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
 
         # Captura de región score o mitad superior si no está definida
         shot_dir.mkdir(parents=True, exist_ok=True)
-        shot_path = shot_dir / f"cliente_no_creado_{dni}_{int(time.time())}.png"
+        # IMPORTANTE: Usar patrón score_{dni}_{timestamp}.png para que deudas.py lo encuentre
+        shot_path = shot_dir / f"score_{dni}_{int(time.time())}.png"
         rx, ry, rw, rh = _resolve_screenshot_region(conf)
         ok = False
         if rw and rh:
@@ -880,23 +881,36 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             pg.click(dni_x, dni_y)
             time.sleep(0.3)
             
-            # Hacer Ctrl+A para seleccionar todo el contenido del campo
-            print(f"[CaminoC] Presionando Ctrl+A para seleccionar DNI")
-            pg.hotkey('ctrl', 'a')
-            time.sleep(0.3)
-            
-            # Right-click para abrir menú contextual
-            print(f"[CaminoC] Right-click en dni_from_cuit ({dni_x}, {dni_y})")
+            # NUEVO FLUJO: Click derecho → Seleccionar todo → Click derecho → Copiar
+            # 1. Right-click para abrir menú contextual
+            print(f"[CaminoC] Right-click en dni_from_cuit para abrir menú")
             pg.click(dni_x, dni_y, button='right')
             time.sleep(0.3)
             
-            # Click en extra_cuit_copy para copiar el DNI
+            # 2. Click en "Seleccionar todo" (959, 336)
+            select_all_x, select_all_y = _xy(conf, 'extra_cuit_select_all')
+            if select_all_x or select_all_y:
+                print(f"[CaminoC] Click en 'Seleccionar todo' ({select_all_x}, {select_all_y})")
+                _click(select_all_x, select_all_y, 'extra_cuit_select_all', 0.3)
+                time.sleep(0.3)
+            else:
+                print("[CaminoC] ADVERTENCIA: extra_cuit_select_all no definido, usando Ctrl+A")
+                pg.hotkey('ctrl', 'a')
+                time.sleep(0.3)
+            
+            # 3. Right-click nuevamente sobre el DNI para copiar
+            print(f"[CaminoC] Right-click en dni_from_cuit para copiar")
+            pg.click(dni_x, dni_y, button='right')
+            time.sleep(0.3)
+            
+            # 4. Click en extra_cuit_copy para copiar el DNI
             copy_x, copy_y = _xy(conf, 'extra_cuit_copy')
             if copy_x or copy_y:
                 # Limpiar portapapeles antes de copiar
                 _clear_clipboard()
                 time.sleep(0.2)
                 
+                print(f"[CaminoC] Click en 'Copiar' ({copy_x}, {copy_y})")
                 _click(copy_x, copy_y, 'extra_cuit_copy', 0.5)
                 time.sleep(0.5)
                 
