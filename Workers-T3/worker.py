@@ -358,7 +358,7 @@ def process_task(task: dict) -> bool:
             import threading
             import queue
             
-            # Función para leer stdout en un hilo separado
+            # Función para leer stdout/stderr en hilos separados
             def read_output(pipe, out_queue):
                 try:
                     for line in iter(pipe.readline, ''):
@@ -369,11 +369,18 @@ def process_task(task: dict) -> bool:
                 finally:
                     out_queue.put(None)  # Señal de fin
             
-            # Crear cola y hilo para lectura no bloqueante
+            # Crear colas y hilos para lectura no bloqueante de STDOUT y STDERR
             output_queue = queue.Queue()
-            reader_thread = threading.Thread(target=read_output, args=(process.stdout, output_queue))
-            reader_thread.daemon = True
-            reader_thread.start()
+            stderr_queue = queue.Queue()
+            
+            stdout_thread = threading.Thread(target=read_output, args=(process.stdout, output_queue))
+            stderr_thread = threading.Thread(target=read_output, args=(process.stderr, stderr_queue))
+            
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+            
+            stdout_thread.start()
+            stderr_thread.start()
             
             start_time = time.time()
             last_line_time = start_time
@@ -381,6 +388,9 @@ def process_task(task: dict) -> bool:
             no_output_timeout = 1200  # 20 minutos sin output = timeout
             
             while True:
+                # Resetear line_text al inicio de cada iteración
+                line_text = None
+                
                 # Enviar heartbeat cada 30 segundos DURANTE la ejecución de la tarea
                 current_time = time.time()
                 if current_time - last_heartbeat_during_task > 30:
@@ -430,6 +440,24 @@ def process_task(task: dict) -> bool:
                     output_lines.append(line.strip())
                     line_text = line.strip()
                     
+                except queue.Empty:
+                    # No hay líneas en stdout, continuar
+                    pass
+                
+                # DRENAR STDERR para evitar bloqueos (no bloqueante)
+                try:
+                    while not stderr_queue.empty():
+                        stderr_line = stderr_queue.get_nowait()
+                        if stderr_line and stderr_line.strip():
+                            stderr_lines.append(stderr_line.strip())
+                            # Log de stderr solo si es importante (errores, warnings)
+                            if any(keyword in stderr_line.lower() for keyword in ['error', 'warning', 'fail', 'exception']):
+                                logger.warning(f"[STDERR] {stderr_line.strip()}")
+                except queue.Empty:
+                    pass
+                
+                # Procesar línea de stdout si existe
+                if line_text is not None and line_text:
                     # DETECTAR JSON PARCIALES DEL SCRIPT
                     if "===JSON_PARTIAL_START===" in line_text:
                         # Iniciar captura de JSON parcial
@@ -544,18 +572,14 @@ def process_task(task: dict) -> bool:
                                 # No es necesario enviarlo aquí ni hacer sleep
                         except Exception as e:
                             logger.warning(f"[SCORE] Error: {e}")
-                
-                except queue.Empty:
-                    # No hay líneas en la cola, continuar esperando
-                    continue
             
-            # Leer stderr
-            stderr_output = process.stderr.read() if process.stderr else ""
-            if stderr_output:
-                stderr_lines = stderr_output.split('\n')
-                # Mostrar stderr completo para debugging (sin truncar)
-                logger.info(f"[DEBUG] Script stderr (completo):")
-                logger.info(stderr_output)
+            # Proceso terminado, mostrar stderr si hubo errores importantes
+            if stderr_lines:
+                important_errors = [line for line in stderr_lines if any(keyword in line.lower() for keyword in ['error', 'exception', 'fail', 'traceback'])]
+                if important_errors:
+                    logger.warning(f"[STDERR] Errores importantes detectados:")
+                    for err_line in important_errors[:10]:  # Mostrar solo los primeros 10
+                        logger.warning(f"[STDERR] {err_line}")
             
             logger.info(f"[PROCESO] Lectura de output completada")
             

@@ -4,6 +4,7 @@ import base64
 import os
 import glob
 import subprocess
+import threading
 from PIL import Image
 import io
 import time
@@ -20,14 +21,12 @@ def send_partial_update(dni: str, score: str, etapa: str, info: str, admin_mode:
         "timestamp": int(time.time() * 1000)
     }
     
-    # Agregar datos extra si se proporcionan
     if extra_data:
         update_data.update(extra_data)
     
-    print("===JSON_PARTIAL_START===")
-    print(json.dumps(update_data))
-    print("===JSON_PARTIAL_END===")
-    sys.stdout.flush()  # Forzar envío inmediato
+    print("===JSON_PARTIAL_START===", flush=True)
+    print(json.dumps(update_data), flush=True)
+    print("===JSON_PARTIAL_END===", flush=True)
 
 
 def get_image_base64(image_path: str) -> str:
@@ -190,22 +189,50 @@ def main():
             print(json.dumps(result))
             sys.exit(1)
 
-        # Ejecutar con el mismo intérprete de Python (asegura usar venv) y pasar coords y shots-dir
-        cmd = [sys.executable, script_path, '--dni', dni, '--coords', coords_path, '--shots-dir', captures_dir]
+        # Ejecutar con unbuffered mode para output en tiempo real
+        cmd = [sys.executable, '-u', script_path, '--dni', dni, '--coords', coords_path, '--shots-dir', captures_dir]
 
-        # NO cambiar cwd para que las rutas relativas funcionen correctamente
-        result_proc = subprocess.run(
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=300  # Timeout de 5 minutos
+            bufsize=1
         )
+        
+        stdout_lines = []
+        stderr_lines = []
+        
+        # Leer stdout en tiempo real
+        try:
+            for line in process.stdout:
+                stdout_lines.append(line)
+                print(line.rstrip(), file=sys.stderr)
+                sys.stderr.flush()
+            
+            # Esperar a que termine y capturar stderr
+            process.wait(timeout=300)
+            stderr_output = process.stderr.read()
+            if stderr_output:
+                stderr_lines.append(stderr_output)
+                print(stderr_output, file=sys.stderr)
+                sys.stderr.flush()
+                
+        except subprocess.TimeoutExpired:
+            process.kill()
+            send_partial_update(dni, "", "error_analisis", "Timeout ejecutando Camino C", admin_mode)
+            result = {"error": "Timeout ejecutando Camino C", "dni": dni, "stages": []}
+            print(json.dumps(result))
+            sys.exit(1)
+        
+        stdout_c = ''.join(stdout_lines)
+        returncode = process.returncode
 
-        if result_proc.returncode != 0:
+        if returncode != 0:
             # Mostrar stderr completo para debugging
-            stderr_output = result_proc.stderr.strip() if result_proc.stderr else "No stderr"
-            stdout_output = result_proc.stdout.strip() if result_proc.stdout else "No stdout"
-            error_msg = f"Error en Camino C (code {result_proc.returncode})"
+            stderr_output = ''.join(stderr_lines).strip()
+            stdout_output = stdout_c.strip()
+            error_msg = f"Error en Camino C (code {returncode})"
             
             # ===== ENVIAR UPDATE DE ERROR =====
             send_partial_update(dni, "", "error_analisis", "Error al analizar la información del cliente", admin_mode)
@@ -227,7 +254,6 @@ def main():
 
         # Parsear el JSON del Camino C (puede contener fraude, cliente no creado, score, etc.)
         camino_c_json = None
-        stdout_c = result_proc.stdout or ""
         
         # Buscar el JSON entre los marcadores
         json_start_marker = "===JSON_RESULT_START==="
@@ -267,7 +293,7 @@ def main():
             latest_file = max(files, key=os.path.getctime)
             img_base64 = get_image_base64(latest_file)
 
-        # ===== ENVIAR UPDATE PARCIAL INMEDIATO: SCORE OBTENIDO CON IMAGEN =====
+        # ===== ENVIAR UPDATE: SCORE OBTENIDO CON IMAGEN =====
         extra_data = {}
         if img_base64:
             extra_data["image"] = img_base64
@@ -275,9 +301,7 @@ def main():
             
         send_partial_update(dni, score, "score_obtenido", f"Análisis completado - Score: {score}", admin_mode, extra_data)
         
-        # ENVIAR SCORE A STDOUT PARA QUE EL WORKER LO DETECTE EN TIEMPO REAL (compatibilidad)
-        print(f"Score: {score}")
-        sys.stdout.flush()
+        print(f"Score: {score}", flush=True)
 
         # Etapa con resultado
         stages.append({
@@ -294,13 +318,9 @@ def main():
         except Exception as e:
             score_num = None
 
-        # LÓGICA DE DECISIÓN: Ejecutar Camino A si:
-        # 1. Score está en rango 80-89 (lógica original), O
-        # 2. Modo administrativo está activado (desde tarea o variable entorno)
+        # LÓGICA DE DECISIÓN: Ejecutar Camino A si score 80-89 O modo admin
         should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) or admin_mode
-        
-        if admin_mode and not (score_num is not None and 80 <= score_num <= 89):
-            print(f"[ADMIN] Forzando ejecución de Camino A por modo administrativo (score: {score})", file=sys.stderr)
+
         
         if should_execute_camino_a:
             # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
@@ -309,10 +329,8 @@ def main():
             else:
                 info_msg = "Buscando información detallada de deudas..."
                 
-            # Enviar update usando la función helper
             send_partial_update(dni, score, "buscando_deudas", info_msg, admin_mode)
             
-            # Agregar stage intermedio
             stages.append({
                 "info": info_msg,
                 "image": "",
@@ -326,35 +344,126 @@ def main():
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
                 if os.path.exists(script_a):
-                    # Determinar qué DNI usar para Camino A
-                    # Si camino_c_json tiene "dni_real" (extraído para CUIT), usarlo
-                    # Si no, usar el dni original
-                    dni_para_camino_a = camino_c_json.get("dni_real", dni)
+                    dni_para_camino_a = dni
+                    dni_fallback = camino_c_json.get("dni_fallback")
                     
-                    if dni_para_camino_a != dni:
-                        print(f"[CaminoA] Usando DNI real extraído: {dni_para_camino_a} (original: {dni})", file=sys.stderr)
-                    
-                    # Simplificar comando: solo pasar --dni como cuando se ejecuta manualmente
-                    # El script usará el DEFAULT_COORDS_FILE si no se especifica --coords
-                    cmd_a = [sys.executable, script_a, '--dni', dni_para_camino_a]
-                    
-                    # Ejecutar Camino A de forma simple - solo esperar resultado
-                    print(f"[CaminoA] Iniciando ejecución del Camino A...", flush=True)
+                    cmd_a = [sys.executable, '-u', script_a, '--dni', dni_para_camino_a]
                     
                     try:
-                        # NO cambiar cwd para que las rutas relativas funcionen
-                        result_a = subprocess.run(
+                        process = subprocess.Popen(
                             cmd_a,
-                            capture_output=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
                             text=True,
-                            timeout=1200  # 20 minutos
+                            bufsize=1
                         )
+                        
+                        stdout_lines = []
+                        stderr_lines = []
+                        
+                        import threading
+                        def read_stderr():
+                            for line in process.stderr:
+                                stderr_lines.append(line)
+                                print(line.rstrip(), file=sys.stderr)
+                        
+                        stderr_thread = threading.Thread(target=read_stderr)
+                        stderr_thread.daemon = True
+                        stderr_thread.start()
+                        
+                        # Leer stdout con timeout
+                        import signal
+                        try:
+                            for line in process.stdout:
+                                stdout_lines.append(line)
+                                print(line.rstrip(), file=sys.stderr)  # Forward to stderr for real-time visibility
+                        except Exception as e:
+                            print(f"Error leyendo stdout: {e}", file=sys.stderr)
+                        
+                        # Esperar a que termine el proceso
+                        returncode = process.wait(timeout=1200)  # 20 minutos
+                        stderr_thread.join(timeout=5)
+                        
                     except subprocess.TimeoutExpired:
+                        process.kill()
                         raise
                     
-                    returncode = result_a.returncode
-                    stdout_full = result_a.stdout
-                    stderr_full = result_a.stderr
+                    stdout_full = ''.join(stdout_lines)
+                    stderr_full = ''.join(stderr_lines)
+                    
+                    # ===== VERIFICAR SI NECESITA FALLBACK A DNI =====
+                    camino_a_data = None
+                    if returncode == 0:
+                        # Parsear resultado del primer intento
+                        try:
+                            a_out = stdout_full or ""
+                            json_start = a_out.find('{')
+                            if json_start != -1:
+                                json_end = a_out.rfind('}')
+                                if json_end != -1 and json_end > json_start:
+                                    json_str = a_out[json_start:json_end+1]
+                                    camino_a_data = json.loads(json_str)
+                        except Exception:
+                            pass
+                        
+                        # Si no encontró registros Y hay dni_fallback, reintentar con DNI
+                        if camino_a_data and dni_fallback:
+                            fa_saldos = camino_a_data.get("fa_saldos", [])
+                            if len(fa_saldos) == 0:
+                                print(f"[CaminoA] No se encontraron registros con CUIT {dni_para_camino_a}", file=sys.stderr)
+                                print(f"[CaminoA] Reintentando con DNI fallback: {dni_fallback}", file=sys.stderr)
+                                
+                                # Reintentar con DNI
+                                # -u: unbuffered mode para output en tiempo real
+                                cmd_a_fallback = [sys.executable, '-u', script_a, '--dni', dni_fallback]
+                                
+                                try:
+                                    process = subprocess.Popen(
+                                        cmd_a_fallback,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True,
+                                        bufsize=1
+                                    )
+                                    
+                                    # Leer output en tiempo real
+                                    stdout_lines = []
+                                    stderr_lines = []
+                                    
+                                    def read_stderr():
+                                        for line in process.stderr:
+                                            stderr_lines.append(line)
+                                            print(line.rstrip(), file=sys.stderr)
+                                    
+                                    stderr_thread = threading.Thread(target=read_stderr)
+                                    stderr_thread.daemon = True
+                                    stderr_thread.start()
+                                    
+                                    for line in process.stdout:
+                                        stdout_lines.append(line)
+                                        print(line.rstrip(), file=sys.stderr)
+                                    
+                                    returncode = process.wait(timeout=1200)
+                                    stderr_thread.join(timeout=5)
+                                    
+                                    stdout_full = ''.join(stdout_lines)
+                                    stderr_full = ''.join(stderr_lines)
+                                    
+                                    # Parsear nuevo resultado
+                                    if returncode == 0:
+                                        try:
+                                            a_out = stdout_full or ""
+                                            json_start = a_out.find('{')
+                                            if json_start != -1:
+                                                json_end = a_out.rfind('}')
+                                                if json_end != -1 and json_end > json_start:
+                                                    json_str = a_out[json_start:json_end+1]
+                                                    camino_a_data = json.loads(json_str)
+                                                    print(f"[CaminoA] Fallback exitoso - {len(camino_a_data.get('fa_saldos', []))} registros encontrados", file=sys.stderr)
+                                        except Exception:
+                                            pass
+                                except subprocess.TimeoutExpired:
+                                    print(f"[CaminoA] Timeout en fallback con DNI", file=sys.stderr)
                     
                     if returncode == 0:
                         print(f"[CaminoA] Camino A completado exitosamente")
@@ -462,17 +571,16 @@ def main():
                           {"has_deudas": has_deudas, "success": True})
 
         # ===== MOSTRAR COMPARATIVA: SCRAPING vs BACKEND =====
-        print("\n" + "="*80)
-        print("RESULTADO FINAL - JSON QUE SE ENVIARÁ AL BACKEND")
-        print("="*80)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        print("="*80 + "\n")
+        print("\n" + "="*80, flush=True)
+        print("RESULTADO FINAL - JSON QUE SE ENVIARÁ AL BACKEND", flush=True)
+        print("="*80, flush=True)
+        print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
+        print("="*80 + "\n", flush=True)
 
         # Output JSON limpio con marcador especial para que el worker lo identifique
-        print("===JSON_RESULT_START===")
-        print(json.dumps(result))
-        print("===JSON_RESULT_END===")
-        sys.stdout.flush()
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
 
         sys.exit(0)  # Salir explícitamente con código 0 (éxito)
 
