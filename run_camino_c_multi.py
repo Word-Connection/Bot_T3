@@ -89,7 +89,6 @@ def _resolve_screenshot_region(conf: Dict[str, Any]) -> Tuple[int,int,int,int]:
 
 
 def _click(x: int, y: int, label: str, delay: float):
-    print(f"[CaminoC] Click {label} ({x},{y})")
     if x and y:
         pg.moveTo(x, y, duration=0.12)
         pg.click()
@@ -99,7 +98,6 @@ def _click(x: int, y: int, label: str, delay: float):
 
 
 def _multi_click(x: int, y: int, label: str, times: int, button: str = 'left', interval: float = 0.0):
-    print(f"[CaminoC] {label}: {times}x {button}-click en ({x},{y}) intervalo={interval}s")
     if x and y:
         pg.moveTo(x, y, duration=0.0)
         for i in range(times):
@@ -121,26 +119,20 @@ def _press_enter(delay_after: float):
 
 
 def _send_down_presses(count: int, interval: float, use_pynput: bool):
-    """Envía flecha abajo 'count' veces. Si use_pynput y disponible, usa pynput (Key.down
-    con press/release explícito). Si no, usa pyautogui.press.
-    """
+    """Envía flecha abajo 'count' veces."""
     if use_pynput and _HAS_PYNPUT:
         kb = KBController()
-        print(f"[CaminoC] Navegación con pynput: {count} x Key.down (interval={interval}s)")
         for i in range(count):
-            print(f"[CaminoC]   -> press(Key.down) #{i+1}")
             kb.press(KBKey.down)
             time.sleep(0.04)
             kb.release(KBKey.down)
             time.sleep(interval)
         return
     # Fallback pyautogui
-    print(f"[CaminoC] Navegación con pyautogui: {count} x down (interval={interval}s)")
     try:
         pg.press('down', presses=count, interval=interval)
     except TypeError:
         for i in range(count):
-            print(f"[CaminoC]   -> press('down') #{i+1}")
             pg.press('down')
             time.sleep(interval)
 
@@ -195,7 +187,6 @@ def _append_log(log_path: Path, dni: str, tag: str, content: str):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open('a', encoding='utf-8') as f:
         f.write(line)
-    print(f"[CaminoC] Log: {line.strip()}")
 
 
 def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float) -> float:
@@ -506,6 +497,13 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     post_enter = float(os.getenv('POST_ENTER_DELAY','1.0'))
     log_path = log_file or Path('camino_c_copias.log')
     shot_dir = screenshot_dir or Path('capturas_camino_c')
+    
+    # Limpiar carpeta de capturas antes de crear nuevas
+    if shot_dir.exists():
+        import shutil
+        shutil.rmtree(shot_dir)
+        print(f"[CaminoC] Carpeta {shot_dir} limpiada")
+    
     shot_dir.mkdir(parents=True, exist_ok=True)
     
     # Variable para almacenar el score obtenido (disponible en todo el scope)
@@ -550,12 +548,16 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         else:
             print("[CaminoC] ADVERTENCIA: no_cuit_field no definido en coordenadas")
     
-    # NUEVO: Validación de cliente creado/no creado
+    # NUEVO: Validación de cliente creado/no creado (IGUAL PARA DNI Y CUIT)
     print("[CaminoC] Validando si cliente está creado...")
     time.sleep(2.5)
     
+    # Limpiar portapapeles ANTES de intentar copiar
+    _clear_clipboard()
+    time.sleep(0.2)
+    
     # Right-click en client_name_field
-    x,y = _xy(conf,'client_name_field')
+    x, y = _xy(conf, 'client_name_field')
     if not (x or y):
         print("[CaminoC] ERROR: client_name_field no definido")
         print("CLIENTE NO CREADO")
@@ -566,7 +568,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     time.sleep(0.5)
     
     # Click en copi_id_field para copiar el ID
-    cx, cy = _xy(conf,'copi_id_field')
+    cx, cy = _xy(conf, 'copi_id_field')
     if not (cx or cy):
         print("[CaminoC] ERROR: copi_id_field no definido")
         print("CLIENTE NO CREADO")
@@ -576,7 +578,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     _click(cx, cy, 'copi_id_field', 0.3)
     time.sleep(0.5)
     
-    # Leer el ID del clipboard (ya copiado por el click, sin hacer Ctrl+C)
+    # Leer el ID del clipboard
     copied_id = ""
     if pyperclip:
         try:
@@ -585,17 +587,24 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             print(f"[CaminoC] Error al leer clipboard: {e}")
     
     copied_id_clean = (copied_id or '').strip()
-    print(f"[CaminoC] ID copiado: '{copied_id_clean}'")
+    print(f"[CaminoC] ID copiado del clipboard: '{copied_id_clean}' ({len(copied_id_clean)} caracteres)")
     
-    # Validar si tiene 4 o más dígitos consecutivos
+    # Validar si tiene contenido y si tiene 4 o más dígitos consecutivos
     numbers_found = re.findall(r'\d+', copied_id_clean)
     has_valid_id = False
     
-    for num in numbers_found:
-        if len(num) >= 4:
-            print(f"[CaminoC] ID válido encontrado: {num} (>= 4 dígitos)")
-            has_valid_id = True
-            break
+    # Si el clipboard está vacío o solo tiene espacios, definitivamente no está creado
+    if len(copied_id_clean) < 3:
+        print(f"[CaminoC] Clipboard vacío o muy corto ({len(copied_id_clean)} caracteres) - Cliente no creado")
+    else:
+        for num in numbers_found:
+            if len(num) >= 4:
+                print(f"[CaminoC] ID válido encontrado: {num} (>= 4 dígitos)")
+                has_valid_id = True
+                break
+        
+        if not has_valid_id:
+            print(f"[CaminoC] No se encontró ID válido en '{copied_id_clean}' - Cliente no creado")
     
     if not has_valid_id:
         print("[CaminoC] No se encontró ID válido (sin números de 4+ dígitos)")
@@ -620,14 +629,6 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                 ok = _capture_region(rx, ry, rw, rh, shot_path)
             except Exception as e:
                 print(f"[CaminoC] Error obteniendo tamaño de pantalla: {e}")
-        img_base64 = ""
-        if ok and shot_path.exists():
-            try:
-                import base64
-                with open(shot_path, "rb") as f:
-                    img_base64 = base64.b64encode(f.read()).decode("utf-8")
-            except Exception as e:
-                print(f"[CaminoC] Error codificando imagen: {e}")
 
         # Devolver JSON estructurado para el worker con marcadores
         result = {
@@ -637,13 +638,13 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             "info": "Cliente no creado, verifiquelo en la imagen",
             "success": True,
             "timestamp": int(time.time() * 1000),
-            "image": img_base64
+            "screenshot": str(shot_path) if shot_path.exists() else None
         }
 
-        # Imprimir con marcadores para que el worker lo parsee correctamente
-        print("===JSON_RESULT_START===")
-        print(json.dumps(result))
-        print("===JSON_RESULT_END===")
+        # Imprimir con marcadores para que el worker lo parsee correctamente (SIN imagen base64)
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
 
         # Cerrar tab y volver a home antes de terminar
         print("[CaminoC] Cerrando tab y volviendo a home...")
@@ -747,9 +748,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                         "timestamp": int(time.time() * 1000)
                     }
                     
-                    print("===JSON_RESULT_START===")
-                    print(json.dumps(result))
-                    print("===JSON_RESULT_END===")
+                    print("===JSON_RESULT_START===", flush=True)
+                    print(json.dumps(result), flush=True)
+                    print("===JSON_RESULT_END===", flush=True)
                     
                     print("[CaminoC] Finalizado - Fraude detectado")
                     return
@@ -867,54 +868,53 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         print('[CaminoC] Region no definida; captura completa')
         _capture_full(shot_path)
 
-    # ===== NUEVO: Extracción de DNI real si es CUIT y score en rango 80-89 =====
+    # ===== Extracción de DNI si es CUIT (para fallback en Camino A) =====
     dni_real_extraido = None
-    if is_cuit and score_value.isdigit():
-        score_int = int(score_value)
-        if 80 <= score_int <= 89:
-            print(f"[CaminoC] CUIT detectado con score {score_int} (rango 80-89)")
-            print("[CaminoC] Extrayendo DNI real para Camino A...")
+    if is_cuit:
+        print("[CaminoC] CUIT detectado, extrayendo DNI asociado para fallback...")
+        
+        # Click en la posición del DNI (911, 174)
+        dni_x, dni_y = _xy(conf, 'dni_from_cuit')
+        if dni_x or dni_y:
+            print(f"[CaminoC] Click en dni_from_cuit ({dni_x}, {dni_y})")
+            pg.click(dni_x, dni_y)
+            time.sleep(0.3)
             
-            # Paso 1: Doble click y luego click derecho en extra_cuit
-            ex_x, ex_y = _xy(conf, 'extra_cuit')
-            if ex_x or ex_y:
-                # Primero doble click
-                print(f"[CaminoC] Doble click en extra_cuit ({ex_x}, {ex_y})")
-                pg.moveTo(ex_x, ex_y, duration=0.15)
+            # Hacer Ctrl+A para seleccionar todo el contenido del campo
+            print(f"[CaminoC] Presionando Ctrl+A para seleccionar DNI")
+            pg.hotkey('ctrl', 'a')
+            time.sleep(0.3)
+            
+            # Right-click para abrir menú contextual
+            print(f"[CaminoC] Right-click en dni_from_cuit ({dni_x}, {dni_y})")
+            pg.click(dni_x, dni_y, button='right')
+            time.sleep(0.3)
+            
+            # Click en extra_cuit_copy para copiar el DNI
+            copy_x, copy_y = _xy(conf, 'extra_cuit_copy')
+            if copy_x or copy_y:
+                # Limpiar portapapeles antes de copiar
+                _clear_clipboard()
                 time.sleep(0.2)
-                pg.doubleClick()
+                
+                _click(copy_x, copy_y, 'extra_cuit_copy', 0.5)
                 time.sleep(0.5)
                 
-                # Luego click derecho en la misma posición
-                print(f"[CaminoC] Click derecho en extra_cuit ({ex_x}, {ex_y})")
-                pg.click(ex_x, ex_y, button='right')
-                time.sleep(0.3)
+                # Leer el DNI del portapapeles
+                dni_clipboard = _get_clipboard_text().strip()
                 
-                # Paso 2: Click en extra_cuit_copy para copiar el DNI
-                copy_x, copy_y = _xy(conf, 'extra_cuit_copy')
-                if copy_x or copy_y:
-                    # Limpiar portapapeles antes de copiar
-                    _clear_clipboard()
-                    time.sleep(0.2)
-                    
-                    _click(copy_x, copy_y, 'extra_cuit_copy', 0.5)
-                    time.sleep(0.5)
-                    
-                    # Leer el DNI del portapapeles
-                    dni_clipboard = _get_clipboard_text().strip()
-                    
-                    # Extraer solo números del clipboard
-                    dni_numerico = re.sub(r'\D', '', dni_clipboard)
-                    
-                    if dni_numerico and len(dni_numerico) >= 7:
-                        dni_real_extraido = dni_numerico
-                        print(f"[CaminoC] DNI real extraído: {dni_real_extraido}")
-                    else:
-                        print(f"[CaminoC] ADVERTENCIA: DNI extraído inválido: '{dni_clipboard}'")
+                # Extraer solo números del clipboard
+                dni_numerico = re.sub(r'\D', '', dni_clipboard)
+                
+                if dni_numerico and len(dni_numerico) >= 7:
+                    dni_real_extraido = dni_numerico
+                    print(f"[CaminoC] DNI extraído del CUIT: {dni_real_extraido}")
                 else:
-                    print("[CaminoC] ADVERTENCIA: extra_cuit_copy no definido en coordenadas")
+                    print(f"[CaminoC] ADVERTENCIA: DNI extraído inválido: '{dni_clipboard}'")
             else:
-                print("[CaminoC] ADVERTENCIA: extra_cuit no definido en coordenadas")
+                print("[CaminoC] ADVERTENCIA: extra_cuit_copy no definido en coordenadas")
+        else:
+            print("[CaminoC] ADVERTENCIA: dni_from_cuit no definido en coordenadas")
 
     # Cerrar y Home (ahora left-click x5)
     x,y = _xy(conf,'close_tab_btn')
@@ -935,14 +935,14 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         "timestamp": int(time.time() * 1000)
     }
     
-    # Agregar dni_real si fue extraído
+    # Agregar dni_real si fue extraído (para fallback en Camino A)
     if dni_real_extraido:
-        result["dni_real"] = dni_real_extraido
-        print(f"[CaminoC] DNI real agregado al resultado: {dni_real_extraido}")
+        result["dni_fallback"] = dni_real_extraido
+        print(f"[CaminoC] DNI fallback agregado al resultado: {dni_real_extraido}")
     
-    print("===JSON_RESULT_START===")
-    print(json.dumps(result))
-    print("===JSON_RESULT_END===")
+    print("===JSON_RESULT_START===", flush=True)
+    print(json.dumps(result), flush=True)
+    print("===JSON_RESULT_END===", flush=True)
     
     print('[CaminoC] Finalizado.')
 

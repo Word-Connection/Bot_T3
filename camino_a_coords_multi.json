@@ -12,6 +12,18 @@
     "x": 140,
     "y": 276
   },
+  "cuit_tipo_doc_btn": {
+    "x": 179,
+    "y": 262
+  },
+  "cuit_option": {
+    "x": 151,
+    "y": 296
+  },
+  "cuit_field": {
+    "x": 912,
+    "y": 263
+  },
 
     "dni_field": {
     "x": 913,
@@ -34,6 +46,10 @@
   "copiado_btn": {
       "x": 96,
       "y": 212
+  },
+  "error_dialog_ok": {
+    "x": 960,
+    "y": 546
   },
   "close_tab_btn": {
     "x": 1896,
@@ -58,6 +74,32 @@
     "home_area": {
     "x": 888,
     "y": 110
+  },
+  "config_registros_btn": {
+    "x": 1875,
+    "y": 155
+  },
+  "num_registros_field": {
+    "x": 940,
+    "y": 516
+  },
+  "buscar_registros_btn": {
+    "x": 938,
+    "y": 570
+  },
+  "screenshot_top_left": {
+    "x": 10,
+    "y": 47
+  },
+  "screenshot_bottom_right": {
+    "x": 1763,
+    "y": 412
+  },
+  "screenshot_region": {
+    "x": 10,
+    "y": 47,
+    "w": 1720,
+    "h": 365
   },
   "steps": [
     ""
