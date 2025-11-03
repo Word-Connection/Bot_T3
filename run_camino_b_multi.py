@@ -1335,6 +1335,8 @@ if __name__ == '__main__':
             prefer_click_actividad_tab=bool(getattr(args, 'prefer_click_actividad_tab', False)),
             use_ctrl_pagedown=bool(getattr(args, 'use_ctrl_pagedown', False)),
             focus_general_then_keys=bool(getattr(args, 'focus_general_then_keys', False)),
+            nav_stabilize_delay=float(getattr(args, 'nav_stabilize_delay', 0.15)),
+            single_id=getattr(args, 'single_id', None),
         )
     except KeyboardInterrupt:
         print('Interrumpido por usuario')
