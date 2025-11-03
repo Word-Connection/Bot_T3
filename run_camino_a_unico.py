@@ -38,7 +38,7 @@ try:
 except Exception:
     pyperclip = None
 
-DEFAULT_COORDS_FILE = 'camino_a_coords_multi.json'
+DEFAULT_COORDS_FILE = 'camino_a_unico_coords_multi.json'
 
 STEP_DESC = {
     0: 'cliente_section',
@@ -1358,10 +1358,8 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
     x, y = _xy(conf, 'close_tab_btn')
     _click(x, y, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
     
-    # Volver a house_area después de cerrar el tab
-    hx, hy = _xy(conf, 'house_area')
-    if hx or hy:
-        _click(hx, hy, 'house_area', base_delay)
+    # No volver a house_area aquí, se hará al final del flujo skip_initial
+
 
 
 def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1491,8 +1489,12 @@ def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]
     return actuales_procesados
 
 
-def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None):
+def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None, skip_initial: bool = False):
     print(f'[CaminoA] run() iniciado para DNI={dni}', flush=True)
+    if skip_initial:
+        print(f'[CaminoA] MODO SKIP_INITIAL ACTIVADO - Saltando pasos iniciales', flush=True)
+        print(f'[CaminoA] Asumiendo que ya está dentro de la cuenta única', flush=True)
+    
     pg.FAILSAFE = True
     start_delay = float(os.getenv('COORDS_START_DELAY','0.25'))
     base_delay = float(os.getenv('STEP_DELAY','0.25'))
@@ -1520,6 +1522,84 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         "cuenta_financiera": []
     }
 
+    # SI skip_initial es True, saltar directamente a FA Cobranza (ya está dentro)
+    if skip_initial:
+        print('[CaminoA] Saltando house_area, validar, y seleccionar_btn', flush=True)
+        print('[CaminoA] Yendo directo a FA Cobranza...', flush=True)
+        
+        # Ir directo al procesamiento de FA Cobranza y Resumen de Facturación
+        validation_success = True
+        
+        # Espera para estabilizar pantalla
+        time.sleep(2.0)
+        
+        # Continuar con FA Cobranza y resto del flujo
+        x,y = _xy(conf,'fa_cobranza_btn'); _click(x,y,'fa_cobranza_btn', _step_delay(step_delays,7,base_delay))
+        x,y = _xy(conf,'fa_cobranza_etapa'); _click(x,y,'fa_cobranza_etapa', _step_delay(step_delays,8,base_delay))
+        x,y = _xy(conf,'fa_cobranza_actual'); _click(x,y,'fa_cobranza_actual', _step_delay(step_delays,9,base_delay))
+
+        # Procesar FA Actuales
+        try:
+            n_actual = _process_fa_actuales(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        except Exception as e:
+            print(f"[CaminoA] ERROR en _process_fa_actuales: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            n_actual = 0
+        
+        # Procesar Resumen/Cuenta/Copias
+        _process_resumen_cuenta_y_copias(conf, step_delays, base_delay, arrow_nav_delay, log_path, dni, results)
+        
+        # Cerrar tabs y volver a home
+        # _process_resumen_cuenta_y_copias ya cierra 1 tab
+        # Hacemos 3 clicks más rápidos para cerrar tabs restantes
+        print('[CaminoA] Cerrando tabs y volviendo a home...', flush=True)
+        x,y = _xy(conf,'close_tab_btn')
+        for i in range(3):
+            _click(x,y,f'close_tab_btn ({i+1}/3)', 0.15)
+        
+        x,y = _xy(conf,'home_area')
+        _click(x,y,'home_area', base_delay)
+        
+        # Convertir formato a fa_saldos para compatibilidad con Camino A
+        print('[CaminoA] Convirtiendo resultados al formato fa_saldos...', flush=True)
+        fa_saldos = []
+        
+        # Agregar items de fa_actual
+        if "fa_actual" in results:
+            for item in results["fa_actual"]:
+                fa_saldos.append({
+                    "id_fa": str(item.get("id", "")),
+                    "saldo": str(item.get("saldo", ""))
+                })
+        
+        # Agregar items de cuenta_financiera (si no están duplicados)
+        if "cuenta_financiera" in results:
+            for grupo in results["cuenta_financiera"]:
+                if "items" in grupo:
+                    for item in grupo["items"]:
+                        id_fa = str(item.get("id", ""))
+                        saldo = str(item.get("saldo", ""))
+                        # Verificar si ya existe (evitar duplicados)
+                        if not any(fa.get("id_fa") == id_fa for fa in fa_saldos):
+                            fa_saldos.append({
+                                "id_fa": id_fa,
+                                "saldo": saldo
+                            })
+        
+        # Construir JSON final con formato de Camino A
+        final_results = {
+            "dni": dni,
+            "fa_saldos": fa_saldos
+        }
+        
+        # Imprimir resultados finales
+        print("===== RESULTADOS FINALES =====", flush=True)
+        print(json.dumps(final_results), flush=True)
+        print('[CaminoA] Finalizado en modo skip_initial', flush=True)
+        return
+    
+    # FLUJO NORMAL (cuando skip_initial es False)
     print('[CaminoA] Paso 0: house_area', flush=True)
     # 0) house_area - Ir directamente al área de registros
     x,y = _xy(conf,'house_area')
@@ -1743,6 +1823,7 @@ def _parse_args():
     ap.add_argument('--coords', default=DEFAULT_COORDS_FILE, help='JSON de coordenadas Camino A')
     ap.add_argument('--step-delays', default='', help='Delays por paso, coma (override MULTIA_STEP_DELAYS)')
     ap.add_argument('--log-file', default='camino_a_copias.log', help='Archivo de salida')
+    ap.add_argument('--skip-initial', action='store_true', help='Saltar pasos iniciales (ya está dentro de la cuenta)')
     return ap.parse_args()
 
 
@@ -1764,7 +1845,7 @@ if __name__ == '__main__':
                 except ValueError:
                     pass
         print('[CaminoA] Llamando a run()...', flush=True)
-        run(args.dni, Path(args.coords), step_delays_list or None, Path(args.log_file))
+        run(args.dni, Path(args.coords), step_delays_list or None, Path(args.log_file), skip_initial=args.skip_initial)
         print('[CaminoA] ===== FIN EXITOSO =====', flush=True)
     except KeyboardInterrupt:
         print('[CaminoA] Interrumpido por usuario', flush=True)

@@ -33,7 +33,7 @@ Flujo:
 """
 
 from __future__ import annotations
-import os, sys, json, time, re
+import os, sys, json, time, re, subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -649,11 +649,15 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     # Paso 5: Presionar Enter
     _press_enter(1.0)  # Espera extra después de Enter
     
-    # Paso 6: Click en ver_todos_btn para mostrar todos los registros
+    # NUEVO: Validar si entró directo (cuenta única) antes de intentar "Ver Todos"
+    # Si detectamos que el sistema ya entró directo, saltamos el flujo de "Ver Todos"
+    time.sleep(0.8)
+    
+    # Intentar click en ver_todos_btn y validar si está disponible
     x, y = _xy(conf, 'ver_todos_btn')
     _click(x, y, 'ver_todos_btn', base_delay)
     
-    # NUEVO: Esperar un momento para que cargue o aparezca el cartel de error
+    # Esperar un momento para que cargue o aparezca el cartel de error
     time.sleep(0.8)
     
     # Paso 7: Right-click en copiar_todo_btn
@@ -676,7 +680,73 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     table_text = _get_clipboard_text()
     print(f"[camino_A] Tabla copiada ({len(table_text)} caracteres)")
     
-    # NUEVO: Si no se copió nada, significa que apareció el cartel de error
+    # NUEVO: Si no copió suficiente (< 30 chars), verificar en coordenada específica
+    if len(table_text.strip()) < 30:
+        print(f"[camino_A] Copia insuficiente ({len(table_text)} chars), verificando en coordenadas específicas...")
+        
+        # Click derecho en coordenada específica (23, 195)
+        print(f"[camino_A] Click derecho en (23, 195)")
+        pg.rightClick(23, 195)
+        time.sleep(0.3)
+        
+        # Click en "Copiar" del menú contextual (42, 207)
+        print(f"[camino_A] Click en Copiar (42, 207)")
+        pg.click(42, 207)
+        time.sleep(0.5)
+        
+        # Leer lo que se copió
+        verification_text = _get_clipboard_text()
+        print(f"[camino_A] Texto copiado: '{verification_text}' ({len(verification_text)} chars)")
+        
+        # Si copió "Llamada", es cuenta única
+        if 'llamada' in verification_text.lower():
+            print(f"[camino_A] ============================================")
+            print(f"[camino_A] CUENTA ÚNICA DETECTADA - 'Llamada' encontrada")
+            print(f"[camino_A] Sistema entró directo a la cuenta")
+            print(f"[camino_A] Ejecutando Camino A Único con --skip-initial")
+            print(f"[camino_A] ============================================")
+            
+            # Ejecutar Camino A Único saltando los pasos iniciales
+            python_exe = sys.executable
+            unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+            
+            cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
+            print(f"[camino_A] Ejecutando: {' '.join(cmd)}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            print(result.stdout)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            
+            return
+        else:
+            # No es "Llamada", actualizar table_text con lo que se copió
+            table_text = verification_text
+            print(f"[camino_A] Usando texto de verificación: '{table_text}'")
+
+    # ANTIGUO: Detectar si copió "Llamada" directamente en el primer intento
+    if 'llamada' in table_text.lower():
+        print(f"[camino_A] ============================================")
+        print(f"[camino_A] CUENTA ÚNICA DETECTADA - 'Llamada' en primera copia")
+        print(f"[camino_A] Sistema entró directo a la cuenta")
+        print(f"[camino_A] Ejecutando Camino A Único con --skip-initial")
+        print(f"[camino_A] ============================================")
+        
+        # Ejecutar Camino A Único saltando los pasos iniciales
+        python_exe = sys.executable
+        unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+        
+        cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
+        print(f"[camino_A] Ejecutando: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        
+        return
+    
+    # NUEVO: Si no se copió nada después de todas las verificaciones, es error
     if len(table_text.strip()) < 10:
         print(f"[camino_A] ============================================")
         print(f"[CaminoJulian] ERROR: No se pudo copiar la tabla ({len(table_text)} caracteres)")
@@ -778,24 +848,24 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
     
     if not fa_data_list:
         print(f"[camino_A] WARN: No se encontraron IDs de FA")
-        print(f"[camino_A] Ejecutando flujo alternativo (FALLA)...")
+        print(f"[camino_A] Ejecutando flujo alternativo (Único)...")
         
-        # Cargar coordenadas del archivo FALLA
-        falla_coords_path = coords_path.parent / 'camino_aFALLA_coords_multi.json'
-        if not falla_coords_path.exists():
-            print(f"[camino_A] ERROR: No se encontró archivo {falla_coords_path}")
+        # Cargar coordenadas del archivo Único
+        unico_coords_path = coords_path.parent / 'camino_a_unico_coords_multi.json'
+        if not unico_coords_path.exists():
+            print(f"[camino_A] ERROR: No se encontró archivo {unico_coords_path}")
             print(json.dumps(results))
             return
         
         try:
-            falla_conf = json.loads(falla_coords_path.read_text(encoding='utf-8'))
+            unico_conf = json.loads(unico_coords_path.read_text(encoding='utf-8'))
         except Exception as e:
-            print(f"[camino_A] ERROR al leer {falla_coords_path}: {e}")
+            print(f"[camino_A] ERROR al leer {unico_coords_path}: {e}")
             print(json.dumps(results))
             return
         
         # Ejecutar flujo alternativo
-        _execute_falla_flow(falla_conf, base_delay)
+        _execute_falla_flow(unico_conf, base_delay)
         
         print(json.dumps(results))
         return

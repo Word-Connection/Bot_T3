@@ -463,7 +463,7 @@ def process_task(task: dict) -> bool:
                         # Iniciar captura de JSON parcial
                         json_buffer = []
                         capturing_partial = True
-                        logger.info(f"[PARCIAL] 🚀 Iniciando captura de update parcial...")
+                        logger.info(f"[PARCIAL] Iniciando captura de update parcial...")
                         
                         # Leer líneas hasta encontrar el final
                         while capturing_partial:
@@ -485,10 +485,10 @@ def process_task(task: dict) -> bool:
                                         
                                         etapa = partial_data.get("etapa", "")
                                         info_preview = partial_data.get("info", "")[:50] + "..." if len(partial_data.get("info", "")) > 50 else partial_data.get("info", "")
-                                        logger.info(f"[PARCIAL] 📦 Parseado: {etapa} - {info_preview}")
+                                        logger.info(f"[PARCIAL] Parseado: {etapa} - {info_preview}")
                                         
                                         # Enviar update parcial INMEDIATAMENTE
-                                        logger.info(f"[PARCIAL] ⚡ Enviando al frontend...")
+                                        logger.info(f"[PARCIAL] Enviando al frontend...")
                                         send_partial_update(task_id, partial_data, status="running")
                                         
                                         # Marcar flags según la etapa
@@ -1025,7 +1025,7 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
                 "partial_data": partial_data
             }
             ws_connection.send(json.dumps(message))
-            logger.info(f"[WS] ⚡ Enviado inmediatamente")
+            logger.info(f"[WS] Enviado inmediatamente")
             return True
         except Exception as e:
             logger.warning(f"[WS] Error: {e}, intentando HTTP rápido")
@@ -1035,7 +1035,7 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
     result = make_request_fast("POST", "/workers/task_update", payload)
     
     if result and result.get("status") == "ok":
-        logger.info(f"[HTTP] ⚡ Enviado rápidamente")
+        logger.info(f"[HTTP] Enviado rápidamente")
         return True
     
     logger.warning(f"[UPDATE] ⚠️ No se pudo enviar update inmediato (continuará procesando)")
