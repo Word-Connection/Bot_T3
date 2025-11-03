@@ -364,6 +364,9 @@ def process_task(task: dict) -> bool:
                     for line in iter(pipe.readline, ''):
                         if line:
                             out_queue.put(line)
+                except UnicodeDecodeError as ude:
+                    logger.warning(f"[UNICODE-ERROR] Error decodificando línea: {ude}")
+                    # Continuar leyendo el resto
                 except Exception as e:
                     logger.error(f"[ERROR] Error leyendo output: {e}")
                 finally:
@@ -578,8 +581,14 @@ def process_task(task: dict) -> bool:
                 important_errors = [line for line in stderr_lines if any(keyword in line.lower() for keyword in ['error', 'exception', 'fail', 'traceback'])]
                 if important_errors:
                     logger.warning(f"[STDERR] Errores importantes detectados:")
-                    for err_line in important_errors[:10]:  # Mostrar solo los primeros 10
+                    for err_line in important_errors[:30]:  # Mostrar hasta 30 líneas
                         logger.warning(f"[STDERR] {err_line}")
+                    
+                    # Si hay muchas líneas, mostrar todas en un solo bloque
+                    if len(stderr_lines) > 30:
+                        logger.warning(f"[STDERR] ===== STDERR COMPLETO ({len(stderr_lines)} líneas) =====")
+                        full_stderr = '\n'.join(stderr_lines)
+                        logger.warning(f"[STDERR-FULL]\n{full_stderr}")
             
             logger.info(f"[PROCESO] Lectura de output completada")
             

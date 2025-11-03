@@ -1079,7 +1079,7 @@ def run(
                                 break
         
         if not tiene_movimientos:
-            print(f"[MultiB] ⚠️ La línea NO tiene movimientos (formato no esperado)")
+            print(f"[MultiB] ADVERTENCIA: La línea NO tiene movimientos (formato no esperado)")
             print(f"[MultiB] Clipboard recibido: {clipboard_validation[:100] if clipboard_validation else 'VACÍO'}")
             
             # Marcar como "No Tiene Movimientos" y continuar con la siguiente línea
