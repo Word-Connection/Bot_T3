@@ -145,39 +145,18 @@ def main():
     validacion_update = {
         "telefono": telefono,
         "etapa": "validacion",
-        "info": f"Teléfono {telefono} validado correctamente",
+        "info": "Iniciando envío de PIN",
         "timestamp": int(time.time() * 1000)
     }
-    print("\n" + "="*80)
-    print("[PIN.PY] ENVIANDO UPDATE PARCIAL - VALIDACIÓN")
-    print(f"[PIN.PY] Datos que se enviarán: {json.dumps(validacion_update, indent=2)}")
-    print("="*80 + "\n")
-    print("===JSON_PARTIAL_START===")
-    print(json.dumps(validacion_update))
-    print("===JSON_PARTIAL_END===")
-    sys.stdout.flush()
+    print("===JSON_PARTIAL_START===", flush=True)
+    print(json.dumps(validacion_update), flush=True)
+    print("===JSON_PARTIAL_END===", flush=True)
     
     try:
         # Configurar directorios
         project_root = get_project_root()
         
         print(f"Iniciando envío de PIN para teléfono {telefono}")
-        
-        # ===== ENVIAR UPDATE PARCIAL: INICIANDO ENVÍO =====
-        iniciando_update = {
-            "telefono": telefono,
-            "etapa": "enviando_pin",
-            "info": f"Iniciando envío de PIN para teléfono {telefono}",
-            "timestamp": int(time.time() * 1000)
-        }
-        print("\n" + "="*80)
-        print("[PIN.PY] ENVIANDO UPDATE PARCIAL - INICIANDO ENVÍO")
-        print(f"[PIN.PY] Datos que se enviarán: {json.dumps(iniciando_update, indent=2)}")
-        print("="*80 + "\n")
-        print("===JSON_PARTIAL_START===")
-        print(json.dumps(iniciando_update))
-        print("===JSON_PARTIAL_END===")
-        sys.stdout.flush()
         
         # Ejecutar Camino D
         process = execute_camino_d(telefono, project_root)

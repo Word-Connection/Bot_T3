@@ -170,15 +170,13 @@ def main():
         clean_captures_dir(captures_dir)
         
         # ===== ENVIAR UPDATE INICIAL =====
-        inicio_msg = f"Iniciando consulta para DNI {dni}"
-        if admin_mode:
-            inicio_msg += " (MODO ADMINISTRATIVO)"
+        inicio_msg = "Iniciando análisis de cliente"
         send_partial_update(dni, "", "iniciando", inicio_msg, admin_mode)
 
         stages = []
 
         # ===== ENVIAR UPDATE: OBTENIENDO SCORE =====
-        send_partial_update(dni, "", "obteniendo_score", "Analizando información del cliente...", admin_mode)
+        send_partial_update(dni, "", "obteniendo_score", "Analizando información del cliente", admin_mode)
 
         # Ejecutar Camino C
         script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_multi.py'))
@@ -299,7 +297,7 @@ def main():
             extra_data["image"] = img_base64
             extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
             
-        send_partial_update(dni, score, "score_obtenido", f"Análisis completado - Score: {score}", admin_mode, extra_data)
+        send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
         
         print(f"Score: {score}", flush=True)
 
@@ -324,10 +322,7 @@ def main():
         
         if should_execute_camino_a:
             # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
-            if admin_mode and not (score_num is not None and 80 <= score_num <= 89):
-                info_msg = "Extrayendo información detallada de deudas..."
-            else:
-                info_msg = "Buscando información detallada de deudas..."
+            info_msg = "Extrayendo información de deudas"
                 
             send_partial_update(dni, score, "buscando_deudas", info_msg, admin_mode)
             
@@ -470,7 +465,7 @@ def main():
                         sys.stdout.flush()
                         
                         # ===== ENVIAR UPDATE PARCIAL: EXTRACCIÓN COMPLETADA =====
-                        send_partial_update(dni, score, "extraccion_completada", "Información de deudas extraída - Procesando datos...", admin_mode)
+                        send_partial_update(dni, score, "extraccion_completada", "Procesando información de deudas", admin_mode)
                         
                         # Intentar parsear JSON de Camino A desde stdout
                         camino_a_data = None
@@ -566,7 +561,7 @@ def main():
 
         # ===== ENVIAR UPDATE PARCIAL FINAL: DATOS LISTOS =====
         has_deudas = bool(final_camino_a and (final_camino_a.get('fa_actual') or final_camino_a.get('cuenta_financiera')))
-        final_info = "Consulta finalizada" + (" - Información de deudas disponible" if has_deudas else " - Información básica disponible")
+        final_info = "Consulta finalizada"
         send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, 
                           {"has_deudas": has_deudas, "success": True})
 

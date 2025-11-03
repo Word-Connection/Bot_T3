@@ -7,6 +7,8 @@ import subprocess
 import os
 import csv
 import tempfile
+import threading
+import queue
 from pathlib import Path
 
 def fake_image(text: str) -> str:
@@ -22,22 +24,16 @@ def main():
 
     stages = []
 
-    # Etapa 1: Validación de DNI
-    stages.append({
-        "info": f"DNI {dni} validado correctamente"
-    })
-    
-    # ===== ENVIAR UPDATE PARCIAL: DNI VALIDADO =====
-    validacion_update = {
+    # ===== ENVIAR UPDATE INICIAL: INICIANDO =====
+    inicio_update = {
         "dni": dni,
-        "etapa": "validacion",
-        "info": f"DNI {dni} validado correctamente",
+        "etapa": "iniciando",
+        "info": "Iniciando búsqueda de movimientos",
         "timestamp": int(time.time() * 1000)
     }
-    print("===JSON_PARTIAL_START===")
-    print(json.dumps(validacion_update))
-    print("===JSON_PARTIAL_END===")
-    sys.stdout.flush()
+    print("===JSON_PARTIAL_START===", flush=True)
+    print(json.dumps(inicio_update), flush=True)
+    print("===JSON_PARTIAL_END===", flush=True)
 
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
@@ -57,22 +53,6 @@ def main():
                 rows_for_dni.append(row)
 
     if not rows_for_dni:
-        stages.append({
-            "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema"
-        })
-        
-        # ===== ENVIAR UPDATE PARCIAL: BÚSQUEDA DIRECTA =====
-        busqueda_update = {
-            "dni": dni,
-            "etapa": "busqueda_directa",
-            "info": f"DNI {dni} no encontrado en CSV - Activando búsqueda directa en el sistema",
-            "timestamp": int(time.time() * 1000)
-        }
-        print("===JSON_PARTIAL_START===")
-        print(json.dumps(busqueda_update))
-        print("===JSON_PARTIAL_END===")
-        sys.stdout.flush()
-        
         # NUEVO: Crear CSV temporal vacío (solo headers) para activar modo búsqueda directa
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8') as tmp:
             writer = csv.DictWriter(tmp, fieldnames=reader.fieldnames, delimiter=delimiter)
@@ -107,18 +87,6 @@ def main():
                 clean_row = {k: row.get(k, '') for k in reader.fieldnames}
                 writer.writerow(clean_row)
             tmp_csv = tmp.name
-
-    # ===== ENVIAR UPDATE PARCIAL: INICIANDO SCRAPING =====
-    scraping_update = {
-        "dni": dni,
-        "etapa": "iniciando_scraping",
-        "info": f"Iniciando extracción de movimientos para DNI {dni}",
-        "timestamp": int(time.time() * 1000)
-    }
-    print("===JSON_PARTIAL_START===")
-    print(json.dumps(scraping_update))
-    print("===JSON_PARTIAL_END===")
-    sys.stdout.flush()
     
     # Ejecutar run_camino_b_multi.py
     script_path = Path(__file__).parent / '../../run_camino_b_multi.py'
@@ -136,25 +104,103 @@ def main():
                 "info": f"Error: No se encuentra Python del venv en {venv_python}"
             })
             result = {"dni": dni, "stages": stages}
-            print(json.dumps(result))
+            print(json.dumps(result), flush=True)
             return
 
         python_exe = str(venv_python)
         print(f"DEBUG: Usando Python del venv: {python_exe}", file=sys.stderr)
-        result_proc = subprocess.run([
-            python_exe, str(script_path),
-            '--dni', dni,
-            '--csv', tmp_csv,
-            '--coords', str(coords_path),
-            '--log-file', str(log_path)
-        ], capture_output=True, text=True, timeout=600)  # 10 min timeout
-
-        if result_proc.returncode != 0:
+        
+        # Usar Popen para lectura en tiempo real
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+        
+        proc = subprocess.Popen(
+            [
+                python_exe, '-u', str(script_path),
+                '--dni', dni,
+                '--csv', tmp_csv,
+                '--coords', str(coords_path),
+                '--log-file', str(log_path)
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env
+        )
+        
+        # Leer stdout y stderr en threads separados
+        stdout_queue = queue.Queue()
+        stderr_queue = queue.Queue()
+        
+        def read_stream(stream, q):
+            try:
+                for line in iter(stream.readline, ''):
+                    if line:
+                        q.put(line)
+            finally:
+                stream.close()
+        
+        stdout_thread = threading.Thread(target=read_stream, args=(proc.stdout, stdout_queue), daemon=True)
+        stderr_thread = threading.Thread(target=read_stream, args=(proc.stderr, stderr_queue), daemon=True)
+        
+        stdout_thread.start()
+        stderr_thread.start()
+        
+        # Leer output en tiempo real
+        stderr_lines = []
+        timeout_seconds = 600
+        start_time = time.time()
+        
+        while proc.poll() is None:
+            if time.time() - start_time > timeout_seconds:
+                proc.kill()
+                raise subprocess.TimeoutExpired(proc.args, timeout_seconds)
+            
+            # Leer stdout
+            try:
+                line = stdout_queue.get(timeout=0.1)
+                if line:
+                    print(line, end='', flush=True)  # Pasar output directamente
+            except queue.Empty:
+                pass
+            
+            # Drenar stderr sin bloquear
+            while not stderr_queue.empty():
+                try:
+                    stderr_line = stderr_queue.get_nowait()
+                    if stderr_line and stderr_line.strip():
+                        stderr_lines.append(stderr_line.strip())
+                        if any(keyword in stderr_line.lower() for keyword in ['error', 'warning', 'fail', 'exception']):
+                            print(f"[STDERR] {stderr_line.strip()}", file=sys.stderr, flush=True)
+                except queue.Empty:
+                    break
+        
+        # Drenar queues restantes
+        while not stdout_queue.empty():
+            try:
+                line = stdout_queue.get_nowait()
+                if line:
+                    print(line, end='', flush=True)
+            except queue.Empty:
+                break
+        
+        while not stderr_queue.empty():
+            try:
+                stderr_line = stderr_queue.get_nowait()
+                if stderr_line and stderr_line.strip():
+                    stderr_lines.append(stderr_line.strip())
+            except queue.Empty:
+                break
+        
+        returncode = proc.wait()
+        
+        if returncode != 0:
             stages.append({
-                "info": f"Error ejecutando camino b: {result_proc.stderr[:200]}"
+                "info": f"Error ejecutando camino b: {' '.join(stderr_lines[:5])}"
             })
             result = {"dni": dni, "stages": stages}
-            print(json.dumps(result))
+            print(json.dumps(result), flush=True)
             return
 
     except subprocess.TimeoutExpired:
@@ -195,20 +241,6 @@ def main():
                             if service_id not in ids_from_busqueda_directa:
                                 ids_from_busqueda_directa.append(service_id)
                                 lineas_procesadas_count += 1
-                                
-                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA ENCONTRADA =====
-                                linea_update = {
-                                    "dni": dni,
-                                    "etapa": "procesando_linea",
-                                    "info": f"Línea {service_id} encontrada y procesada",
-                                    "linea_actual": service_id,
-                                    "lineas_procesadas": lineas_procesadas_count,
-                                    "timestamp": int(time.time() * 1000)
-                                }
-                                print("===JSON_PARTIAL_START===")
-                                print(json.dumps(linea_update))
-                                print("===JSON_PARTIAL_END===")
-                                sys.stdout.flush()
                     continue
                 
                 # Formato normal de log: "service_id  contenido"
@@ -222,20 +254,6 @@ def main():
                             if service_id not in movimientos_por_linea:
                                 movimientos_por_linea[service_id] = []
                                 lineas_procesadas_count += 1
-                                
-                                # ===== ENVIAR UPDATE EN TIEMPO REAL: LÍNEA PROCESADA =====
-                                linea_update = {
-                                    "dni": dni,
-                                    "etapa": "procesando_linea",
-                                    "info": f"Procesando línea {service_id}",
-                                    "linea_actual": service_id,
-                                    "lineas_procesadas": lineas_procesadas_count,
-                                    "timestamp": int(time.time() * 1000)
-                                }
-                                print("===JSON_PARTIAL_START===")
-                                print(json.dumps(linea_update))
-                                print("===JSON_PARTIAL_END===")
-                                sys.stdout.flush()
                             
                             # Si el contenido no es "No Tiene Pedido", procesarlo
                             if content != "No Tiene Pedido" and content != "." and content != "No Tiene Pedido (base de datos)":
@@ -258,40 +276,38 @@ def main():
     # Etapa 2: Información de procesamiento
     if total_movimientos > 0:
         stages.append({
-            "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados"
+            "info": f"{total_movimientos} movimientos encontrados en {len(ids)} líneas"
         })
         
         # ===== ENVIAR UPDATE PARCIAL: PROCESAMIENTO =====
         procesamiento_update = {
             "dni": dni,
-            "etapa": "procesamiento",
-            "info": f"Procesadas {len(ids)} líneas - {total_movimientos} movimientos encontrados",
+            "etapa": "completado",
+            "info": f"{total_movimientos} movimientos encontrados en {len(ids)} líneas",
             "lineas_procesadas": len(ids),
             "movimientos_encontrados": total_movimientos,
             "timestamp": int(time.time() * 1000)
         }
-        print("===JSON_PARTIAL_START===")
-        print(json.dumps(procesamiento_update))
-        print("===JSON_PARTIAL_END===")
-        sys.stdout.flush()
+        print("===JSON_PARTIAL_START===", flush=True)
+        print(json.dumps(procesamiento_update), flush=True)
+        print("===JSON_PARTIAL_END===", flush=True)
     else:
         stages.append({
-            "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos"
+            "info": "Sin movimientos activos"
         })
         
         # ===== ENVIAR UPDATE PARCIAL: SIN MOVIMIENTOS =====
         sin_movimientos_update = {
             "dni": dni,
-            "etapa": "procesamiento",
-            "info": f"Procesadas {len(ids)} líneas - Sin movimientos activos",
+            "etapa": "completado",
+            "info": "Sin movimientos activos",
             "lineas_procesadas": len(ids),
             "movimientos_encontrados": 0,
             "timestamp": int(time.time() * 1000)
         }
-        print("===JSON_PARTIAL_START===")
-        print(json.dumps(sin_movimientos_update))
-        print("===JSON_PARTIAL_END===")
-        sys.stdout.flush()
+        print("===JSON_PARTIAL_START===", flush=True)
+        print(json.dumps(sin_movimientos_update), flush=True)
+        print("===JSON_PARTIAL_END===", flush=True)
 
     # Etapa 3+: Resumen de movimientos por línea
     stage_count = 3
@@ -329,23 +345,22 @@ def main():
             "info": f"+ {restantes} líneas adicionales procesadas"
         })
 
-    # Etapa final: Resumen total
+    # Etapa final: Resumen total (no enviar al frontend, solo para stages internos)
     if movimientos_activos > 0:
         stages.append({
-            "info": f"COMPLETADO: {movimientos_activos} movimientos totales encontrados para DNI {dni}"
+            "info": f"{movimientos_activos} movimientos totales"
         })
     else:
         stages.append({
-            "info": f"COMPLETADO: No hay movimientos activos para DNI {dni}"
+            "info": "Búsqueda completada"
         })
 
     result = {"dni": dni, "stages": stages}
     
     # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
-    print("===JSON_RESULT_START===")
-    print(json.dumps(result))
-    print("===JSON_RESULT_END===")
-    sys.stdout.flush()
+    print("===JSON_RESULT_START===", flush=True)
+    print(json.dumps(result), flush=True)
+    print("===JSON_RESULT_END===", flush=True)
 
 if __name__ == "__main__":
     main()
