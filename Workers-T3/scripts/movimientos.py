@@ -17,7 +17,10 @@ def fake_image(text: str) -> str:
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "DNI requerido"}))
+        error_result = {"error": "DNI requerido", "dni": "", "stages": []}
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(error_result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
         sys.exit(1)
 
     dni = sys.argv[1]
@@ -38,7 +41,10 @@ def main():
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
     if not csv_main.exists():
-        print(json.dumps({"error": "CSV principal no encontrado"}))
+        error_result = {"error": "CSV principal no encontrado", "dni": dni, "stages": []}
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(error_result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
         sys.exit(1)
 
     # Leer CSV y obtener líneas para el DNI
@@ -104,7 +110,9 @@ def main():
                 "info": f"Error: No se encuentra Python del venv en {venv_python}"
             })
             result = {"dni": dni, "stages": stages}
+            print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
             return
 
         python_exe = str(venv_python)
@@ -200,7 +208,9 @@ def main():
                 "info": f"Error ejecutando camino b: {' '.join(stderr_lines[:5])}"
             })
             result = {"dni": dni, "stages": stages}
+            print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
             return
 
     except subprocess.TimeoutExpired:
@@ -208,7 +218,9 @@ def main():
             "info": "Timeout ejecutando camino b"
         })
         result = {"dni": dni, "stages": stages}
-        print(json.dumps(result))
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
         return
     finally:
         # Limpiar CSV temporal
