@@ -589,6 +589,105 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     copied_id_clean = (copied_id or '').strip()
     print(f"[CaminoC] ID copiado del clipboard: '{copied_id_clean}' ({len(copied_id_clean)} caracteres)")
     
+    # CASO ESPECIAL: Si copia "Telefónico", significa que el sistema entró directo (una sola cuenta)
+    # En este caso, saltamos todos los pasos de validación y vamos directo a copiar el score
+    if copied_id_clean.lower() == 'telefónico' or copied_id_clean.lower() == 'telefonico':
+        print("[CaminoC] CASO ESPECIAL: 'Telefónico' detectado - Cliente con cuenta única, entrando directo a score")
+        print("[CaminoC] Saltando validaciones de fraude y registro corrupto...")
+        
+        # Ir directo al paso de nombre_cliente_btn para copiar score
+        # (línea ~797 del código original)
+        time.sleep(2.0)
+        
+        # Nombre cliente
+        x,y = _xy(conf,'nombre_cliente_btn')
+        if x or y:
+            time.sleep(2.5)
+            _click(x,y,'nombre_cliente_btn', _step_delay(step_delays,7,base_delay))
+        
+        # Presionar Enter 1 segundo después para eliminar posible cartel
+        time.sleep(1.0)
+        pg.press('enter')
+        print("[CaminoC] Enter presionado después de nombre_cliente_btn para eliminar cartel")
+        time.sleep(0.5)
+
+        # Right-click para menú de copia sobre score_area_page (preferido) o fallback score_area_copy
+        px, py = _xy(conf, 'score_area_page')
+        if not (px or py):
+            px, py = _xy(conf, 'score_area_copy')
+            if px or py:
+                print('[CaminoC] Usando fallback score_area_copy (no definido score_area_page)')
+        if px or py:
+            print(f"[CaminoC] Right-click área score ({px},{py})")
+            time.sleep(2.5)
+            time.sleep(0.5)
+            pg.moveTo(px, py, duration=0.12)
+            pg.click(button='right')
+            time.sleep(0.25)
+            # Seleccionar opción de copia en el menú
+            cx, cy = _xy(conf, 'copy_menu_option')
+            if cx or cy:
+                pg.moveTo(cx, cy, duration=0.08)
+                pg.click()
+                time.sleep(0.4)
+
+        # Leer score del clipboard
+        score_value = "No encontrado"
+        score_raw = ""
+        if pyperclip:
+            try:
+                score_raw = pyperclip.paste() or ""
+            except:
+                pass
+        # Extraer el número del texto que puede venir con más info
+        match_score = re.search(r'\d+', score_raw.strip())
+        if match_score:
+            score_value = match_score.group(0)
+        print(f"Score obtenido: {score_value}")
+
+        # Capturar screenshot
+        shot_dir.mkdir(parents=True, exist_ok=True)
+        shot_path = shot_dir / f"score_{dni}_{int(time.time())}.png"
+        
+        # Click en screenshot_confirm antes de capturar
+        scx, scy = _xy(conf, 'screenshot_confirm')
+        if scx or scy:
+            print(f"[CaminoC] Haciendo click en screenshot_confirm ({scx},{scy}) antes de capturar")
+            _click(scx, scy, 'screenshot_confirm', 0.3)
+            time.sleep(0.3)
+
+        rx, ry, rw, rh = _resolve_screenshot_region(conf)
+        ok = False
+        if rw and rh:
+            ok = _capture_region(rx, ry, rw, rh, shot_path)
+
+        # Cerrar y Home
+        x,y = _xy(conf,'close_tab_btn')
+        _multi_click(x, y, 'close_tab_btn (left x5)', times=5, button='left', interval=0.3)
+        hx, hy = _xy(conf,'home_area')
+        if hx or hy:
+            _click(hx, hy, 'home_area', _step_delay(step_delays,11,base_delay))
+
+        # Limpiar portapapeles al final
+        _clear_clipboard()
+
+        # Devolver JSON con el resultado
+        result = {
+            "dni": dni,
+            "score": score_value,
+            "success": True,
+            "timestamp": int(time.time() * 1000),
+            "caso_especial": "cuenta_unica_telefonico"
+        }
+        
+        print("===JSON_RESULT_START===", flush=True)
+        print(json.dumps(result), flush=True)
+        print("===JSON_RESULT_END===", flush=True)
+        
+        print('[CaminoC] Finalizado - Caso especial cuenta única.')
+        return
+    
+    # Continuar con flujo normal si NO es "Telefónico"
     # Validar si tiene contenido y si tiene 4 o más dígitos consecutivos
     numbers_found = re.findall(r'\d+', copied_id_clean)
     has_valid_id = False
