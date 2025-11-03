@@ -718,6 +718,8 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
             if result.stderr:
                 print(result.stderr, file=sys.stderr)
             
+            # Terminar aquí, no continuar con el flujo normal
+            return
             return
         else:
             # No es "Llamada", actualizar table_text con lo que se copió
