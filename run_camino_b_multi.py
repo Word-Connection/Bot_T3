@@ -993,15 +993,14 @@ def run(
     
     svc_x, svc_y = _xy(conf,'service_id_field')
     prev_trailing_part: Optional[str] = None
+    
+    # Enviar total de líneas a procesar al inicio
+    send_partial_update("inicio", f"Procesando {len(ids)} líneas", dni, {
+        "total_lineas": len(ids)
+    })
 
     for idx, service_id in enumerate(ids, start=1):
         print(f"[MultiB] Servicio {idx}/{len(ids)} = {service_id}")
-        
-        # Enviar update de progreso
-        send_partial_update("procesando", f"Procesando servicio {idx}/{len(ids)}: {service_id}", dni, {
-            "servicio_actual": service_id,
-            "progreso": f"{idx}/{len(ids)}"
-        })
         
         # Paso 1: preparar / limpiar campo service id
         _click(svc_x, svc_y, 'Service ID field', _step_delay(step_delays,0,0.5))
@@ -1174,12 +1173,6 @@ def run(
         # Copiar con Ctrl+C
         print("[MultiB] Copiando con Ctrl+C...")
         
-        # Enviar update de copia
-        send_partial_update("copiando", f"Copiando datos del servicio {service_id}", dni, {
-            "servicio_actual": service_id,
-            "accion": "copiando_datos"
-        })
-        
         pg.hotkey('ctrl', 'c')
         
         # Esperar a que el portapapeles se actualice
@@ -1263,13 +1256,28 @@ def run(
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
         
-        # Enviar update de servicio completado
-        status_msg = "Datos copiados" if new_info else "Sin movimientos nuevos"
-        send_partial_update("servicio_completado", f"Servicio {service_id}: {status_msg}", dni, {
-            "servicio_actual": service_id,
-            "tiene_datos": new_info,
-            "progreso": f"{idx}/{len(ids)}"
-        })
+        # Enviar update con información útil: movimientos encontrados y última fecha
+        if new_info:
+            # Parsear display_txt para extraer información de movimientos
+            movimientos_lines = display_txt.split('\n') if '\n' in display_txt else [display_txt]
+            count_movs = len([line for line in movimientos_lines if line.strip()])
+            
+            # Extraer la última fecha (primer movimiento en la lista)
+            ultima_fecha = "Sin fecha"
+            if movimientos_lines:
+                primer_movimiento = movimientos_lines[0].strip()
+                # Intentar extraer fecha del formato esperado
+                if primer_movimiento:
+                    ultima_fecha = primer_movimiento[:50]  # Primeros 50 caracteres
+            
+            info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultima_fecha}"
+            send_partial_update("linea_procesada", info_msg, dni, {
+                "service_id": service_id,
+                "count": count_movs,
+                "ultimo": ultima_fecha,
+                "progreso": f"{idx}/{len(ids)}"
+            })
+        # No enviar nada si no hay movimientos (para reducir verbosidad)
         
         time.sleep(_step_delay(step_delays,7,base_step_delay))
         
