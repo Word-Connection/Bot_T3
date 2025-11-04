@@ -993,11 +993,6 @@ def run(
     
     svc_x, svc_y = _xy(conf,'service_id_field')
     prev_trailing_part: Optional[str] = None
-    
-    # Enviar total de líneas a procesar al inicio
-    send_partial_update("inicio", f"Procesando {len(ids)} líneas", dni, {
-        "total_lineas": len(ids)
-    })
 
     for idx, service_id in enumerate(ids, start=1):
         print(f"[MultiB] Servicio {idx}/{len(ids)} = {service_id}")
@@ -1256,32 +1251,7 @@ def run(
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
         
-        # Enviar update parcial SOLO si hay movimientos reales
-        # Extraer la información correcta del log_line que acabamos de escribir
-        if new_info and "No Tiene Pedido" not in log_line:
-            # El log_line tiene formato: "service_id  contenido"
-            # Parsear para obtener el contenido real
-            if '  ' in log_line:
-                parts = log_line.split('  ', 1)
-                if len(parts) == 2:
-                    contenido = parts[1].strip()
-                    
-                    # Contar movimientos (líneas separadas por \n o espacios)
-                    if contenido and contenido != "." and "sin fecha" not in contenido.lower():
-                        # Si tiene múltiples movimientos separados por \n
-                        movimientos_lines = contenido.split('\n') if '\n' in contenido else [contenido]
-                        count_movs = len([line for line in movimientos_lines if line.strip()])
-                        
-                        # Extraer la última fecha/movimiento (primer elemento)
-                        ultimo_mov = movimientos_lines[0].strip()[:60] if movimientos_lines else contenido[:60]
-                        
-                        # Enviar update parcial con información real
-                        info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}"
-                        send_partial_update("linea_procesada", info_msg, dni, {
-                            "service_id": service_id,
-                            "count": count_movs,
-                            "progreso": f"{idx}/{len(ids)}"
-                        })
+        # NO enviar updates parciales - movimientos.py los enviará después de parsear el log
         
         time.sleep(_step_delay(step_delays,7,base_step_delay))
         
