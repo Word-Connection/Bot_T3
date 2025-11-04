@@ -273,80 +273,85 @@ def main():
         lineas_procesadas = set()  # Para evitar duplicados
         
         if log_path.exists():
-            with log_path.open('r', encoding='utf-8', errors='replace') as f:
-                for line in f:
-                    line = line.strip()
-                    
-                    # Detectar formato de búsqueda directa
-                    if line.startswith('DNI_') and '| ID Servicio:' in line:
-                        busqueda_directa_detected = True
-                        import re
-                        match = re.search(r'ID Servicio:\s*(\S+)', line)
-                        fecha_match = re.search(r'Fecha:\s*([^|]+)', line)
+            try:
+                with log_path.open('r', encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        line = line.strip()
                         
-                        if match:
-                            service_id = match.group(1).strip()
-                            fecha = fecha_match.group(1).strip() if fecha_match else "Sin fecha"
+                        # Detectar formato de búsqueda directa
+                        if line.startswith('DNI_') and '| ID Servicio:' in line:
+                            busqueda_directa_detected = True
+                            import re
+                            match = re.search(r'ID Servicio:\s*(\S+)', line)
+                            fecha_match = re.search(r'Fecha:\s*([^|]+)', line)
                             
-                            if service_id and service_id.lower() != 'desconocido':
-                                if service_id not in ids_from_busqueda_directa:
-                                    ids_from_busqueda_directa.append(service_id)
+                            if match:
+                                service_id = match.group(1).strip()
+                                fecha = fecha_match.group(1).strip() if fecha_match else "Sin fecha"
                                 
-                                # Solo enviar si no se procesó antes
-                                if service_id not in lineas_procesadas:
-                                    lineas_procesadas.add(service_id)
+                                if service_id and service_id.lower() != 'desconocido':
+                                    if service_id not in ids_from_busqueda_directa:
+                                        ids_from_busqueda_directa.append(service_id)
                                     
-                                    # Enviar update parcial inmediatamente
-                                    info_msg = f"Línea {service_id}: 1 movimiento(s) - Último: {fecha}"
-                                    send_partial_update(dni, "linea_procesada", info_msg, {
-                                        "service_id": service_id,
-                                        "count": 1,
-                                        "ultimo": fecha
-                                    })
-                                    total_movimientos += 1
-                        continue
-                    
-                    # Formato normal de log: "service_id  contenido"
-                    if '  ' in line:
-                        parts = line.split('  ', 1)
-                        if len(parts) == 2:
-                            service_id = parts[0].strip()
-                            content = parts[1].strip()
-                            
-                            if service_id and content:
-                                if service_id not in movimientos_por_linea:
-                                    movimientos_por_linea[service_id] = []
-                                
-                                # Solo procesar si tiene movimientos reales
-                                if content and content != "No Tiene Pedido" and content != "." and "No Tiene Pedido" not in content and "sin fecha" not in content.lower():
-                                    # Dividir por líneas si hay múltiples movimientos
-                                    lines = content.replace('\\n', '\n').split('\n')
-                                    valid_movs = []
-                                    
-                                    for mov_line in lines:
-                                        mov_line = mov_line.strip()
-                                        if mov_line and mov_line != "No Tiene Pedido":
-                                            valid_movs.append(mov_line)
-                                    
-                                    if valid_movs:
-                                        movimientos_por_linea[service_id] = valid_movs
+                                    # Solo enviar si no se procesó antes
+                                    if service_id not in lineas_procesadas:
+                                        lineas_procesadas.add(service_id)
                                         
-                                        # Solo enviar si no se procesó antes (evitar duplicados)
-                                        if service_id not in lineas_procesadas:
-                                            lineas_procesadas.add(service_id)
-                                            count_movs = len(valid_movs)
-                                            total_movimientos += count_movs
-                                            ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
+                                        # Enviar update parcial inmediatamente
+                                        info_msg = f"Línea {service_id}: 1 movimiento(s) - Último: {fecha}"
+                                        send_partial_update(dni, "linea_procesada", info_msg, {
+                                            "service_id": service_id,
+                                            "count": 1,
+                                            "ultimo": fecha
+                                        })
+                                        total_movimientos += 1
+                            continue
+                        
+                        # Formato normal de log: "service_id  contenido"
+                        if '  ' in line:
+                            parts = line.split('  ', 1)
+                            if len(parts) == 2:
+                                service_id = parts[0].strip()
+                                content = parts[1].strip()
+                                
+                                if service_id and content:
+                                    if service_id not in movimientos_por_linea:
+                                        movimientos_por_linea[service_id] = []
+                                    
+                                    # Solo procesar si tiene movimientos reales
+                                    if content and content != "No Tiene Pedido" and content != "." and "No Tiene Pedido" not in content and "sin fecha" not in content.lower():
+                                        # Dividir por líneas si hay múltiples movimientos
+                                        lines = content.replace('\\n', '\n').split('\n')
+                                        valid_movs = []
+                                        
+                                        for mov_line in lines:
+                                            mov_line = mov_line.strip()
+                                            if mov_line and mov_line != "No Tiene Pedido":
+                                                valid_movs.append(mov_line)
+                                        
+                                        if valid_movs:
+                                            movimientos_por_linea[service_id] = valid_movs
                                             
-                                            info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
-                                            send_partial_update(dni, "linea_procesada", info_msg, {
-                                                "service_id": service_id,
-                                                "count": count_movs,
-                                                "ultimo": ultimo_mov
-                                            })
-                                else:
-                                    # Sin movimientos
-                                    movimientos_por_linea[service_id] = ["No Tiene Pedido"]
+                                            # Solo enviar si no se procesó antes (evitar duplicados)
+                                            if service_id not in lineas_procesadas:
+                                                lineas_procesadas.add(service_id)
+                                                count_movs = len(valid_movs)
+                                                total_movimientos += count_movs
+                                                ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
+                                                
+                                                info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
+                                                send_partial_update(dni, "linea_procesada", info_msg, {
+                                                    "service_id": service_id,
+                                                    "count": count_movs,
+                                                    "ultimo": ultimo_mov
+                                                })
+                                    else:
+                                        # Sin movimientos
+                                        movimientos_por_linea[service_id] = ["No Tiene Pedido"]
+            except Exception as log_error:
+                # Si falla leer el log, reportar pero continuar
+                print(f"WARNING: Error leyendo log: {log_error}", file=sys.stderr)
+                # Continuar sin movimientos
         
         # Usar IDs de búsqueda directa si se detectó
         if busqueda_directa_detected and ids_from_busqueda_directa:
@@ -365,10 +370,21 @@ def main():
             })
 
     except Exception as e:
-        error_msg = f"Error inesperado: {str(e)}"
-        print(f"ERROR: {error_msg}", file=sys.stderr)
-        send_partial_update(dni, "error", error_msg)
-        result = {"error": error_msg, "dni": dni, "stages": []}
+        error_msg_raw = str(e)
+        print(f"ERROR: {error_msg_raw}", file=sys.stderr)
+        
+        # Sanitizar error para el frontend
+        if 'codec' in error_msg_raw.lower() or 'decode' in error_msg_raw.lower() or 'encode' in error_msg_raw.lower():
+            error_msg_frontend = "Error de codificación al procesar datos"
+        elif 'timeout' in error_msg_raw.lower():
+            error_msg_frontend = "El proceso tardó demasiado tiempo"
+        elif 'permission' in error_msg_raw.lower() or 'access' in error_msg_raw.lower():
+            error_msg_frontend = "Error de permisos al acceder a archivos"
+        else:
+            error_msg_frontend = "Error inesperado al procesar movimientos"
+        
+        send_partial_update(dni, "error", error_msg_frontend)
+        result = {"error": error_msg_frontend, "dni": dni, "stages": []}
         print("===JSON_RESULT_START===", flush=True)
         print(json.dumps(result), flush=True)
         print("===JSON_RESULT_END===", flush=True)
@@ -388,7 +404,7 @@ def main():
     lineas_procesadas_count = 0
     
     if log_path.exists():
-        with log_path.open('r', encoding='utf-8') as f:
+        with log_path.open('r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 
