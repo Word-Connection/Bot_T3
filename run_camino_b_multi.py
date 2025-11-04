@@ -48,6 +48,22 @@ import platform
 import ctypes
 from ctypes import wintypes
 
+def send_partial_update(etapa: str, info: str, dni: str = "", extra_data: dict = None):
+    """Envía update parcial al worker para mostrar en frontend en tiempo real."""
+    update_data = {
+        "dni": dni,
+        "etapa": etapa,
+        "info": info,
+        "timestamp": int(time.time() * 1000)
+    }
+    
+    if extra_data:
+        update_data.update(extra_data)
+    
+    print("===JSON_PARTIAL_START===", flush=True)
+    print(json.dumps(update_data), flush=True)
+    print("===JSON_PARTIAL_END===", flush=True)
+
 try:
     import pyperclip  # opcional
 except Exception:
@@ -862,6 +878,10 @@ def run(
                 step_delays = None
     # Pasos por iteración (ver docstring). Si no se definen, se usa base_step_delay para todos excepto Enter que usa post_enter_delay.
     print(f"Iniciando en {start_delay}s...")
+    
+    # Enviar update inicial
+    send_partial_update("iniciando", f"Iniciando búsqueda de movimientos para DNI {dni}", dni)
+    
     time.sleep(start_delay)
 
     conf = _load_coords(coords_path)
@@ -976,6 +996,13 @@ def run(
 
     for idx, service_id in enumerate(ids, start=1):
         print(f"[MultiB] Servicio {idx}/{len(ids)} = {service_id}")
+        
+        # Enviar update de progreso
+        send_partial_update("procesando", f"Procesando servicio {idx}/{len(ids)}: {service_id}", dni, {
+            "servicio_actual": service_id,
+            "progreso": f"{idx}/{len(ids)}"
+        })
+        
         # Paso 1: preparar / limpiar campo service id
         _click(svc_x, svc_y, 'Service ID field', _step_delay(step_delays,0,0.5))
         print(f"[MultiB] === INICIANDO LIMPIEZA Service ID ===")
@@ -1146,6 +1173,13 @@ def run(
         
         # Copiar con Ctrl+C
         print("[MultiB] Copiando con Ctrl+C...")
+        
+        # Enviar update de copia
+        send_partial_update("copiando", f"Copiando datos del servicio {service_id}", dni, {
+            "servicio_actual": service_id,
+            "accion": "copiando_datos"
+        })
+        
         pg.hotkey('ctrl', 'c')
         
         # Esperar a que el portapapeles se actualice
@@ -1228,6 +1262,15 @@ def run(
         
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
+        
+        # Enviar update de servicio completado
+        status_msg = "Datos copiados" if new_info else "Sin movimientos nuevos"
+        send_partial_update("servicio_completado", f"Servicio {service_id}: {status_msg}", dni, {
+            "servicio_actual": service_id,
+            "tiene_datos": new_info,
+            "progreso": f"{idx}/{len(ids)}"
+        })
+        
         time.sleep(_step_delay(step_delays,7,base_step_delay))
         
         # SIEMPRE cerrar pestaña
@@ -1265,6 +1308,13 @@ def run(
         time.sleep(0.2)
         pg.press('delete')
     print('[MultiB] Campos limpiados.')
+    
+    # Enviar update final
+    servicios_procesados = len(ids)
+    send_partial_update("completado", f"Procesamiento completado. {servicios_procesados} servicios procesados", dni, {
+        "total_servicios": servicios_procesados,
+        "archivo_log": str(log_path)
+    })
     
     # Resumen final
     print('[MultiB] ========================================')

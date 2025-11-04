@@ -107,6 +107,39 @@ def safe_str(text: str, max_length: int = None) -> str:
     except Exception:
         return "[texto no decodificable]"
 
+def sanitize_error_for_frontend(error_text: str) -> str:
+    """Convierte errores técnicos en mensajes amigables para el frontend."""
+    if not error_text:
+        return "Error inesperado"
+    
+    error_lower = error_text.lower()
+    
+    # Categorización de errores
+    if any(keyword in error_lower for keyword in ['timeout', 'expired']):
+        return "El proceso tardó demasiado tiempo"
+    elif any(keyword in error_lower for keyword in ['unicode', 'decode', 'encoding']):
+        return "Error de codificación"
+    elif any(keyword in error_lower for keyword in ['no such file', 'file not found']):
+        return "Archivo no encontrado"
+    elif any(keyword in error_lower for keyword in ['permission', 'access denied']):
+        return "Sin permisos suficientes"
+    elif any(keyword in error_lower for keyword in ['connection', 'network']):
+        return "Error de conectividad"
+    elif any(keyword in error_lower for keyword in ['memory']):
+        return "Memoria insuficiente"
+    elif any(keyword in error_lower for keyword in ['subprocess', 'process']):
+        return "Error en el proceso de automatización"
+    
+    # Si contiene información técnica (traceback, rutas de archivos, etc)
+    if any(indicator in error_lower for indicator in ['traceback', '.py', 'line ', 'file "', 'exception']):
+        return "Error inesperado"
+    
+    # Si es un mensaje corto y amigable, mantenerlo
+    if len(error_text) < 100 and not any(char in error_text for char in ['/', '\\', '"', "'"]):
+        return error_text
+    
+    return "Error inesperado"
+
 def log_stats():
     uptime = time.time() - stats["started_at"]
     logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
@@ -258,6 +291,9 @@ def process_task(task: dict) -> bool:
     
     operation_type = "PIN" if is_pin_operation else TIPO
     
+    # ⭐ IMPORTANTE: Guardar tiempo de inicio para calcular execution_time
+    start_time = time.time()
+    
     logger.info(f"[SCRAPING] Iniciando scraping {data_label} {input_data} | Task: {task_id} | Tipo: {operation_type}")
    
     try:
@@ -345,7 +381,8 @@ def process_task(task: dict) -> bool:
         except Exception as subprocess_error:
             logger.error(f"[SUBPROCESS-ERROR] Error creando subprocess: {subprocess_error}", exc_info=True)
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": f"Error iniciando proceso: {subprocess_error}"}, status="error")
+            sanitized_error = sanitize_error_for_frontend(str(subprocess_error))
+            send_partial_update(task_id, {"info": sanitized_error}, status="error")
             return False
 
         output_lines = []
@@ -409,7 +446,7 @@ def process_task(task: dict) -> bool:
                     logger.error(f"[TIMEOUT] Timeout global de {timeout}s excedido")
                     process.kill()
                     stats["scraping_errors"] += 1
-                    send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
+                    send_partial_update(task_id, {"info": "El proceso tardó demasiado tiempo"}, status="error")
                     return False
                 
                 # Verificar timeout de inactividad
@@ -417,7 +454,7 @@ def process_task(task: dict) -> bool:
                     logger.error(f"[TIMEOUT] Sin output por {no_output_timeout}s, considerando proceso bloqueado")
                     process.kill()
                     stats["scraping_errors"] += 1
-                    send_partial_update(task_id, {"info": "Proceso bloqueado (sin output)"}, status="error")
+                    send_partial_update(task_id, {"info": "El proceso no responde"}, status="error")
                     return False
                 
                 # Verificar si el proceso terminó
@@ -598,7 +635,7 @@ def process_task(task: dict) -> bool:
             logger.error(f"[TIMEOUT] Task ID: {task_id} | Input: {input_data}")
             logger.error(f"[TIMEOUT] Última línea recibida hace {time.time() - last_line_time:.1f}s")
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": f"Timeout después de {timeout}s"}, status="error")
+            send_partial_update(task_id, {"info": "El proceso tardó demasiado tiempo"}, status="error")
             return False
         except Exception as e:
             logger.error(f"[ERROR] Error durante ejecución en tiempo real: {e}", exc_info=True)
@@ -611,7 +648,8 @@ def process_task(task: dict) -> bool:
                 except:
                     pass
             stats["scraping_errors"] += 1
-            send_partial_update(task_id, {"info": f"Error durante procesamiento: {str(e)}"}, status="error")
+            sanitized_error = sanitize_error_for_frontend(str(e))
+            send_partial_update(task_id, {"info": sanitized_error}, status="error")
             return False
 
         # Asegurarse de que el proceso haya terminado completamente
@@ -696,11 +734,11 @@ def process_task(task: dict) -> bool:
 
         # Procesar resultado según el tipo de worker
         if TIPO == "deudas":
-            return process_deudas_result(task_id, input_data, data)
+            return process_deudas_result(task_id, input_data, data, start_time)
         elif TIPO == "pin":
-            return process_pin_operation(task_id, input_data, data)
+            return process_pin_operation(task_id, input_data, data, start_time)
         else:
-            return process_movimientos_result(task_id, input_data, data)
+            return process_movimientos_result(task_id, input_data, data, start_time)
 
     except subprocess.TimeoutExpired:
         logger.error(f"[ERROR] Timeout ejecutando script para {task_id}")
@@ -718,7 +756,8 @@ def process_task(task: dict) -> bool:
         logger.error(f"[ERROR] Python executable: {python_executable if 'python_executable' in locals() else 'N/A'}")
         logger.error(f"[ERROR] Task data completa: {json.dumps(task, ensure_ascii=False)}")
         stats["scraping_errors"] += 1
-        send_partial_update(task_id, {"info": f"Excepción: {e}"}, status="error")
+        sanitized_error = sanitize_error_for_frontend(str(e))
+        send_partial_update(task_id, {"info": sanitized_error}, status="error")
         return False
 
 
@@ -849,7 +888,7 @@ def _clean_and_format_camino_a(camino_a_data: dict) -> dict:
     return cleaned
 
 
-def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
+def process_deudas_result(task_id: str, dni: str, data: dict, start_time: float) -> bool:
     """Procesa resultado final del script de deudas.
     Los updates parciales (score, buscando_deudas) ya fueron enviados en tiempo real.
     
@@ -862,12 +901,16 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
         print(f"\n[DEUDAS] DNI {dni} - Procesando resultado final")
         print(f"[DEBUG] DATA recibida: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
+        # ⭐ Calcular tiempo de ejecución
+        execution_time = int(time.time() - start_time)
+        
         # Verificar si es el JSON de Camino A (nuevo o viejo formato)
         # Nuevo formato: tiene "fa_saldos"
         # Viejo formato: tiene "fa_actual" o "cuenta_financiera"
         if "fa_saldos" in data or "fa_actual" in data or "cuenta_financiera" in data:
             # Es el JSON directo de Camino A - enviarlo completo
-            final_data = data  # Ya es el JSON completo de Camino A
+            final_data = data.copy()  # Copiar para no modificar original
+            final_data["execution_time"] = execution_time  # ⭐ Agregar tiempo de ejecución
             
             formato = "NUEVO (fa_saldos)" if "fa_saldos" in data else "VIEJO (fa_actual/cuenta_financiera)"
             print(f"[RESULTADO FINAL] DEUDAS COMPLETAS - JSON de Camino A ({formato}):")
@@ -877,20 +920,23 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
             send_result = send_partial_update(task_id, final_data, status="completed")
             print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
             
-            print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
+            print(f"[COMPLETADO] DNI {dni} procesado exitosamente en {execution_time}s\n")
             return True
         else:
             # Solo tiene score básico (sin Camino A) - enviar tal cual viene del script
             score_val = data.get("score", "No encontrado")
             
+            final_data = data.copy()
+            final_data["execution_time"] = execution_time  # ⭐ Agregar tiempo de ejecución
+            
             print(f"[RESULTADO FINAL] JSON del script (sin modificar):")
-            print(json.dumps(data, indent=2, ensure_ascii=False))
+            print(json.dumps(final_data, indent=2, ensure_ascii=False))
             
             # Enviar resultado final TAL CUAL viene del script
-            send_result = send_partial_update(task_id, data, status="completed")
+            send_result = send_partial_update(task_id, final_data, status="completed")
             print(f"  -> Resultado final enviado: {'OK' if send_result else 'ERROR'}")
             
-            print(f"[COMPLETADO] DNI {dni} procesado exitosamente\n")
+            print(f"[COMPLETADO] DNI {dni} procesado exitosamente en {execution_time}s\n")
             return True
         
     except Exception as e:
@@ -899,7 +945,7 @@ def process_deudas_result(task_id: str, dni: str, data: dict) -> bool:
         return False
 
 
-def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
+def process_movimientos_result(task_id: str, dni: str, data: dict, start_time: float) -> bool:
     """Procesa resultado del script de movimientos (múltiples stages)."""
     try:
         stages = data.get("stages", [])
@@ -926,8 +972,14 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
                 "total_etapas": len(stages)
             }
             
-            # Último stage marca como completed
-            status = "completed" if i == len(stages) else "running"
+            # ⭐ En el último stage, agregar execution_time
+            if i == len(stages):
+                execution_time = int(time.time() - start_time)
+                partial_data["execution_time"] = execution_time
+                status = "completed"
+            else:
+                status = "running"
+            
             send_partial_update(task_id, partial_data, status=status)
             logger.info(f"[PARCIAL] Task={task_id} Etapa={i}/{len(stages)} Info={info[:50]}...")
             
@@ -940,11 +992,12 @@ def process_movimientos_result(task_id: str, dni: str, data: dict) -> bool:
         
     except Exception as e:
         logger.error(f"[ERROR] Error procesando movimientos para {dni}: {e}", exc_info=True)
-        send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}"}, status="error")
+        sanitized_error = sanitize_error_for_frontend(str(e))
+        send_partial_update(task_id, {"info": sanitized_error}, status="error")
         return False
 
 
-def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
+def process_pin_operation(task_id: str, telefono: str, data: dict, start_time: float) -> bool:
     """Procesa resultado del script de envío de PIN."""
     try:
         print("\n" + "="*80)
@@ -962,6 +1015,9 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
         
         logger.info(f"[PIN] Teléfono {telefono} - Estado: {estado}, Mensaje: {mensaje}")
         
+        # ⭐ Calcular tiempo de ejecución
+        execution_time = int(time.time() - start_time)
+        
         # Enviar resultado final
         final_data = {
             "telefono": telefono,
@@ -969,6 +1025,7 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
             "pin_enviado": pin_enviado,
             "mensaje": mensaje,
             "info": mensaje,
+            "execution_time": execution_time,  # ⭐ Agregar tiempo de ejecución
             "timestamp": int(time.time() * 1000)
         }
         
@@ -976,6 +1033,7 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
         print("[WORKER.PY] ENVIANDO RESULTADO FINAL AL BACKEND")
         print(f"[WORKER.PY] Task ID: {task_id}")
         print(f"[WORKER.PY] Status: {'completed' if pin_enviado else 'error'}")
+        print(f"[WORKER.PY] Execution time: {execution_time}s")
         print(f"[WORKER.PY] Datos que se enviarán al backend:")
         print(json.dumps(final_data, indent=2))
         print("="*80 + "\n")
@@ -983,12 +1041,13 @@ def process_pin_operation(task_id: str, telefono: str, data: dict) -> bool:
         status = "completed" if pin_enviado else "error"
         send_partial_update(task_id, final_data, status=status)
         
-        logger.info(f"[OK] Envío PIN de {task_id} completado | Enviado: {pin_enviado}")
+        logger.info(f"[OK] Envío PIN de {task_id} completado en {execution_time}s | Enviado: {pin_enviado}")
         return pin_enviado  # Retorna True solo si el PIN fue enviado exitosamente
         
     except Exception as e:
         logger.error(f"[ERROR] Error procesando PIN para {telefono}: {e}", exc_info=True)
-        send_partial_update(task_id, {"info": f"Error interno: {str(e)[:100]}", "tipo": "pin"}, status="error")
+        sanitized_error = sanitize_error_for_frontend(str(e))
+        send_partial_update(task_id, {"info": sanitized_error, "tipo": "pin"}, status="error")
         return False
 
 

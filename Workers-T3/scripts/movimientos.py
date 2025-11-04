@@ -11,6 +11,47 @@ import threading
 import queue
 from pathlib import Path
 
+def sanitize_error_message(error_lines: list, return_code: int = None) -> str:
+    """Convierte errores técnicos en mensajes amigables para el usuario."""
+    if not error_lines and return_code == 0:
+        return ""
+    
+    # Si hay errores críticos, determinar el tipo
+    critical_keywords = {
+        'timeout': ['timeout', 'expired'],
+        'encoding': ['unicode', 'decode', 'encoding', 'charmap'],
+        'file_not_found': ['no such file', 'file not found', 'cannot find'],
+        'permission': ['permission denied', 'access denied'],
+        'network': ['connection', 'network', 'socket'],
+        'memory': ['memory', 'out of memory'],
+        'argument': ['invalid argument', 'errno 22']
+    }
+    
+    error_text = ' '.join(error_lines).lower()
+    
+    for error_type, keywords in critical_keywords.items():
+        if any(keyword in error_text for keyword in keywords):
+            if error_type == 'timeout':
+                return "El proceso tardó demasiado tiempo en completarse"
+            elif error_type == 'encoding':
+                return "Error de codificación de caracteres"
+            elif error_type == 'file_not_found':
+                return "No se encontraron archivos necesarios"
+            elif error_type == 'permission':
+                return "Sin permisos para acceder a archivos"
+            elif error_type == 'network':
+                return "Error de conectividad"
+            elif error_type == 'memory':
+                return "Memoria insuficiente"
+            elif error_type == 'argument':
+                return "Error en parámetros del sistema"
+    
+    # Si no se puede categorizar, mensaje genérico
+    if return_code and return_code != 0:
+        return f"Error inesperado (código {return_code})"
+    
+    return "Error inesperado"
+
 def fake_image(text: str) -> str:
     """Genera un string base64 simulado a partir de texto."""
     return base64.b64encode(text.encode()).decode()
@@ -100,10 +141,30 @@ def main():
     log_path = Path(__file__).parent / '../../multi_copias.log'
 
     try:
+        # Verificar que los archivos existen
+        if not script_path.exists():
+            stages.append({
+                "info": f"Error: No se encuentra el script {script_path}"
+            })
+            result = {"dni": dni, "stages": stages}
+            print("===JSON_RESULT_START===", flush=True)
+            print(json.dumps(result), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
+            return
+
+        if not coords_path.exists():
+            stages.append({
+                "info": f"Error: No se encuentra archivo de coordenadas {coords_path}"
+            })
+            result = {"dni": dni, "stages": stages}
+            print("===JSON_RESULT_START===", flush=True)
+            print(json.dumps(result), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
+            return
+
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
         venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
-
 
         if not venv_python.exists():
             stages.append({
@@ -118,21 +179,30 @@ def main():
         python_exe = str(venv_python)
         print(f"DEBUG: Usando Python del venv: {python_exe}", file=sys.stderr)
         
+        # Construir comando con logging
+        cmd_args = [
+            python_exe, '-u', str(script_path),
+            '--dni', dni,
+            '--csv', tmp_csv,
+            '--coords', str(coords_path),
+            '--log-file', str(log_path)
+        ]
+        
+        print(f"DEBUG: Comando a ejecutar: {' '.join(cmd_args)}", file=sys.stderr)
+        print(f"DEBUG: Archivos verificados - script: {script_path.exists()}, coords: {coords_path.exists()}, csv: {Path(tmp_csv).exists()}", file=sys.stderr)
+        
         # Usar Popen para lectura en tiempo real
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
+        env['PYTHONIOENCODING'] = 'utf-8'  # Forzar UTF-8 en subprocess
         
         proc = subprocess.Popen(
-            [
-                python_exe, '-u', str(script_path),
-                '--dni', dni,
-                '--csv', tmp_csv,
-                '--coords', str(coords_path),
-                '--log-file', str(log_path)
-            ],
+            cmd_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding='utf-8',
+            errors='replace',  # Reemplazar caracteres problemáticos en lugar de fallar
             bufsize=1,
             env=env
         )
@@ -146,8 +216,16 @@ def main():
                 for line in iter(stream.readline, ''):
                     if line:
                         q.put(line)
+            except UnicodeDecodeError as ude:
+                print(f"[UNICODE-ERROR] Error decodificando línea en read_stream: {ude}", file=sys.stderr, flush=True)
+                # Continuar leyendo el resto del stream
+            except Exception as e:
+                print(f"[ERROR] Error en read_stream: {e}", file=sys.stderr, flush=True)
             finally:
-                stream.close()
+                try:
+                    stream.close()
+                except Exception:
+                    pass
         
         stdout_thread = threading.Thread(target=read_stream, args=(proc.stdout, stdout_queue), daemon=True)
         stderr_thread = threading.Thread(target=read_stream, args=(proc.stderr, stderr_queue), daemon=True)
@@ -202,10 +280,25 @@ def main():
                 break
         
         returncode = proc.wait()
+        print(f"DEBUG: Proceso terminado con código: {returncode}", file=sys.stderr)
+        
+        # Si hubo errores importantes, reportarlos en logs pero no al frontend
+        critical_errors = []
+        for stderr_line in stderr_lines:
+            if any(keyword in stderr_line.lower() for keyword in ['traceback', 'exception', 'error']):
+                critical_errors.append(stderr_line)
+        
+        if critical_errors:
+            print(f"[STDERR] Errores importantes detectados:", file=sys.stderr, flush=True)
+            for error in critical_errors:
+                print(f"[STDERR] {error}", file=sys.stderr, flush=True)
         
         if returncode != 0:
+            # Sanitizar el mensaje de error para el frontend
+            user_friendly_error = sanitize_error_message(critical_errors, returncode)
+            
             stages.append({
-                "info": f"Error ejecutando camino b: {' '.join(stderr_lines[:5])}"
+                "info": user_friendly_error
             })
             result = {"dni": dni, "stages": stages}
             print("===JSON_RESULT_START===", flush=True)
@@ -215,7 +308,7 @@ def main():
 
     except subprocess.TimeoutExpired:
         stages.append({
-            "info": "Timeout ejecutando camino b"
+            "info": "El proceso tardó demasiado tiempo en completarse"
         })
         result = {"dni": dni, "stages": stages}
         print("===JSON_RESULT_START===", flush=True)
