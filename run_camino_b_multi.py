@@ -1256,28 +1256,32 @@ def run(
         _append_log_raw(log_path, log_line)
         print('[MultiB] Copiado al portapapeles' if new_info else '[MultiB] SIN NUEVO PEDIDO')
         
-        # Enviar update con información útil: movimientos encontrados y última fecha
-        if new_info:
-            # Parsear display_txt para extraer información de movimientos
-            movimientos_lines = display_txt.split('\n') if '\n' in display_txt else [display_txt]
-            count_movs = len([line for line in movimientos_lines if line.strip()])
-            
-            # Extraer la última fecha (primer movimiento en la lista)
-            ultima_fecha = "Sin fecha"
-            if movimientos_lines:
-                primer_movimiento = movimientos_lines[0].strip()
-                # Intentar extraer fecha del formato esperado
-                if primer_movimiento:
-                    ultima_fecha = primer_movimiento[:50]  # Primeros 50 caracteres
-            
-            info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultima_fecha}"
-            send_partial_update("linea_procesada", info_msg, dni, {
-                "service_id": service_id,
-                "count": count_movs,
-                "ultimo": ultima_fecha,
-                "progreso": f"{idx}/{len(ids)}"
-            })
-        # No enviar nada si no hay movimientos (para reducir verbosidad)
+        # Enviar update parcial SOLO si hay movimientos reales
+        # Extraer la información correcta del log_line que acabamos de escribir
+        if new_info and "No Tiene Pedido" not in log_line:
+            # El log_line tiene formato: "service_id  contenido"
+            # Parsear para obtener el contenido real
+            if '  ' in log_line:
+                parts = log_line.split('  ', 1)
+                if len(parts) == 2:
+                    contenido = parts[1].strip()
+                    
+                    # Contar movimientos (líneas separadas por \n o espacios)
+                    if contenido and contenido != "." and "sin fecha" not in contenido.lower():
+                        # Si tiene múltiples movimientos separados por \n
+                        movimientos_lines = contenido.split('\n') if '\n' in contenido else [contenido]
+                        count_movs = len([line for line in movimientos_lines if line.strip()])
+                        
+                        # Extraer la última fecha/movimiento (primer elemento)
+                        ultimo_mov = movimientos_lines[0].strip()[:60] if movimientos_lines else contenido[:60]
+                        
+                        # Enviar update parcial con información real
+                        info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}"
+                        send_partial_update("linea_procesada", info_msg, dni, {
+                            "service_id": service_id,
+                            "count": count_movs,
+                            "progreso": f"{idx}/{len(ids)}"
+                        })
         
         time.sleep(_step_delay(step_delays,7,base_step_delay))
         

@@ -233,7 +233,7 @@ def main():
         stdout_thread.start()
         stderr_thread.start()
         
-        # Leer output en tiempo real
+        # Leer output en tiempo real (sin leer log - los updates vienen directo por stdout)
         stderr_lines = []
         timeout_seconds = 600
         start_time = time.time()
@@ -247,7 +247,7 @@ def main():
             try:
                 line = stdout_queue.get(timeout=0.1)
                 if line:
-                    print(line, end='', flush=True)  # Pasar output directamente
+                    print(line, end='', flush=True)  # Pasar output directamente (incluye JSON_PARTIAL de run_camino_b)
             except queue.Empty:
                 pass
             
@@ -322,7 +322,7 @@ def main():
         except:
             pass
 
-    # Leer el log y parsear movimientos
+    # Leer el log solo para el resultado final JSON (los updates parciales ya se enviaron por stdout)
     movimientos_por_linea = {}
     total_movimientos = 0
     ids_from_busqueda_directa = []
@@ -334,10 +334,9 @@ def main():
             for line in f:
                 line = line.strip()
                 
-                # Detectar formato de búsqueda directa: "DNI_29940807  Pos1 | ID Servicio: 2944834762 | Fecha: ..."
+                # Detectar formato de búsqueda directa
                 if line.startswith('DNI_') and '| ID Servicio:' in line:
                     busqueda_directa_detected = True
-                    # Extraer el ID de servicio
                     import re
                     match = re.search(r'ID Servicio:\s*(\S+)', line)
                     if match:
@@ -348,7 +347,7 @@ def main():
                                 lineas_procesadas_count += 1
                     continue
                 
-                # Formato normal de log: "service_id  contenido"
+                # Formato normal de log
                 if '  ' in line:
                     parts = line.split('  ', 1)
                     if len(parts) == 2:
@@ -360,9 +359,7 @@ def main():
                                 movimientos_por_linea[service_id] = []
                                 lineas_procesadas_count += 1
                             
-                            # Si el contenido no es "No Tiene Pedido", procesarlo
                             if content != "No Tiene Pedido" and content != "." and content != "No Tiene Pedido (base de datos)":
-                                # Dividir por líneas si hay múltiples movimientos
                                 lines = content.replace('\\n', '\n').split('\n')
                                 for mov_line in lines:
                                     mov_line = mov_line.strip()
@@ -370,95 +367,22 @@ def main():
                                         movimientos_por_linea[service_id].append(mov_line)
                                         total_movimientos += 1
                             else:
-                                # Registrar que no tiene pedidos
                                 movimientos_por_linea[service_id].append("No Tiene Pedido")
 
-    # Si se detectó búsqueda directa, usar esos IDs en lugar de los del CSV
     if busqueda_directa_detected and ids_from_busqueda_directa:
         ids = ids_from_busqueda_directa
-        print(f"DEBUG: Búsqueda directa detectada, usando {len(ids)} IDs del log: {ids}", file=sys.stderr)
 
-    # Etapa 2: Información de procesamiento
+    # Resultado final simple (los updates detallados ya se enviaron durante el procesamiento)
     if total_movimientos > 0:
         stages.append({
             "info": f"{total_movimientos} movimientos encontrados en {len(ids)} líneas"
         })
-        
-        # ===== ENVIAR UPDATE PARCIAL: PROCESAMIENTO =====
-        procesamiento_update = {
-            "dni": dni,
-            "etapa": "completado",
-            "info": f"{total_movimientos} movimientos encontrados en {len(ids)} líneas",
-            "lineas_procesadas": len(ids),
-            "movimientos_encontrados": total_movimientos,
-            "timestamp": int(time.time() * 1000)
-        }
-        print("===JSON_PARTIAL_START===", flush=True)
-        print(json.dumps(procesamiento_update), flush=True)
-        print("===JSON_PARTIAL_END===", flush=True)
     else:
         stages.append({
             "info": "Sin movimientos activos"
         })
-        
-        # ===== ENVIAR UPDATE PARCIAL: SIN MOVIMIENTOS =====
-        sin_movimientos_update = {
-            "dni": dni,
-            "etapa": "completado",
-            "info": "Sin movimientos activos",
-            "lineas_procesadas": len(ids),
-            "movimientos_encontrados": 0,
-            "timestamp": int(time.time() * 1000)
-        }
-        print("===JSON_PARTIAL_START===", flush=True)
-        print(json.dumps(sin_movimientos_update), flush=True)
-        print("===JSON_PARTIAL_END===", flush=True)
 
-    # Etapa 3+: Resumen de movimientos por línea
-    stage_count = 3
-    movimientos_activos = 0
-    
-    for service_id in ids[:5]:  # Mostrar máximo 5 líneas para no saturar
-        if service_id in movimientos_por_linea and movimientos_por_linea[service_id]:
-            movimientos = movimientos_por_linea[service_id]
-            if movimientos and movimientos[0] != "No Tiene Pedido":
-                # Mostrar el primer movimiento real
-                primer_mov = movimientos[0]
-                count_movs = len([m for m in movimientos if m != "No Tiene Pedido"])
-                stages.append({
-                    "info": f"Línea {service_id}: {count_movs} movimiento(s) - Último: {primer_mov[:50]}..."
-                })
-                movimientos_activos += count_movs
-            else:
-                stages.append({
-                    "info": f"Línea {service_id}: Sin movimientos activos"
-                })
-        else:
-            stages.append({
-                "info": f"Línea {service_id}: No procesada o sin datos"
-        })
-        stage_count += 1
-        
-        # Limitar a 5 líneas para no saturar el frontend
-        if stage_count >= 8:
-            break
-    
-    # Si hay más líneas, mostrar resumen
-    if len(ids) > 5:
-        restantes = len(ids) - 5
-        stages.append({
-            "info": f"+ {restantes} líneas adicionales procesadas"
-        })
-
-    # Etapa final: Resumen total (no enviar al frontend, solo para stages internos)
-    if movimientos_activos > 0:
-        stages.append({
-            "info": f"{movimientos_activos} movimientos totales"
-        })
-    else:
-        stages.append({
-            "info": "Búsqueda completada"
-        })
+    # Resultado final
 
     result = {"dni": dni, "stages": stages}
     
