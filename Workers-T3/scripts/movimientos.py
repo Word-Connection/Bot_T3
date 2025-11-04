@@ -84,17 +84,6 @@ def main():
 
     stages = []
 
-    # ===== ENVIAR UPDATE INICIAL: INICIANDO =====
-    inicio_update = {
-        "dni": dni,
-        "etapa": "iniciando",
-        "info": "Iniciando búsqueda de movimientos",
-        "timestamp": int(time.time() * 1000)
-    }
-    print("===JSON_PARTIAL_START===", flush=True)
-    print(json.dumps(inicio_update), flush=True)
-    print("===JSON_PARTIAL_END===", flush=True)
-
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
     if not csv_main.exists():
@@ -181,10 +170,7 @@ def main():
         # ===== ENVIAR UPDATE INICIAL =====
         send_partial_update(dni, "iniciando", "Iniciando búsqueda de movimientos")
         
-        # ===== ENVIAR UPDATE: TOTAL DE LÍNEAS =====
-        send_partial_update(dni, "procesando", f"Procesando {len(ids)} líneas", {
-            "total_lineas": len(ids)
-        })
+        # NO enviar total de líneas aquí - se enviará después de parsear el log
 
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
@@ -284,6 +270,7 @@ def main():
         total_movimientos = 0
         ids_from_busqueda_directa = []
         busqueda_directa_detected = False
+        lineas_procesadas = set()  # Para evitar duplicados
         
         if log_path.exists():
             with log_path.open('r', encoding='utf-8', errors='replace') as f:
@@ -304,6 +291,10 @@ def main():
                             if service_id and service_id.lower() != 'desconocido':
                                 if service_id not in ids_from_busqueda_directa:
                                     ids_from_busqueda_directa.append(service_id)
+                                
+                                # Solo enviar si no se procesó antes
+                                if service_id not in lineas_procesadas:
+                                    lineas_procesadas.add(service_id)
                                     
                                     # Enviar update parcial inmediatamente
                                     info_msg = f"Línea {service_id}: 1 movimiento(s) - Último: {fecha}"
@@ -336,21 +327,23 @@ def main():
                                         mov_line = mov_line.strip()
                                         if mov_line and mov_line != "No Tiene Pedido":
                                             valid_movs.append(mov_line)
-                                            total_movimientos += 1
                                     
                                     if valid_movs:
                                         movimientos_por_linea[service_id] = valid_movs
                                         
-                                        # Enviar update parcial con información de esta línea
-                                        count_movs = len(valid_movs)
-                                        ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
-                                        
-                                        info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
-                                        send_partial_update(dni, "linea_procesada", info_msg, {
-                                            "service_id": service_id,
-                                            "count": count_movs,
-                                            "ultimo": ultimo_mov
-                                        })
+                                        # Solo enviar si no se procesó antes (evitar duplicados)
+                                        if service_id not in lineas_procesadas:
+                                            lineas_procesadas.add(service_id)
+                                            count_movs = len(valid_movs)
+                                            total_movimientos += count_movs
+                                            ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
+                                            
+                                            info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
+                                            send_partial_update(dni, "linea_procesada", info_msg, {
+                                                "service_id": service_id,
+                                                "count": count_movs,
+                                                "ultimo": ultimo_mov
+                                            })
                                 else:
                                     # Sin movimientos
                                     movimientos_por_linea[service_id] = ["No Tiene Pedido"]
