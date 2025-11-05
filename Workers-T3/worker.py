@@ -950,10 +950,20 @@ def process_movimientos_result(task_id: str, dni: str, data: dict, start_time: f
     try:
         stages = data.get("stages", [])
         
+        # Si no hay stages, es porque ya se enviaron todos los updates parciales
+        # Marcar la tarea como completada (los updates ya se enviaron en tiempo real)
         if not stages:
-            logger.warning(f"[WARN] No hay stages en el resultado para {dni}")
-            send_partial_update(task_id, {"info": "Sin resultados encontrados"}, status="error")
-            return False
+            logger.info(f"[INFO] No hay stages adicionales para {dni} (updates parciales ya enviados)")
+            
+            # Calcular tiempo de ejecución y enviar status completado
+            execution_time = int(time.time() - start_time)
+            final_data = {
+                "dni": dni,
+                "execution_time": execution_time
+            }
+            send_partial_update(task_id, final_data, status="completed")
+            logger.info(f"[OK] Procesamiento movimientos de {task_id} completado en {execution_time}s")
+            return True
         
         logger.info(f"[WORKER] Procesando {len(stages)} stages para {dni}")
         
