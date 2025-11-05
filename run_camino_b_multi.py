@@ -1115,7 +1115,7 @@ def run(
             
             continue  # Saltar al siguiente service_id (pasará por la limpieza al final del loop)
         
-        print(f"[MultiB] ✓ La línea tiene movimientos. Continuando con el flujo normal...")
+        print(f"[MultiB] OK - La línea tiene movimientos. Continuando con el flujo normal...")
         
         # Paso 4 Primera fila (doble click con intervalo configurable)
         fx, fy = _xy(conf,'first_row')
