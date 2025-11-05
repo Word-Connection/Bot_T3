@@ -167,11 +167,6 @@ def main():
             print("===JSON_RESULT_END===", flush=True)
             return
 
-        # ===== ENVIAR UPDATE INICIAL =====
-        send_partial_update(dni, "iniciando", "Iniciando búsqueda de movimientos")
-        
-        # NO enviar total de líneas aquí - se enviará después de parsear el log
-
         # Usar el Python del entorno virtual del proyecto
         project_root = Path(__file__).parent / '../..'
         venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
@@ -204,6 +199,8 @@ def main():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1
         )
         
@@ -454,19 +451,12 @@ def main():
                 total_movimientos_reales += 1
 
     # Resultado final simple (los updates detallados ya se enviaron durante el procesamiento)
-    stages = []
-    if total_movimientos_reales > 0:
-        stages.append({
-            "info": f"{total_movimientos_reales} movimientos encontrados en {len(ids)} líneas"
-        })
-    else:
-        stages.append({
-            "info": "Sin movimientos activos"
-        })
+    # NO duplicar el mensaje - ya se envió en el update parcial
+    result = {"dni": dni, "stages": []}
 
     # Resultado final
 
-    result = {"dni": dni, "stages": stages}
+    result = {"dni": dni, "stages": []}
     
     # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
     print("===JSON_RESULT_START===", flush=True)

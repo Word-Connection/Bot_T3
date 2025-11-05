@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Camino B multi-servicio.
 
 Lee un CSV con columnas al menos: DNI, Linea2, Domicilio
@@ -42,6 +43,12 @@ import csv, re, time, os, sys, json
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+# Forzar UTF-8 en stdout/stderr para evitar problemas de encoding en Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import pyautogui as pg
 import platform
