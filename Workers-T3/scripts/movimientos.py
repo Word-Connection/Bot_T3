@@ -319,7 +319,7 @@ def main():
                                         movimientos_por_linea[service_id] = []
                                     
                                     # Solo procesar si tiene movimientos reales
-                                    if content and content != "No Tiene Pedido" and content != "." and "No Tiene Pedido" not in content and "sin fecha" not in content.lower():
+                                    if content and content != "No Tiene Pedido" and content != "." and "No Tiene Pedido" not in content and "sin fecha" not in content.lower() and "No Tiene Movimientos" not in content and "línea vacía" not in content.lower():
                                         # Dividir por líneas si hay múltiples movimientos
                                         lines = content.replace('\\n', '\n').split('\n')
                                         valid_movs = []
@@ -446,10 +446,18 @@ def main():
     if busqueda_directa_detected and ids_from_busqueda_directa:
         ids = ids_from_busqueda_directa
 
+    # Contar movimientos reales (excluyendo "No Tiene Pedido", "No Tiene Movimientos", etc.)
+    total_movimientos_reales = 0
+    for service_id, movs in movimientos_por_linea.items():
+        for mov in movs:
+            if mov and mov != "No Tiene Pedido" and "No Tiene Movimientos" not in mov and "línea vacía" not in mov.lower():
+                total_movimientos_reales += 1
+
     # Resultado final simple (los updates detallados ya se enviaron durante el procesamiento)
-    if total_movimientos > 0:
+    stages = []
+    if total_movimientos_reales > 0:
         stages.append({
-            "info": f"{total_movimientos} movimientos encontrados en {len(ids)} líneas"
+            "info": f"{total_movimientos_reales} movimientos encontrados en {len(ids)} líneas"
         })
     else:
         stages.append({
