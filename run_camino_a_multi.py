@@ -827,15 +827,31 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
             num_field_x, num_field_y = _xy(conf, 'num_registros_field')
             if num_field_x and num_field_y:
                 print(f"[camino_A] >> Haciendo click en campo de número...")
-                _click(num_field_x, num_field_y, 'num_registros_field', 0.5)
+                _click(num_field_x, num_field_y, 'num_registros_field', 0.3)
                 
-                # Seleccionar todo el texto existente con Ctrl+A
-                print(f"[camino_A] >> Seleccionando texto existente (Ctrl+A)...")
-                pg.hotkey('ctrl', 'a')
+                # Limpieza robusta (similar al Camino B)
+                print(f"[camino_A] >> Limpiando campo (método Camino B)...")
+                
+                # Primer pase: 2 clicks + delete + backspace
+                pg.click()
+                time.sleep(0.1)
+                pg.click()
+                time.sleep(0.2)
+                pg.press('delete')
+                time.sleep(0.3)
+                pg.press('backspace')
+                time.sleep(0.2)
+                
+                # Segundo pase: re-click + 3 backspaces
+                pg.click(num_field_x, num_field_y)
+                time.sleep(0.2)
+                for i in range(3):
+                    pg.press('backspace')
+                    time.sleep(0.1)
                 time.sleep(0.3)
                 
                 print(f"[camino_A] >> Escribiendo '{num_registros}'...")
-                # Escribir el número exacto de registros encontrados (reemplaza el texto seleccionado)
+                # Escribir el número exacto de registros encontrados
                 _type_text(str(num_registros), 0.8)
                 
                 # Click en botón buscar
