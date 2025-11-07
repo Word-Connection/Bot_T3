@@ -491,14 +491,14 @@ def _execute_falla_flow(conf: Dict[str, Any], base_delay: float):
 
 def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
     """
-    Parsea la tabla copiada y extrae los IDs de FA junto con el CUIT si existe.
+    Parsea la tabla copiada y extrae los IDs de FA, CUIT y ID del Cliente.
     
     Formato esperado:
-    ID    Tipo de Documento    ...    ID del FA    ...    Tipo ID Compañía    ...
-    41823096    Documento Nacional...    67089208    ...    CUIT    ...
-    41823096    Documento Nacional...    65263199    ...    (vacío)    ...
+    ID    Tipo de Documento    ...    ID del FA    ...    Tipo ID Compañía    ...    ID del Cliente    ...
+    41823096    Documento Nacional...    67089208    ...    CUIT    ...    101186384    ...
+    41823096    Documento Nacional...    65263199    ...    (vacío)    ...    44402491    ...
     
-    Retorna lista de diccionarios con: {"id_fa": "...", "cuit": "CUIT" o ""}
+    Retorna lista de diccionarios con: {"id_fa": "...", "cuit": "CUIT" o "", "id_cliente": "..."}
     """
     lines = table_text.strip().split('\n')
     if len(lines) < 2:
@@ -508,7 +508,7 @@ def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
     # Primera línea es header
     header = lines[0]
     
-    # Buscar la posición de "ID del FA" o "FA ID" y "Tipo ID Compañía" en el header
+    # Buscar la posición de "ID del FA", "Tipo ID Compañía" y "ID del Cliente" en el header
     # Intentar primero con tabulaciones, si no funciona usar múltiples espacios
     header_parts = re.split(r'\t+', header.strip())
     
@@ -535,13 +535,27 @@ def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
             cuit_index = idx
             break
     
+    # Buscar "ID del Cliente" o "Customer ID"
+    cliente_index = None
+    try:
+        cliente_index = header_parts.index('ID del Cliente')
+    except ValueError:
+        try:
+            cliente_index = header_parts.index('Customer ID')
+        except ValueError:
+            print(f"[camino_A] WARN: No se encontró 'ID del Cliente' ni 'Customer ID' en header")
+    
     print(f"[camino_A] ID del FA está en la columna {fa_index}")
     if cuit_index is not None:
         print(f"[camino_A] Tipo ID Compañía está en la columna {cuit_index}")
     else:
         print(f"[camino_A] WARN: No se encontró columna 'Tipo ID Compañía'")
+    if cliente_index is not None:
+        print(f"[camino_A] ID del Cliente está en la columna {cliente_index}")
+    else:
+        print(f"[camino_A] WARN: No se encontró columna 'ID del Cliente'")
     
-    # Extraer IDs de FA y CUIT de cada línea de datos
+    # Extraer IDs de FA, CUIT y ID del Cliente de cada línea de datos
     fa_data_list = []
     for i, line in enumerate(lines[1:], start=1):
         if not line.strip():
@@ -562,7 +576,7 @@ def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
                     alt_fa_id = parts[fa_index - 1].strip()
                     if alt_fa_id and alt_fa_id.isdigit():
                         fa_id = alt_fa_id
-                        print(f"[CaminoJulian] Registro {i}: Usando columna {fa_index - 1} en lugar de {fa_index}")
+                        print(f"[camino_A] Registro {i}: Usando columna {fa_index - 1} en lugar de {fa_index}")
             
             if fa_id and fa_id.isdigit():
                 # Extraer CUIT si existe
@@ -572,26 +586,249 @@ def _parse_fa_ids_from_table(table_text: str) -> List[Dict[str, str]]:
                     if cuit_value == "CUIT":
                         tiene_cuit = "CUIT"
                 
+                # Extraer ID del Cliente si existe
+                id_cliente = ""
+                if cliente_index is not None and len(parts) > cliente_index:
+                    id_cliente = parts[cliente_index].strip()
+                    # Validar que sea numérico
+                    if not (id_cliente and id_cliente.isdigit()):
+                        id_cliente = ""
+                
+                # FALLBACK: Si no se encontró ID del Cliente en la columna esperada,
+                # buscar en columnas posteriores al ID del FA
+                # Patrón real (cuando columnas vacías colapsan):
+                # ... | ID_FA | Nombre_FA | ID_Cliente | Alias_Cliente
+                # Las columnas "Tipo ID Compañía", "ID de la Compañía", "ID de la Cuenta", "Nombre de la Cuenta" están vacías y desaparecen
+                if not id_cliente and fa_index is not None:
+                    # Buscar el primer número después del "Nombre de FA" (fa_index + 1)
+                    # El ID del Cliente suele estar en fa_index + 2
+                    for offset in [2, 3, 4]:  # Probar varias posiciones
+                        fallback_index = fa_index + offset
+                        if len(parts) > fallback_index:
+                            candidate = parts[fallback_index].strip()
+                            if candidate and candidate.isdigit() and len(candidate) >= 6:
+                                id_cliente = candidate
+                                break
+                
                 # AGREGAR TODOS LOS REGISTROS (incluyendo duplicados)
                 fa_data_list.append({
                     "id_fa": fa_id,
-                    "cuit": tiene_cuit
+                    "cuit": tiene_cuit,
+                    "id_cliente": id_cliente
                 })
                 
+                log_msg = f"[camino_A] Registro {i}: ID FA = {fa_id}"
                 if tiene_cuit:
-                    print(f"[CaminoJulian] Registro {i}: ID FA = {fa_id} (TIENE CUIT)")
-                else:
-                    print(f"[CaminoJulian] Registro {i}: ID FA = {fa_id}")
+                    log_msg += " (TIENE CUIT)"
+                if id_cliente:
+                    log_msg += f", ID Cliente = {id_cliente}"
+                print(log_msg)
             else:
-                print(f"[CaminoJulian] WARN: Registro {i} sin ID FA válido: '{fa_id}'")
+                print(f"[camino_A] WARN: Registro {i} sin ID FA válido: '{fa_id}'")
         else:
-            print(f"[CaminoJulian] WARN: Registro {i} no tiene suficientes columnas")
+            print(f"[camino_A] WARN: Registro {i} no tiene suficientes columnas")
     
-    print(f"[CaminoJulian] Total IDs de FA encontrados: {len(fa_data_list)}")
+    print(f"[camino_A] Total IDs de FA encontrados: {len(fa_data_list)}")
     return fa_data_list
 
-def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
+def _limpiar_campo(conf: Dict[str, Any], field_key: str, field_label: str, base_delay: float):
+    """Limpia un campo de texto usando el método del Camino B"""
+    fx, fy = _xy(conf, field_key)
+    if fx or fy:
+        print(f"[camino_A] Limpiando {field_label}...")
+        pg.click(fx, fy)
+        time.sleep(0.2)
+        
+        # Limpieza: 2 clicks + delete + backspace
+        # IMPORTANTE: Usar coordenadas explícitas para evitar clicks erróneos
+        pg.click(fx, fy)
+        time.sleep(0.1)
+        pg.click(fx, fy)
+        time.sleep(0.2)
+        pg.press('delete')
+        time.sleep(0.6)
+        pg.press('backspace')
+        time.sleep(0.2)
+        
+        # Segundo pase
+        pg.click(fx, fy)
+        time.sleep(0.2)
+        for i in range(3):
+            pg.press('backspace')
+            time.sleep(0.1)
+        time.sleep(0.2)
+
+def _buscar_por_id_cliente(conf: Dict[str, Any], id_cliente: str, base_delay: float) -> List[Dict[str, str]]:
+    """
+    Busca cuentas FA por ID de cliente específico.
+    
+    Proceso:
+    1. Click en cliente_section para asegurar contexto correcto
+    2. Limpiar campo DNI (dni_field_clear)
+    3. Limpiar campo ID cliente
+    4. Escribir ID cliente en id_cliente_field
+    5. Presionar Enter
+    6. Hacer "Ver Todos" y copiar tabla
+    7. Extraer y retornar lista de {id_fa, saldo, id_cliente}
+    
+    Returns:
+        Lista de diccionarios con id_fa, saldo, e id_cliente_interno
+    """
+    print(f"[camino_A] ========================================")
+    print(f"[camino_A] BUSCANDO POR ID CLIENTE: {id_cliente}")
+    print(f"[camino_A] ========================================")
+    
+    # Paso 0: Click en cliente_section para asegurar contexto
+    x, y = _xy(conf, 'cliente_section')
+    _click(x, y, 'cliente_section', base_delay)
+    
+    # Paso 1: Limpiar campo DNI (x373, y218)
+    _limpiar_campo(conf, 'dni_field_clear', 'Campo DNI', base_delay)
+    
+    # Paso 2: Limpiar campo ID cliente también por las dudas
+    _limpiar_campo(conf, 'id_cliente_field', 'Campo ID Cliente', base_delay)
+    
+    # Paso 3: Click en campo ID cliente y escribir
+    x, y = _xy(conf, 'id_cliente_field')
+    _click(x, y, 'id_cliente_field', base_delay)
+    _type_text(id_cliente, base_delay)
+    
+    # Paso 4: Presionar Enter
+    _press_enter(1.0)
+    
+    # Paso 5: Click en Ver Todos
+    x, y = _xy(conf, 'ver_todos_btn')
+    _click(x, y, 'ver_todos_btn', base_delay)
+    time.sleep(0.8)
+    
+    # Paso 5.5: Intentar copiar algo para detectar si hay error
+    # Si hay cartel de error "no hay registros", no se podrá copiar nada
+    pyperclip.copy("")  # Limpiar clipboard primero
+    x, y = _xy(conf, 'copiar_todo_btn')
+    _right_click(x, y, 'copiar_todo_btn (right-click)', base_delay)
+    
+    x, y = _xy(conf, 'resaltar_btn')
+    _click(x, y, 'resaltar_btn', base_delay)
+    
+    x, y = _xy(conf, 'copiar_todo_btn')
+    _right_click(x, y, 'copiar_todo_btn (right-click)', base_delay)
+    
+    x, y = _xy(conf, 'copiado_btn')
+    _click(x, y, 'copiado_btn', 0.5)
+    
+    # Leer clipboard para verificar si hay datos
+    table_text = _get_clipboard_text()
+    print(f"[camino_A] Tabla copiada ({len(table_text)} caracteres)")
+    
+    # Si no se copió nada, significa que hay un cartel de error
+    if len(table_text.strip()) < 30:
+        print(f"[camino_A] WARN: No se encontraron cuentas para ID Cliente {id_cliente}")
+        print(f"[camino_A] Detectado cartel de error - cerrando...")
+        
+        # Presionar Enter para cerrar el cuadro de diálogo de error
+        _press_enter(0.5)
+        
+        # También intentar hacer click en el botón OK por si Enter no funcionó
+        error_ok_x, error_ok_y = _xy(conf, 'error_dialog_ok')
+        if error_ok_x and error_ok_y:
+            _click(error_ok_x, error_ok_y, 'error_dialog_ok', 0.5)
+        
+        # NO cerrar ventana Ver Todos aquí - simplemente retornar vacío
+        # El sistema continuará con el siguiente ID faltante
+        print(f"[camino_A] Continuando con siguiente ID faltante...")
+        return []
+    
+    fa_data_list = _parse_fa_ids_from_table(table_text)
+    num_registros = len(fa_data_list)
+    print(f"[camino_A] Total registros encontrados para ID Cliente {id_cliente}: {num_registros}")
+    
+    # Paso 11: Cerrar ventana de "Ver Todos"
+    print(f"[camino_A] Cerrando ventana 'Ver Todos'...")
+    close_x, close_y = _xy(conf, 'close_tab_btn')
+    _click(close_x, close_y, 'close_tab_btn (cerrar Ver Todos)', 0.8)
+    
+    if num_registros == 0:
+        return []
+    
+    print(f"[camino_A] Se procesarán {num_registros} registros")
+    
+    # Paso 12: Iterar por cada registro y copiar saldo
+    id_area_x_base = int(conf.get('id_area_x_base', 914))
+    id_area_y_base = int(conf.get('id_area_y_base', 239))
+    id_area_y_step = int(conf.get('id_area_y_step', 19))
+    
+    saldo_x, saldo_y = _xy(conf, 'saldo')
+    saldo_all_copy_x, saldo_all_copy_y = _xy(conf, 'saldo_all_copy')
+    saldo_copy_x, saldo_copy_y = _xy(conf, 'saldo_copy')
+    close_x, close_y = _xy(conf, 'close_tab_btn')
+    
+    fa_saldos = []
+    
+    for idx, fa_data in enumerate(fa_data_list):
+        id_fa = fa_data["id_fa"]
+        tiene_cuit = fa_data.get("cuit", "")
+        id_cliente_interno = fa_data.get("id_cliente", "")
+        
+        print(f"[camino_A] ===== Procesando registro {idx+1}/{num_registros}: ID FA {id_fa} =====")
+        
+        # Limpiar portapapeles
+        pyperclip.copy("")
+        print(f"[camino_A] Portapapeles limpiado")
+        
+        # Click en id_area (posición dinámica según índice)
+        id_area_y = id_area_y_base + (idx * id_area_y_step)
+        _click(id_area_x_base, id_area_y, f'id_area registro {idx+1}', 1.5)
+        
+        # Copiar saldo
+        pg.doubleClick(saldo_x, saldo_y)
+        print(f"[camino_A] Double-click saldo ({saldo_x},{saldo_y})")
+        time.sleep(0.4)
+        
+        pg.rightClick(saldo_x, saldo_y)
+        print(f"[camino_A] Right-click saldo (right-click) ({saldo_x},{saldo_y})")
+        time.sleep(0.4)
+        
+        pg.click(saldo_all_copy_x, saldo_all_copy_y)
+        print(f"[camino_A] Click saldo_all_copy ({saldo_all_copy_x},{saldo_all_copy_y})")
+        time.sleep(0.4)
+        
+        pg.rightClick(saldo_x, saldo_y)
+        print(f"[camino_A] Right-click saldo (right-click 2) ({saldo_x},{saldo_y})")
+        time.sleep(0.4)
+        
+        pg.click(saldo_copy_x, saldo_copy_y)
+        print(f"[camino_A] Click saldo_copy ({saldo_copy_x},{saldo_copy_y})")
+        time.sleep(0.6)
+        
+        # Leer saldo del portapapeles
+        saldo_str = _get_clipboard_text().strip()
+        print(f"[camino_A] Saldo copiado para ID FA {id_fa}: '{saldo_str}'")
+        
+        # Agregar al resultado
+        fa_saldos.append({
+            "id_fa": id_fa,
+            "saldo": saldo_str,
+            "id_cliente_interno": id_cliente_interno  # Campo temporal para filtrado
+        })
+        
+        # Cerrar pestaña
+        _click(close_x, close_y, 'close_tab_btn', 0.5)
+        
+        # Si es el último registro, cerrar pestañas adicionales
+        if idx == len(fa_data_list) - 1:
+            print(f"[camino_A] Último registro - cerrando pestañas adicionales")
+            for i in range(3):
+                _click(close_x, close_y, f'close_tab_btn (adicional {i+1})', 0.5)
+    
+    # NO volver a home aquí - eso se hace en el flujo principal
+    # Solo retornar los datos encontrados
+    
+    return fa_saldos
+
+def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_cliente_filter: Optional[List[str]] = None):
     print(f'[camino_A] Iniciado para DNI={dni}')
+    if ids_cliente_filter:
+        print(f'[camino_A] Modo filtrado: {len(ids_cliente_filter)} IDs de cliente del Camino C')
     pg.FAILSAFE = True
     
     start_delay = 0.5
@@ -945,7 +1182,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
         saldo_text = _get_clipboard_text()
         print(f"[camino_A] Saldo copiado para ID FA {fa_id}: '{saldo_text}'")
         
-        # Guardar resultado con CUIT si aplica
+        # Guardar resultado con CUIT y ID Cliente si aplican
         fa_result = {
             "id_fa": fa_id,
             "saldo": saldo_text.strip()
@@ -956,23 +1193,110 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
             fa_result["cuit"] = tiene_cuit
             print(f"[camino_A] Registro con CUIT agregado")
         
+        # Agregar ID Cliente si existe (para filtro posterior)
+        id_cliente = fa_data.get("id_cliente", "")
+        if id_cliente:
+            fa_result["id_cliente_interno"] = id_cliente  # Solo para filtro, no se envía al frontend
+        
         results["fa_saldos"].append(fa_result)
         
         # 12g: Click en close_tab_btn
         close_x, close_y = _xy(conf, 'close_tab_btn')
         _click(close_x, close_y, 'close_tab_btn', base_delay)
+    
+    # NO cerrar ventanas adicionales ni ir a home aquí
+    # Eso se hará después de procesar los IDs faltantes
+    
+    # ===== FILTRAR POR IDS DE CLIENTE DEL CAMINO C =====
+    if ids_cliente_filter:
+        print(f"[camino_A] ========================================")
+        print(f"[camino_A] APLICANDO FILTRO DE IDS DE CLIENTE")
+        print(f"[camino_A] IDs permitidos del Camino C: {len(ids_cliente_filter)}")
+        print(f"[camino_A] Total antes del filtro: {len(results['fa_saldos'])}")
         
-        # Si es el último registro, hacer clicks adicionales y ir a home
-        if idx == len(fa_data_list) - 1:
-            print(f"[camino_A] Último registro - cerrando pestañas adicionales")
-            # Repetir close_tab_btn 3 veces más
-            for i in range(3):
-                _click(close_x, close_y, f'close_tab_btn (adicional {i+1})', base_delay)
+        # Filtrar solo los que tienen ID de cliente en la lista del Camino C
+        fa_saldos_filtrados = []
+        # Convertir IDs a strings para comparación (el parsing devuelve strings)
+        ids_cliente_set = set(str(id_c) for id_c in ids_cliente_filter)  # Para búsqueda rápida
+        ids_encontrados = set()  # IDs que SÍ encontramos en la tabla
+        
+        for fa_saldo in results["fa_saldos"]:
+            id_fa = fa_saldo["id_fa"]
+            id_cliente = fa_saldo.get("id_cliente_interno", "")
             
-            # Ir a home_area
-            home_x, home_y = _xy(conf, 'home_area')
-            _click(home_x, home_y, 'home_area', base_delay)
-            print(f"[CaminoJulian] Navegado a home_area")
+            if id_cliente and id_cliente in ids_cliente_set:
+                # Guardar el ID como encontrado
+                ids_encontrados.add(id_cliente)
+                
+                # Remover el campo interno antes de agregarlo al resultado
+                if "id_cliente_interno" in fa_saldo:
+                    del fa_saldo["id_cliente_interno"]
+                fa_saldos_filtrados.append(fa_saldo)
+                print(f"[camino_A] ✅ ID FA {id_fa} - ID Cliente {id_cliente} (permitido)")
+            else:
+                if id_cliente:
+                    print(f"[camino_A] ❌ ID FA {id_fa} - ID Cliente {id_cliente} (FILTRADO - no está en lista C)")
+                else:
+                    print(f"[camino_A] ❌ ID FA {id_fa} - Sin ID Cliente (FILTRADO)")
+        
+        results["fa_saldos"] = fa_saldos_filtrados
+        print(f"[camino_A] Total después del filtro: {len(results['fa_saldos'])}")
+        print(f"[camino_A] ========================================")
+        
+        # ===== BUSCAR IDS DE CLIENTE FALTANTES =====
+        # Identificar qué IDs del Camino C no tienen cuentas asociadas
+        ids_faltantes = []
+        for id_c in ids_cliente_filter:
+            if str(id_c) not in ids_encontrados:
+                ids_faltantes.append(str(id_c))
+        
+        if ids_faltantes:
+            print(f"[camino_A] ========================================")
+            print(f"[camino_A] IDS DE CLIENTE FALTANTES DETECTADOS")
+            print(f"[camino_A] Total IDs faltantes: {len(ids_faltantes)}")
+            print(f"[camino_A] IDs: {ids_faltantes}")
+            print(f"[camino_A] Se buscarán directamente por ID de cliente")
+            print(f"[camino_A] ========================================")
+            
+            # Para cada ID faltante, buscar por ID de cliente
+            for id_faltante in ids_faltantes:
+                fa_saldos_extra = _buscar_por_id_cliente(conf, id_faltante, base_delay)
+                
+                if fa_saldos_extra:
+                    print(f"[camino_A] ✅ Se encontraron {len(fa_saldos_extra)} cuentas para ID Cliente {id_faltante}")
+                    
+                    # Agregar al resultado (sin filtrar porque ya sabemos que el ID está en la lista)
+                    for fa_saldo in fa_saldos_extra:
+                        # Remover campo interno antes de agregar
+                        if "id_cliente_interno" in fa_saldo:
+                            del fa_saldo["id_cliente_interno"]
+                        results["fa_saldos"].append(fa_saldo)
+                        print(f"[camino_A]    + ID FA {fa_saldo['id_fa']} - Saldo: {fa_saldo['saldo']}")
+                else:
+                    print(f"[camino_A] ⚠️ No se encontraron cuentas para ID Cliente {id_faltante}")
+            
+            print(f"[camino_A] ========================================")
+            print(f"[camino_A] Total después de buscar IDs faltantes: {len(results['fa_saldos'])}")
+            print(f"[camino_A] ========================================")
+        else:
+            print(f"[camino_A] ✅ Todos los IDs del Camino C tienen cuentas asociadas")
+    else:
+        # Si no hay filtro, limpiar el campo interno de todos los registros
+        for fa_saldo in results["fa_saldos"]:
+            if "id_cliente_interno" in fa_saldo:
+                del fa_saldo["id_cliente_interno"]
+    
+    # ===== CERRAR VENTANAS Y NAVEGAR A HOME =====
+    # Esto se hace DESPUÉS de procesar todos los registros (incluyendo IDs faltantes)
+    print(f"[camino_A] Cerrando ventanas adicionales y navegando a home...")
+    close_x, close_y = _xy(conf, 'close_tab_btn')
+    for i in range(3):
+        _click(close_x, close_y, f'close_tab_btn (adicional {i+1})', base_delay)
+    
+    # Ir a home_area
+    home_x, home_y = _xy(conf, 'home_area')
+    _click(home_x, home_y, 'home_area', base_delay)
+    print(f"[camino_A] Navegado a home_area")
     
     # Filtrar duplicados en el resultado final (mantener solo el primero de cada ID)
     seen_ids = set()
@@ -983,7 +1307,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None):
             seen_ids.add(id_fa)
             fa_saldos_unicos.append(fa_saldo)
         else:
-            print(f"[CaminoJulian] Eliminando duplicado del resultado: ID FA {id_fa}")
+            print(f"[camino_A] Eliminando duplicado del resultado: ID FA {id_fa}")
     
     # Reemplazar con la lista sin duplicados
     results["fa_saldos"] = fa_saldos_unicos
@@ -1000,13 +1324,26 @@ def main():
     parser.add_argument('--dni', required=True, help='DNI a buscar')
     parser.add_argument('--coords', default=DEFAULT_COORDS_FILE, help='Archivo de coordenadas JSON')
     parser.add_argument('--log-file', help='Archivo de log (opcional)')
+    parser.add_argument('ids_cliente_json', nargs='?', default=None, 
+                       help='JSON con los IDs de cliente del Camino C (opcional)')
     
     args = parser.parse_args()
     
     coords_path = Path(args.coords)
     log_file = Path(args.log_file) if args.log_file else None
     
-    run(args.dni, coords_path, log_file)
+    # Parsear IDs de cliente si se proporcionaron
+    ids_cliente_filter = None
+    if args.ids_cliente_json:
+        try:
+            ids_cliente_filter = json.loads(args.ids_cliente_json)
+            print(f"[camino_A] IDs de cliente recibidos del Camino C: {len(ids_cliente_filter)} IDs")
+            print(f"[camino_A] Primeros 3 IDs: {ids_cliente_filter[:3] if len(ids_cliente_filter) > 0 else []}")
+        except json.JSONDecodeError as e:
+            print(f"[camino_A] ERROR parseando IDs de cliente JSON: {e}")
+            ids_cliente_filter = None
+    
+    run(args.dni, coords_path, log_file, ids_cliente_filter)
 
 if __name__ == '__main__':
     main()

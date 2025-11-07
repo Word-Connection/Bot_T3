@@ -490,6 +490,66 @@ def _ensure_exact_region(rx: int, ry: int, rw: int, rh: int, shot_path: Path) ->
     return False
 
 
+def extract_ids_cliente_from_table(table_text: str) -> List[str]:
+    """
+    Extrae los IDs de cliente de la tabla copiada.
+    La columna "Id del cliente" está en la posición 7 (índice 6).
+    
+    Ejemplo de tabla:
+    ID de Contacto    Tipo de Documento    Número de Documento    ...    Id del cliente    ...
+    30996880          ...                  ...                           101186384          ...
+    30996880          ...                  ...                           44402491           ...
+    
+    Returns:
+        Lista de IDs de cliente únicos encontrados (excluyendo vacíos y la cabecera)
+    """
+    ids_cliente = []
+    lines = table_text.strip().split('\n')
+    
+    print(f"[CaminoC] Parseando tabla para extraer IDs de cliente...")
+    print(f"[CaminoC] Total de líneas en tabla: {len(lines)}")
+    
+    for i, line in enumerate(lines):
+        # Dividir por tabs o múltiples espacios
+        cols = re.split(r'\t+|\s{2,}', line.strip())
+        
+        # La primera línea es la cabecera
+        if i == 0:
+            print(f"[CaminoC] Línea {i+1}: Cabecera detectada")
+            continue
+        
+        # La columna "Id del cliente" está en índice 6
+        if len(cols) > 6:
+            id_cliente = cols[6].strip()
+            
+            # Validar que sea un número válido (4+ dígitos)
+            if id_cliente and id_cliente.isdigit() and len(id_cliente) >= 4:
+                ids_cliente.append(id_cliente)
+                print(f"[CaminoC] Línea {i+1}: ID cliente '{id_cliente}' extraído")
+            else:
+                print(f"[CaminoC] Línea {i+1}: ID cliente vacío o inválido, ignorando")
+        else:
+            print(f"[CaminoC] Línea {i+1}: Formato incorrecto ({len(cols)} columnas)")
+    
+    # Eliminar duplicados manteniendo el orden
+    ids_unicos = []
+    seen = set()
+    for id_val in ids_cliente:
+        if id_val not in seen:
+            ids_unicos.append(id_val)
+            seen.add(id_val)
+    
+    print(f"[CaminoC] ===== RESUMEN DE IDS CLIENTE =====")
+    print(f"[CaminoC] Total de IDs únicos encontrados: {len(ids_unicos)}")
+    if ids_unicos:
+        print(f"[CaminoC] Primeros 5 IDs: {ids_unicos[:5]}")
+        if len(ids_unicos) > 5:
+            print(f"[CaminoC] Últimos 5 IDs: {ids_unicos[-5:]}")
+    print(f"[CaminoC] =====================================")
+    
+    return ids_unicos
+
+
 def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, log_file: Optional[Path] = None, screenshot_dir: Optional[Path] = None):
     pg.FAILSAFE = True
     start_delay = float(os.getenv('COORDS_START_DELAY','0.375'))
@@ -588,6 +648,79 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     
     copied_id_clean = (copied_id or '').strip()
     print(f"[CaminoC] ID copiado del clipboard: '{copied_id_clean}' ({len(copied_id_clean)} caracteres)")
+    
+    # ===== NUEVO: EXTRAER IDS DE CLIENTE CON "VER TODOS" =====
+    ids_cliente = []
+    
+    # Validar si tiene contenido y si tiene 4 o más dígitos consecutivos
+    numbers_found = re.findall(r'\d+', copied_id_clean)
+    has_valid_id = False
+    
+    if len(copied_id_clean) >= 3:
+        for num in numbers_found:
+            if len(num) >= 4:
+                has_valid_id = True
+                print(f"[CaminoC] ID válido encontrado: {num} (>= 4 dígitos)")
+                break
+    
+    if has_valid_id:
+        print("[CaminoC] Cliente creado verificado, extrayendo IDs de cliente...")
+        time.sleep(1.0)
+        
+        # 1. Click en botón "Ver Todos" (coordenadas del Camino A)
+        ver_todos_x, ver_todos_y = _xy(conf, 'ver_todos_btn')
+        if ver_todos_x or ver_todos_y:
+            print(f"[CaminoC] Click en ver_todos_btn ({ver_todos_x},{ver_todos_y})")
+            _click(ver_todos_x, ver_todos_y, 'ver_todos_btn', 1.5)
+            
+            # 2. Copiar toda la tabla (patrón del Camino A)
+            # Right-click en copiar_todo_btn
+            copiar_todo_x, copiar_todo_y = _xy(conf, 'copiar_todo_btn')
+            if copiar_todo_x or copiar_todo_y:
+                print(f"[CaminoC] Right-click en copiar_todo_btn ({copiar_todo_x},{copiar_todo_y})")
+                pg.click(copiar_todo_x, copiar_todo_y, button='right')
+                time.sleep(0.5)
+                
+                # Click en resaltar_btn
+                resaltar_x, resaltar_y = _xy(conf, 'resaltar_btn')
+                if resaltar_x or resaltar_y:
+                    print(f"[CaminoC] Click en resaltar_btn ({resaltar_x},{resaltar_y})")
+                    _click(resaltar_x, resaltar_y, 'resaltar_btn', 0.5)
+                    
+                    # Right-click nuevamente en copiar_todo_btn
+                    pg.click(copiar_todo_x, copiar_todo_y, button='right')
+                    time.sleep(0.5)
+                    
+                    # Click en copiado_btn
+                    copiado_x, copiado_y = _xy(conf, 'copiado_btn')
+                    if copiado_x or copiado_y:
+                        print(f"[CaminoC] Click en copiado_btn ({copiado_x},{copiado_y})")
+                        _click(copiado_x, copiado_y, 'copiado_btn', 0.8)
+                        
+                        # 3. Leer tabla del clipboard
+                        tabla_completa = ""
+                        if pyperclip:
+                            try:
+                                tabla_completa = pyperclip.paste() or ""
+                                print(f"[CaminoC] Tabla completa copiada ({len(tabla_completa)} caracteres)")
+                            except Exception as e:
+                                print(f"[CaminoC] Error al leer tabla: {e}")
+                        
+                        # 4. Extraer IDs de cliente de la columna
+                        if tabla_completa:
+                            ids_cliente = extract_ids_cliente_from_table(tabla_completa)
+                        else:
+                            print("[CaminoC] ADVERTENCIA: Tabla vacía, no se pudieron extraer IDs de cliente")
+            
+            # 5. Cerrar ventana "Ver Todos"
+            close_tab_x, close_tab_y = _xy(conf, 'close_tab_btn')
+            if close_tab_x or close_tab_y:
+                print(f"[CaminoC] Cerrando ventana 'Ver Todos'...")
+                _click(close_tab_x, close_tab_y, 'close_tab_btn (cerrar Ver Todos)', 0.8)
+        else:
+            print("[CaminoC] ADVERTENCIA: ver_todos_btn no definido en coordenadas")
+    else:
+        print("[CaminoC] ADVERTENCIA: No se pudo validar ID de cliente, IDs de cliente no extraídos")
     
     # CASO ESPECIAL: Si copia "Telefónico", significa que el sistema entró directo (una sola cuenta)
     # En este caso, saltamos todos los pasos de validación y vamos directo a copiar el score
@@ -1047,6 +1180,13 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         "success": True,
         "timestamp": int(time.time() * 1000)
     }
+    
+    # Agregar IDs de cliente si fueron extraídos
+    if ids_cliente:
+        result["ids_cliente"] = ids_cliente
+        result["total_ids_cliente"] = len(ids_cliente)
+        print(f"[CaminoC] IDs de cliente agregados al resultado: {len(ids_cliente)} IDs")
+        print(f"[CaminoC] Primeros 3 IDs: {ids_cliente[:3]}")
     
     # Agregar dni_real si fue extraído (para fallback en Camino A)
     if dni_real_extraido:

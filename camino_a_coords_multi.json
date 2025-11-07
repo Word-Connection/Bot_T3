@@ -30,6 +30,16 @@
     "y": 240
   },
 
+  "dni_field_clear": {
+    "x": 373,
+    "y": 218
+  },
+
+  "id_cliente_field": {
+    "x": 1612,
+    "y": 219
+  },
+
   "ver_todos_btn": {
     "x": 1810,
     "y": 159

@@ -47,6 +47,22 @@
     "x": 1325,
     "y": 180
   },
+  "ver_todos_btn": {
+    "x": 1810,
+    "y": 159
+  },
+  "copiar_todo_btn": {
+    "x": 24,
+    "y": 174
+  },
+  "resaltar_btn": {
+    "x": 97,
+    "y": 229
+  },
+  "copiado_btn": {
+    "x": 96,
+    "y": 212
+  },
   "dni_from_cuit": {
     "x": 911,
     "y": 174
