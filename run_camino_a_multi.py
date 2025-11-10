@@ -1232,12 +1232,12 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
                 if "id_cliente_interno" in fa_saldo:
                     del fa_saldo["id_cliente_interno"]
                 fa_saldos_filtrados.append(fa_saldo)
-                print(f"[camino_A] ✅ ID FA {id_fa} - ID Cliente {id_cliente} (permitido)")
+                print(f"[camino_A] [OK] ID FA {id_fa} - ID Cliente {id_cliente} (permitido)")
             else:
                 if id_cliente:
-                    print(f"[camino_A] ❌ ID FA {id_fa} - ID Cliente {id_cliente} (FILTRADO - no está en lista C)")
+                    print(f"[camino_A] [SKIP] ID FA {id_fa} - ID Cliente {id_cliente} (FILTRADO - no está en lista C)")
                 else:
-                    print(f"[camino_A] ❌ ID FA {id_fa} - Sin ID Cliente (FILTRADO)")
+                    print(f"[camino_A] [SKIP] ID FA {id_fa} - Sin ID Cliente (FILTRADO)")
         
         results["fa_saldos"] = fa_saldos_filtrados
         print(f"[camino_A] Total después del filtro: {len(results['fa_saldos'])}")
@@ -1263,7 +1263,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
                 fa_saldos_extra = _buscar_por_id_cliente(conf, id_faltante, base_delay)
                 
                 if fa_saldos_extra:
-                    print(f"[camino_A] ✅ Se encontraron {len(fa_saldos_extra)} cuentas para ID Cliente {id_faltante}")
+                    print(f"[camino_A] [OK] Se encontraron {len(fa_saldos_extra)} cuentas para ID Cliente {id_faltante}")
                     
                     # Agregar al resultado (sin filtrar porque ya sabemos que el ID está en la lista)
                     for fa_saldo in fa_saldos_extra:
@@ -1273,13 +1273,13 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
                         results["fa_saldos"].append(fa_saldo)
                         print(f"[camino_A]    + ID FA {fa_saldo['id_fa']} - Saldo: {fa_saldo['saldo']}")
                 else:
-                    print(f"[camino_A] ⚠️ No se encontraron cuentas para ID Cliente {id_faltante}")
+                    print(f"[camino_A] [WARN] No se encontraron cuentas para ID Cliente {id_faltante}")
             
             print(f"[camino_A] ========================================")
             print(f"[camino_A] Total después de buscar IDs faltantes: {len(results['fa_saldos'])}")
             print(f"[camino_A] ========================================")
         else:
-            print(f"[camino_A] ✅ Todos los IDs del Camino C tienen cuentas asociadas")
+            print(f"[camino_A] [OK] Todos los IDs del Camino C tienen cuentas asociadas")
     else:
         # Si no hay filtro, limpiar el campo interno de todos los registros
         for fa_saldo in results["fa_saldos"]:
