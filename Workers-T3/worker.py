@@ -471,6 +471,7 @@ def process_task(task: dict) -> bool:
                     break
                 
                 # Intentar leer línea de la cola con timeout más corto para mayor responsividad
+                line_text = ""
                 try:
                     line = output_queue.get(timeout=0.1)  # Reducido de 0.5 a 0.1 para mayor velocidad
                     if line is None:  # Señal de fin
@@ -496,120 +497,121 @@ def process_task(task: dict) -> bool:
                 except queue.Empty:
                     pass
                 
-                    # DETECTAR JSON PARCIALES DEL SCRIPT
-                    if "===JSON_PARTIAL_START===" in line_text:
-                        # Iniciar captura de JSON parcial
-                        json_buffer = []
-                        capturing_partial = True
-                        logger.info(f"[PARCIAL] Iniciando captura de update parcial...")
-                        
-                        # Leer líneas hasta encontrar el final
-                        while capturing_partial:
-                            try:
-                                json_line = output_queue.get(timeout=1.0)  # Reducido de 2.0 a 1.0
-                                if json_line is None:
-                                    break
-                                
-                                json_line_text = json_line.strip()
-                                output_lines.append(json_line_text)
-                                
-                                if "===JSON_PARTIAL_END===" in json_line_text:
-                                    capturing_partial = False
-                                    
-                                    # Parsear y enviar el JSON parcial
-                                    try:
-                                        json_text = '\n'.join(json_buffer)
-                                        partial_data = json.loads(json_text)
-                                        
-                                        etapa = partial_data.get("etapa", "")
-                                        info_preview = partial_data.get("info", "")[:50] + "..." if len(partial_data.get("info", "")) > 50 else partial_data.get("info", "")
-                                        logger.info(f"[PARCIAL] Parseado: {etapa} - {info_preview}")
-                                        
-                                        # Enviar update parcial INMEDIATAMENTE
-                                        logger.info(f"[PARCIAL] Enviando al frontend...")
-                                        send_partial_update(task_id, partial_data, status="running")
-                                        
-                                        # Marcar flags según la etapa
-                                        if etapa == "score_obtenido":
-                                            score_sent = True
-                                        elif etapa == "buscando_deudas":
-                                            searching_sent = True
-                                        
-                                    except Exception as json_err:
-                                        logger.error(f"[PARCIAL] Error parseando JSON: {json_err}")
-                                    
-                                    break
-                                else:
-                                    json_buffer.append(json_line_text)
-                                    
-                            except queue.Empty:
-                                logger.warning(f"[PARCIAL] Timeout esperando fin de JSON parcial")
-                                capturing_partial = False
-                                break
-                        
-                        continue  # Continuar con el siguiente ciclo del loop principal
+                # DETECTAR JSON PARCIALES DEL SCRIPT (CORREGIDO: fuera del except)
+                if line_text and "===JSON_PARTIAL_START===" in line_text:
+                    # Iniciar captura de JSON parcial
+                    json_buffer = []
+                    capturing_partial = True
+                    logger.info(f"[PARCIAL] Iniciando captura de update parcial...")
                     
-                    if not score_sent and ("score" in line_text.lower()):
+                    # Leer líneas hasta encontrar el final
+                    while capturing_partial:
                         try:
-                            import re
-                            score_match = re.search(r'score[:\s]*(\d+)', line_text, re.IGNORECASE)
-                            if score_match:
-                                score_val = int(score_match.group(1))
-                                logger.info(f"[SCORE] Detectado: {score_val}")
-                                import base64, glob
-                                base_dir = os.path.dirname(__file__)
-                                capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
-                                screenshot_b64 = None
-                                dni_for_pattern = str(input_data)
-                                pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
-                                # Esperar hasta 12 segundos por la imagen
-                                for attempt in range(24):
-                                    matching_files = glob.glob(pattern)
-                                    if matching_files:
-                                        latest_image = max(matching_files, key=os.path.getctime)
-                                        try:
-                                            with open(latest_image, 'rb') as img_file:
-                                                img_data = img_file.read()
-                                                img_size_bytes = len(img_data)
-                                                screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
-                                                b64_size = len(screenshot_b64)
-                                                logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
-                                                logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
-                                            break
-                                        except Exception as img_e:
-                                            logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
-                                    time.sleep(0.5)
-                                if not screenshot_b64:
-                                    any_pattern = os.path.join(capturas_dir, 'score_*.png')
-                                    any_files = glob.glob(any_pattern)
-                                    if any_files:
-                                        latest_any = max(any_files, key=os.path.getctime)
-                                        try:
-                                            with open(latest_any, 'rb') as img_file:
-                                                img_data = img_file.read()
-                                                img_size_bytes = len(img_data)
-                                                screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
-                                                b64_size = len(screenshot_b64)
-                                                logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
-                                                logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
-                                        except Exception as img_e:
-                                            logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
-                                # Enviar solo un update de score_obtenido, siempre con imagen si está disponible
-                                score_update = {
-                                    "dni": input_data,
-                                    "score": score_val,
-                                    "etapa": "score_obtenido",
-                                    "info": f"Score obtenido: {score_val}",
-                                    "timestamp": int(time.time() * 1000)
-                                }
-                                if screenshot_b64:
-                                    score_update["image"] = screenshot_b64
-                                send_partial_update(task_id, score_update, status="running")
-                                score_sent = True
-                                # Si el score está en el rango de deudas, el script ya enviará el update de "buscando_deudas"
-                                # No es necesario enviarlo aquí ni hacer sleep
-                        except Exception as e:
-                            logger.warning(f"[SCORE] Error: {e}")
+                            json_line = output_queue.get(timeout=1.0)  # Reducido de 2.0 a 1.0
+                            if json_line is None:
+                                break
+                            
+                            json_line_text = json_line.strip()
+                            output_lines.append(json_line_text)
+                            
+                            if "===JSON_PARTIAL_END===" in json_line_text:
+                                capturing_partial = False
+                                
+                                # Parsear y enviar el JSON parcial
+                                try:
+                                    json_text = '\n'.join(json_buffer)
+                                    partial_data = json.loads(json_text)
+                                    
+                                    etapa = partial_data.get("etapa", "")
+                                    info_preview = partial_data.get("info", "")[:50] + "..." if len(partial_data.get("info", "")) > 50 else partial_data.get("info", "")
+                                    logger.info(f"[PARCIAL] Parseado: {etapa} - {info_preview}")
+                                    
+                                    # Enviar update parcial INMEDIATAMENTE
+                                    logger.info(f"[PARCIAL] Enviando al frontend...")
+                                    send_partial_update(task_id, partial_data, status="running")
+                                    
+                                    # Marcar flags según la etapa
+                                    if etapa == "score_obtenido":
+                                        score_sent = True
+                                    elif etapa == "buscando_deudas":
+                                        searching_sent = True
+                                    
+                                except Exception as json_err:
+                                    logger.error(f"[PARCIAL] Error parseando JSON: {json_err}")
+                                
+                                break
+                            else:
+                                json_buffer.append(json_line_text)
+                                
+                        except queue.Empty:
+                            logger.warning(f"[PARCIAL] Timeout esperando fin de JSON parcial")
+                            capturing_partial = False
+                            break
+                    
+                    continue  # Continuar con el siguiente ciclo del loop principal
+                
+                # Detección de score (fallback si no vino por JSON_PARTIAL)
+                if line_text and not score_sent and ("score" in line_text.lower()):
+                    try:
+                        import re
+                        score_match = re.search(r'score[:\s]*(\d+)', line_text, re.IGNORECASE)
+                        if score_match:
+                            score_val = int(score_match.group(1))
+                            logger.info(f"[SCORE] Detectado: {score_val}")
+                            import base64, glob
+                            base_dir = os.path.dirname(__file__)
+                            capturas_dir = os.path.abspath(os.path.join(base_dir, '..', 'capturas_camino_c'))
+                            screenshot_b64 = None
+                            dni_for_pattern = str(input_data)
+                            pattern = os.path.join(capturas_dir, f'score_{dni_for_pattern}_*.png')
+                            # Esperar hasta 12 segundos por la imagen
+                            for attempt in range(24):
+                                matching_files = glob.glob(pattern)
+                                if matching_files:
+                                    latest_image = max(matching_files, key=os.path.getctime)
+                                    try:
+                                        with open(latest_image, 'rb') as img_file:
+                                            img_data = img_file.read()
+                                            img_size_bytes = len(img_data)
+                                            screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
+                                            b64_size = len(screenshot_b64)
+                                            logger.info(f"[IMAGEN] Imagen encontrada: {os.path.basename(latest_image)}")
+                                            logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
+                                        break
+                                    except Exception as img_e:
+                                        logger.warning(f"[IMAGEN] Error leyendo imagen: {img_e}")
+                                time.sleep(0.5)
+                            if not screenshot_b64:
+                                any_pattern = os.path.join(capturas_dir, 'score_*.png')
+                                any_files = glob.glob(any_pattern)
+                                if any_files:
+                                    latest_any = max(any_files, key=os.path.getctime)
+                                    try:
+                                        with open(latest_any, 'rb') as img_file:
+                                            img_data = img_file.read()
+                                            img_size_bytes = len(img_data)
+                                            screenshot_b64 = base64.b64encode(img_data).decode('utf-8')
+                                            b64_size = len(screenshot_b64)
+                                            logger.info(f"[IMAGEN] Fallback usando última imagen: {os.path.basename(latest_any)}")
+                                            logger.info(f"[IMAGEN] Tamaño original: {img_size_bytes} bytes, base64: {b64_size} caracteres")
+                                    except Exception as img_e:
+                                        logger.warning(f"[IMAGEN] Error leyendo imagen fallback: {img_e}")
+                            # Enviar solo un update de score_obtenido, siempre con imagen si está disponible
+                            score_update = {
+                                "dni": input_data,
+                                "score": score_val,
+                                "etapa": "score_obtenido",
+                                "info": f"Score obtenido: {score_val}",
+                                "timestamp": int(time.time() * 1000)
+                            }
+                            if screenshot_b64:
+                                score_update["image"] = screenshot_b64
+                            send_partial_update(task_id, score_update, status="running")
+                            score_sent = True
+                            # Si el score está en el rango de deudas, el script ya enviará el update de "buscando_deudas"
+                            # No es necesario enviarlo aquí ni hacer sleep
+                    except Exception as e:
+                        logger.warning(f"[SCORE] Error: {e}")
             
             # Proceso terminado, mostrar stderr si hubo errores importantes
             if stderr_lines:
