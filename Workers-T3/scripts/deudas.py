@@ -99,14 +99,10 @@ def main():
         # Limpiar capturas previas
         clean_captures_dir(captures_dir)
         
-        # ===== ENVIAR UPDATE INICIAL =====
-        inicio_msg = "Iniciando análisis de cliente"
-        send_partial_update(dni, "", "iniciando", inicio_msg, admin_mode)
+        # ===== ENVIAR UPDATE INICIAL ÚNICO =====
+        send_partial_update(dni, "", "iniciando", f"Análisis iniciado para DNI {dni}", admin_mode)
 
         stages = []
-
-        # ===== ENVIAR UPDATE: OBTENIENDO SCORE =====
-        send_partial_update(dni, "", "obteniendo_score", "Analizando información del cliente", admin_mode)
 
         # Ejecutar Camino C
         script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_multi.py'))
@@ -235,7 +231,7 @@ def main():
         print(f"Score: {score}", flush=True)
         
         # Para score 80-89: NO enviar update de score, ir directo a validación de deudas
-        # Para otros scores: enviar score con imagen
+        # Para otros scores: enviar score con imagen INMEDIATAMENTE
         if not should_execute_camino_a:
             extra_data = {}
             if img_base64:
@@ -243,35 +239,10 @@ def main():
                 extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
                 
             send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
-            
-            # Etapa con resultado e imagen
-            stages.append({
-                "info": f"Score: {score}",
-                "image": img_base64,
-                "timestamp": int(os.path.getctime(latest_file)) if latest_file else 0
-            })
-        else:
-            # Score 80-89: guardar stage sin imagen, se enviará después de validar deudas
-            stages.append({
-                "info": f"Score: {score}",
-                "image": "",
-                "timestamp": 0
-            })
 
         
         if should_execute_camino_a:
-            # ===== ENVIAR UPDATE PARCIAL: BUSCANDO DEUDAS =====
-            info_msg = "Extrayendo información de deudas"
-                
-            send_partial_update(dni, score, "buscando_deudas", info_msg, admin_mode)
-            
-            stages.append({
-                "info": info_msg,
-                "image": "",
-                "timestamp": int(time.time()),
-                "etapa": "buscando_deudas",
-                "admin_mode": admin_mode
-            })
+            # Score 80-89 o modo admin: NO enviar nada, ir directo a validar deudas
             
             try:
                 # USAR CAMINO A PROVISIONAL para validación de deudas > $60k
@@ -418,8 +389,7 @@ def main():
                     if returncode == 0:
                         sys.stdout.flush()
                         
-                        # ===== ENVIAR UPDATE PARCIAL: EXTRACCIÓN COMPLETADA =====
-                        send_partial_update(dni, score, "extraccion_completada", "Procesando información de deudas", admin_mode)
+                        # NO enviar updates intermedios - ir directo al resultado
                         
                         # Intentar parsear JSON de Camino A desde stdout
                         camino_a_data = None
