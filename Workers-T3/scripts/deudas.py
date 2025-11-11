@@ -578,6 +578,7 @@ def main():
         final_camino_a = None
         imagen_final = None
         imagen_timestamp = None
+        score_modificado = False  # Flag para saber si se ejecutó Camino C corto
         
         try:
             # Buscar en stages el JSON de Camino A y la imagen correspondiente
@@ -590,6 +591,7 @@ def main():
                     if st.get('score_modificado') and st.get('image'):
                         imagen_final = st['image']
                         imagen_timestamp = st.get('timestamp', int(time.time()))
+                        score_modificado = True  # Se ejecutó Camino C corto
                     
                     # Imagen del Camino C original (deudas < $60k)
                     elif st.get('imagen_camino_c_original') and st.get('image'):
@@ -608,6 +610,11 @@ def main():
             # Si no hay Camino A, devolver el JSON del Camino C tal cual
             result = camino_c_json
             print(f"[RESULTADO] Usando JSON del Camino C directamente", file=sys.stderr)
+        
+        # ⭐ IMPORTANTE: Si se ejecutó Camino C corto, actualizar score a 98
+        if score_modificado:
+            result["score"] = "98"
+            print(f"[RESULTADO] Score actualizado a 98 (Camino C corto ejecutado)", file=sys.stderr)
             
         # Agregar información del modo administrativo al resultado final
         result["admin_mode"] = admin_mode
