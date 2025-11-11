@@ -1,11 +1,9 @@
-"""Camino C Corto - Solo captura de última cuenta para casos de deudas > $60k
+"""Camino C Corto - Solo captura de última cuenta
 
 Este script simplificado:
 1. Selecciona la última cuenta (última línea de la tabla)
 2. Saca captura de pantalla en las coordenadas del score
 3. Devuelve score 98 sin información adicional
-
-Se ejecuta cuando el Camino A detecta deudas > $60,000
 """
 from __future__ import annotations
 import os, sys, json, time
@@ -284,8 +282,7 @@ def run_corto(dni: str, coords_path: Path, shots_dir: str):
         "dni": dni,
         "score": "98",
         "success": captura_ok,
-        "screenshot": shot_path if captura_ok else "",
-        "info": "Captura de última cuenta (deudas > $60k)"
+        "screenshot": shot_path if captura_ok else ""
     }
     
     print(f"[CaminoC_CORTO] ========================================")

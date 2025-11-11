@@ -516,9 +516,6 @@ def main():
                                 script_c_corto = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_corto.py'))
                                 coords_c = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
                                 
-                                # Enviar update informando que se está procesando
-                                send_partial_update(dni, "80", "procesando_informacion", "Procesando información del cliente", admin_mode)
-                                
                                 cmd_c_corto = [
                                     sys.executable, '-u',
                                     script_c_corto,
