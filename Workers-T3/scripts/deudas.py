@@ -280,33 +280,6 @@ def main():
         # Extraer el score del JSON del Camino C
         score = camino_c_json.get("score", "No encontrado")
         
-        # Buscar captura más reciente
-        pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
-        files = glob.glob(pattern)
-
-        img_base64 = ""
-        latest_file = None
-        if files:
-            latest_file = max(files, key=os.path.getctime)
-            img_base64 = get_image_base64(latest_file)
-
-        # ===== ENVIAR UPDATE: SCORE OBTENIDO CON IMAGEN =====
-        extra_data = {}
-        if img_base64:
-            extra_data["image"] = img_base64
-            extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
-            
-        send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
-        
-        print(f"Score: {score}", flush=True)
-
-        # Etapa con resultado
-        stages.append({
-            "info": f"Score: {score}",
-            "image": img_base64,
-            "timestamp": int(os.path.getctime(latest_file)) if latest_file else 0
-        })
-
         # Verificar si el score es numérico y está en el rango 80-89
         try:
             import re as _re
@@ -317,6 +290,34 @@ def main():
 
         # LÓGICA DE DECISIÓN: Ejecutar Camino A si score 80-89 O modo admin
         should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) or admin_mode
+        
+        # Buscar captura más reciente
+        pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
+        files = glob.glob(pattern)
+
+        img_base64 = ""
+        latest_file = None
+        if files:
+            latest_file = max(files, key=os.path.getctime)
+            img_base64 = get_image_base64(latest_file)
+
+        # ===== ENVIAR UPDATE: SCORE OBTENIDO (SIN IMAGEN si score 80-89 para validar deudas primero) =====
+        extra_data = {}
+        # Solo enviar imagen si NO es score 80-89 (esos se validan con deudas primero)
+        if img_base64 and not should_execute_camino_a:
+            extra_data["image"] = img_base64
+            extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+            
+        send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
+        
+        print(f"Score: {score}", flush=True)
+
+        # Etapa con resultado (sin imagen si score 80-89, se enviará después de validar deudas)
+        stages.append({
+            "info": f"Score: {score}",
+            "image": img_base64 if not should_execute_camino_a else "",
+            "timestamp": int(os.path.getctime(latest_file)) if (latest_file and not should_execute_camino_a) else 0
+        })
 
         
         if should_execute_camino_a:
@@ -334,7 +335,8 @@ def main():
             })
             
             try:
-                script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
+                # USAR CAMINO A PROVISIONAL para validación de deudas > $60k
+                script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_provisional.py'))
                 coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
                 if os.path.exists(script_a):
@@ -506,12 +508,85 @@ def main():
 
                         # Agregar etapa y adjuntar datos estructurados SIN FILTRAR
                         if camino_a_data:
-                            stages.append({
-                                "info": "Camino A ejecutado",
-                                "image": "",
-                                "timestamp": int(time.time()),
-                                "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
-                            })
+                            # Verificar si el Camino A requiere ejecutar Camino C corto
+                            if camino_a_data.get("ejecutar_camino_c_corto"):
+                                print(f"[CaminoA] Deudas > $60k detectadas. Ejecutando Camino C corto...", file=sys.stderr)
+                                
+                                # ===== EJECUTAR CAMINO C CORTO =====
+                                script_c_corto = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_corto.py'))
+                                coords_c = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
+                                
+                                cmd_c_corto = [
+                                    sys.executable, '-u',
+                                    script_c_corto,
+                                    '--dni', dni,
+                                    '--coords', coords_c,
+                                    '--shots-dir', captures_dir
+                                ]
+                                
+                                try:
+                                    proc_c_corto = subprocess.run(
+                                        cmd_c_corto,
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=120
+                                    )
+                                    
+                                    if proc_c_corto.returncode == 0:
+                                        # Parsear resultado del Camino C corto
+                                        try:
+                                            c_corto_out = proc_c_corto.stdout
+                                            json_start_marker = "===JSON_RESULT_START==="
+                                            json_end_marker = "===JSON_RESULT_END==="
+                                            
+                                            start_pos = c_corto_out.find(json_start_marker)
+                                            if start_pos != -1:
+                                                json_start = c_corto_out.find('\n', start_pos) + 1
+                                                end_pos = c_corto_out.find(json_end_marker, json_start)
+                                                if end_pos != -1:
+                                                    json_text = c_corto_out[json_start:end_pos].strip()
+                                                    c_corto_data = json.loads(json_text)
+                                                    
+                                                    # Actualizar score a 98 y agregar captura
+                                                    score = "98"
+                                                    
+                                                    # Convertir captura a base64
+                                                    if c_corto_data.get("screenshot"):
+                                                        image_b64 = get_image_base64(c_corto_data["screenshot"])
+                                                        stages.append({
+                                                            "info": "Score modificado (deudas > $60k)",
+                                                            "image": image_b64,
+                                                            "timestamp": int(time.time())
+                                                        })
+                                                    
+                                                    print(f"[CaminoC_CORTO] Ejecutado correctamente. Score: 98", file=sys.stderr)
+                                        except Exception as e:
+                                            print(f"[CaminoC_CORTO] ERROR parseando resultado: {e}", file=sys.stderr)
+                                    else:
+                                        print(f"[CaminoC_CORTO] ERROR: Falló con código {proc_c_corto.returncode}", file=sys.stderr)
+                                
+                                except subprocess.TimeoutExpired:
+                                    print(f"[CaminoC_CORTO] ERROR: Timeout", file=sys.stderr)
+                                except Exception as e:
+                                    print(f"[CaminoC_CORTO] ERROR: {e}", file=sys.stderr)
+                                
+                                # No agregar datos de Camino A (están vacíos de todos modos)
+                            else:
+                                # Caso normal: deudas < $60k, enviar imagen del Camino C original
+                                stages.append({
+                                    "info": "Camino A ejecutado",
+                                    "image": img_base64,  # Enviar la imagen del Camino C original
+                                    "timestamp": int(os.path.getctime(latest_file)) if latest_file else int(time.time()),
+                                    "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
+                                })
+                                
+                                # Enviar update con la imagen del Camino C original
+                                if img_base64:
+                                    extra_data_final = {
+                                        "image": img_base64,
+                                        "timestamp": int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+                                    }
+                                    send_partial_update(dni, score, "deudas_validadas", f"Score: {score} (deudas validadas)", admin_mode, extra_data_final)
                         else:
                             stages.append({
                                 "info": "Camino A ejecutado (sin datos parseados)",
