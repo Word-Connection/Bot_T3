@@ -592,7 +592,12 @@ def main():
             result["admin_info"] = "Ejecutado en modo administrativo - Camino A forzado independientemente del score"
 
         # ===== ENVIAR UPDATE PARCIAL FINAL: DATOS LISTOS =====
-        has_deudas = bool(final_camino_a and (final_camino_a.get('fa_actual') or final_camino_a.get('cuenta_financiera')))
+        # Detectar si hay deudas (nuevo formato: fa_saldos, viejo formato: fa_actual/cuenta_financiera)
+        has_deudas = bool(final_camino_a and (
+            final_camino_a.get('fa_saldos') or 
+            final_camino_a.get('fa_actual') or 
+            final_camino_a.get('cuenta_financiera')
+        ))
         final_info = "Consulta finalizada"
         
         # Agregar imagen si existe (Camino C corto o Camino C original)
