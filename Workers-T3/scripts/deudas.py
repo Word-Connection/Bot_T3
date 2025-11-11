@@ -195,13 +195,25 @@ def main():
                     print(f"[CaminoC] Error parseando JSON del Camino C: {e}", file=sys.stderr)
         
         if not camino_c_json:
-            # Fallback: si no hay JSON con marcadores, construir uno básico
-            print(f"[CaminoC] No se encontró JSON del Camino C, usando fallback", file=sys.stderr)
+            # Fallback: si no hay JSON con marcadores, es un error crítico
+            print(f"[CaminoC] ERROR CRÍTICO: No se encontró JSON del Camino C", file=sys.stderr)
+            print(f"[CaminoC] Stdout primeros 500 caracteres: {stdout_c[:500]}", file=sys.stderr)
+            
+            # Enviar error al frontend
+            send_partial_update(dni, "", "error_analisis", "No se pudo obtener información del cliente", admin_mode)
+            
             camino_c_json = {
                 "dni": dni,
-                "score": "No encontrado",
-                "success": True
+                "error": "No se pudo obtener información del cliente",
+                "score": "Error",
+                "success": False
             }
+            
+            # Devolver resultado de error
+            print("===JSON_RESULT_START===", flush=True)
+            print(json.dumps(camino_c_json), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
+            sys.exit(1)
         
         # Extraer el score del JSON del Camino C
         score = camino_c_json.get("score", "No encontrado")
