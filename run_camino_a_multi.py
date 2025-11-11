@@ -678,10 +678,6 @@ def _buscar_por_id_cliente(conf: Dict[str, Any], id_cliente: str, base_delay: fl
     print(f"[camino_A] BUSCANDO POR ID CLIENTE: {id_cliente}")
     print(f"[camino_A] ========================================")
     
-    # Paso 0: Click en cliente_section para asegurar contexto
-    x, y = _xy(conf, 'cliente_section')
-    _click(x, y, 'cliente_section', base_delay)
-    
     # Paso 1: Limpiar campo DNI (x373, y218)
     _limpiar_campo(conf, 'dni_field_clear', 'Campo DNI', base_delay)
     

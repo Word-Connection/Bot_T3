@@ -943,7 +943,12 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                         print(f"[CaminoC] Error al leer clipboard (fraude): {e}")
                 
                 fraude_text_clean = (fraude_text or '').strip().lower()
-                print(f"[CaminoC] Texto copiado: '{fraude_text_clean}'")
+                # Convertir a ASCII seguro para evitar errores de encoding
+                try:
+                    fraude_safe = fraude_text_clean.encode('ascii', errors='replace').decode('ascii')
+                    print(f"[CaminoC] Texto copiado: '{fraude_safe}'")
+                except Exception as e:
+                    print(f"[CaminoC] Texto copiado: [texto con caracteres especiales] (longitud: {len(fraude_text_clean)})")
                 
                 # Verificar si contiene la palabra "fraude"
                 if 'fraude' in fraude_text_clean:

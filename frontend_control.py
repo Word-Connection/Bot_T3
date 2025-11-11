@@ -73,8 +73,8 @@ class BotController:
             self.worker_status = "esperando"
             self.countdown_cancelled = False
             self.countdown_remaining = 30
-            self.add_log("⏳ Iniciando bot en 30 segundos...")
-            self.add_log("🖥️ ABRE EL SISTEMA T3 AHORA y dejalo maximizado")
+            self.add_log("Iniciando bot en 30 segundos...")
+            self.add_log("ABRE EL SISTEMA T3 AHORA y dejalo maximizado")
             
             # Usar threading para el delay
             self.countdown_thread = threading.Thread(target=self.delayed_start, daemon=True)
@@ -92,7 +92,7 @@ class BotController:
                 self.countdown_cancelled = True
                 self.countdown_remaining = 0
                 self.worker_status = "detenido"
-                self.add_log("🛑 Inicio cancelado")
+                self.add_log("Inicio cancelado")
                 return jsonify({'success': True, 'message': 'Inicio cancelado'})
             
             # Detener worker si está ejecutando
@@ -107,7 +107,7 @@ class BotController:
         """Inicia el worker después de 30 segundos"""
         for i in range(30, 0, -1):
             if self.countdown_cancelled or self.worker_status != "esperando":
-                self.add_log("🛑 Countdown cancelado")
+                self.add_log("Countdown cancelado")
                 self.countdown_remaining = 0
                 return
             
@@ -115,7 +115,7 @@ class BotController:
             
             # Log cada 10 segundos o los últimos 5
             if i % 10 == 0 or i <= 5:
-                self.add_log(f"⏱️ Iniciando en {i} segundos... (Prepara el sistema T3)")
+                self.add_log(f"Iniciando en {i} segundos... (Prepara el sistema T3)")
             
             time.sleep(1)
         
@@ -129,7 +129,7 @@ class BotController:
             # Leer configuración del .env
             env_path = os.path.join("Workers-T3", ".env")
             if not os.path.exists(env_path):
-                self.add_log("❌ ERROR: No se encuentra el archivo .env")
+                self.add_log("ERROR: No se encuentra el archivo .env")
                 self.worker_status = "error"
                 return
             
@@ -155,22 +155,22 @@ class BotController:
             
             self.worker_status = "ejecutando"
             self.start_time = datetime.now()
-            self.add_log("✅ Bot iniciado correctamente")
-            self.add_log(f"🤖 Worker tipo: {config.get('WORKER_TYPE', 'deudas')}")
-            self.add_log(f"🆔 PC ID: {config.get('PC_ID', 'N/A')}")
+            self.add_log("Bot iniciado correctamente")
+            self.add_log(f"Worker tipo: {config.get('WORKER_TYPE', 'deudas')}")
+            self.add_log(f"PC ID: {config.get('PC_ID', 'N/A')}")
             
             # Monitorear output del worker
             threading.Thread(target=self.monitor_worker, daemon=True).start()
             
         except Exception as e:
-            self.add_log(f"❌ ERROR al iniciar: {str(e)}")
+            self.add_log(f"ERROR al iniciar: {str(e)}")
             self.worker_status = "error"
     
     def stop_worker_process(self):
         """Detiene el proceso del worker de forma robusta"""
         if self.worker_process:
             try:
-                self.add_log("🛑 Deteniendo bot...")
+                self.add_log("Deteniendo bot...")
                 
                 # Intentar terminar gracefully primero
                 self.worker_process.terminate()
@@ -178,27 +178,27 @@ class BotController:
                 try:
                     # Esperar hasta 3 segundos
                     self.worker_process.wait(timeout=3)
-                    self.add_log("✅ Bot detenido correctamente")
+                    self.add_log("Bot detenido correctamente")
                     
                 except subprocess.TimeoutExpired:
                     # Si no responde, forzar cierre
-                    self.add_log("⚠️ Forzando cierre del bot...")
+                    self.add_log("WARNING: Forzando cierre del bot...")
                     self.worker_process.kill()
                     
                     try:
                         self.worker_process.wait(timeout=2)
-                        self.add_log("✅ Bot forzado a cerrar")
+                        self.add_log("Bot forzado a cerrar")
                     except:
-                        self.add_log("⚠️ Proceso puede seguir activo")
+                        self.add_log("WARNING: Proceso puede seguir activo")
                 
             except Exception as e:
-                self.add_log(f"⚠️ Error al detener: {str(e)}")
+                self.add_log(f"WARNING: Error al detener: {str(e)}")
                 
                 # Último intento: kill directo
                 try:
                     if self.worker_process.poll() is None:  # Si aún está vivo
                         self.worker_process.kill()
-                        self.add_log("🔴 Proceso eliminado forzosamente")
+                        self.add_log("Proceso eliminado forzosamente")
                 except:
                     pass
             
@@ -216,7 +216,7 @@ class BotController:
         try:
             for line in iter(self.worker_process.stdout.readline, ''):
                 if line:
-                    self.add_log(f"🤖 {line.strip()}")
+                    self.add_log(f"[Worker] {line.strip()}")
                 
                 # Verificar si el proceso sigue corriendo
                 if self.worker_process.poll() is not None:
@@ -226,10 +226,10 @@ class BotController:
             if self.worker_status == "ejecutando":
                 self.worker_status = "detenido"
                 self.start_time = None
-                self.add_log("⚠️ El bot se detuvo inesperadamente")
+                self.add_log("WARNING: El bot se detuvo inesperadamente")
                 
         except Exception as e:
-            self.add_log(f"⚠️ Error monitoreando worker: {str(e)}")
+            self.add_log(f"WARNING: Error monitoreando worker: {str(e)}")
     
     def read_env_file(self, filepath):
         """Lee el archivo .env y retorna un diccionario"""
@@ -272,12 +272,12 @@ class BotController:
         """Ejecuta la aplicación"""
         # Verificar dependencias
         if not os.path.exists("Workers-T3"):
-            print("❌ ERROR: No se encuentra la carpeta Workers-T3")
+            print("ERROR: No se encuentra la carpeta Workers-T3")
             print("Ejecuta primero setup_and_run.bat para configurar el proyecto")
             return
         
-        print("🚀 Iniciando Frontend de Control Bot T3...")
-        print("📱 Abriendo navegador en http://localhost:5555")
+        print("Iniciando Frontend de Control Bot T3...")
+        print("Abriendo navegador en http://localhost:5555")
         
         # Abrir navegador automáticamente
         threading.Timer(1.0, lambda: webbrowser.open('http://localhost:5555')).start()
@@ -288,11 +288,11 @@ class BotController:
         try:
             self.app.run(host='localhost', port=5555, debug=False)
         except Exception as e:
-            print(f"❌ Error iniciando servidor: {e}")
+            print(f"ERROR iniciando servidor: {e}")
     
     def signal_handler(self, signum, frame):
         """Maneja la señal de cierre"""
-        print("\n🛑 Cerrando frontend...")
+        print("\nCerrando frontend...")
         if self.worker_process:
             self.stop_worker_process()
         sys.exit(0)

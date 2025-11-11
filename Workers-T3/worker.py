@@ -905,140 +905,8 @@ def process_deudas_result(task_id: str, dni: str, data: dict, start_time: float)
         # ⭐ Calcular tiempo de ejecución
         execution_time = int(time.time() - start_time)
         
-        # ===== NUEVO: DETECTAR SCORE 80 CON IDS DE CLIENTE =====
-        score_val = data.get("score", "")
-        ids_cliente = data.get("ids_cliente", [])
-        
-        if score_val == "80" and ids_cliente:
-            print(f"[DEUDAS] ========================================")
-            print(f"[DEUDAS] SCORE = 80 DETECTADO con {len(ids_cliente)} IDs de cliente")
-            print(f"[DEUDAS] Ejecutando Camino A...")
-            print(f"[DEUDAS] ========================================")
-            
-            # Enviar update parcial informando que se va a ejecutar Camino A
-            send_partial_update(task_id, {
-                "etapa": "ejecutando_camino_a",
-                "info": f"Score 80 detectado. Ejecutando Camino A con {len(ids_cliente)} cuentas...",
-                "score": score_val,
-                "total_cuentas": len(ids_cliente)
-            }, status="running")
-            
-            try:
-                import subprocess
-                import sys
-                from pathlib import Path
-                
-                # Construir comando para ejecutar Camino A
-                base_dir = os.path.dirname(__file__)
-                camino_a_script = os.path.abspath(os.path.join(base_dir, '..', 'run_camino_a_multi.py'))
-                
-                if not os.path.exists(camino_a_script):
-                    logger.error(f"[DEUDAS] ERROR: Script Camino A no encontrado: {camino_a_script}")
-                    send_partial_update(task_id, {
-                        "info": "Error: Script Camino A no encontrado",
-                        "score": score_val
-                    }, status="error")
-                    return False
-                
-                # Crear argumentos: DNI y luego los IDs de cliente como JSON
-                ids_cliente_json = json.dumps(ids_cliente)
-                
-                print(f"[DEUDAS] Ejecutando: python {camino_a_script} --dni {dni}")
-                print(f"[DEUDAS] IDs de cliente: {ids_cliente[:3]}{'...' if len(ids_cliente) > 3 else ''}")
-                
-                # Determinar el ejecutable de Python a usar
-                project_venv = os.path.join(base_dir, '..', 'venv', 'Scripts', 'python.exe')
-                if os.path.exists(project_venv):
-                    python_executable = project_venv
-                    logger.info(f"[DEUDAS] Usando Python del venv: {python_executable}")
-                else:
-                    python_executable = sys.executable
-                    logger.info(f"[DEUDAS] Usando Python actual: {python_executable}")
-                
-                # Ejecutar Camino A con timeout de 30 minutos
-                result_camino_a = subprocess.run(
-                    [python_executable, camino_a_script, "--dni", dni, ids_cliente_json],
-                    capture_output=True,
-                    text=True,
-                    timeout=1800  # 30 minutos
-                )
-                
-                print("[DEUDAS] ===== RESULTADO CAMINO A =====")
-                if result_camino_a.stdout:
-                    print(result_camino_a.stdout[-1000:])  # Últimas 1000 chars
-                if result_camino_a.stderr:
-                    logger.warning(f"[DEUDAS] STDERR: {result_camino_a.stderr[-500:]}")
-                print(f"[DEUDAS] Return code: {result_camino_a.returncode}")
-                print("[DEUDAS] ====================================")
-                
-                if result_camino_a.returncode != 0:
-                    logger.error(f"[DEUDAS] Camino A falló con código {result_camino_a.returncode}")
-                    send_partial_update(task_id, {
-                        "info": f"Error ejecutando Camino A (código {result_camino_a.returncode})",
-                        "score": score_val
-                    }, status="error")
-                    return False
-                
-                # Parsear resultado de Camino A
-                try:
-                    # Buscar JSON_RESULT en la salida
-                    stdout = result_camino_a.stdout
-                    start_marker = "===JSON_RESULT_START==="
-                    end_marker = "===JSON_RESULT_END==="
-                    
-                    start_pos = stdout.find(start_marker)
-                    if start_pos != -1:
-                        json_start = stdout.find('\n', start_pos) + 1
-                        end_pos = stdout.find(end_marker, json_start)
-                        
-                        if end_pos != -1:
-                            json_text = stdout[json_start:end_pos].strip()
-                            camino_a_data = json.loads(json_text)
-                            
-                            # Agregar execution_time y enviar resultado
-                            camino_a_data["execution_time"] = int(time.time() - start_time)
-                            camino_a_data["score"] = score_val  # Agregar score original
-                            
-                            print(f"[DEUDAS] Camino A completado exitosamente")
-                            print(f"[DEUDAS] Total FAs procesados: {camino_a_data.get('total_fas', 0)}")
-                            
-                            send_partial_update(task_id, camino_a_data, status="completed")
-                            print(f"[COMPLETADO] DNI {dni} con Camino A procesado exitosamente\n")
-                            return True
-                        else:
-                            logger.error("[DEUDAS] No se encontró marcador de fin de JSON")
-                    else:
-                        logger.error("[DEUDAS] No se encontró resultado JSON de Camino A")
-                    
-                    # Si no se pudo parsear, enviar error
-                    send_partial_update(task_id, {
-                        "info": "Error: No se pudo parsear resultado de Camino A",
-                        "score": score_val
-                    }, status="error")
-                    return False
-                    
-                except json.JSONDecodeError as je:
-                    logger.error(f"[DEUDAS] Error parseando JSON de Camino A: {je}")
-                    send_partial_update(task_id, {
-                        "info": "Error parseando resultado de Camino A",
-                        "score": score_val
-                    }, status="error")
-                    return False
-                
-            except subprocess.TimeoutExpired:
-                logger.error("[DEUDAS] Camino A excedió el tiempo límite (30 minutos)")
-                send_partial_update(task_id, {
-                    "info": "Timeout ejecutando Camino A (30 minutos)",
-                    "score": score_val
-                }, status="error")
-                return False
-            except Exception as e:
-                logger.error(f"[DEUDAS] Error ejecutando Camino A: {e}", exc_info=True)
-                send_partial_update(task_id, {
-                    "info": f"Error ejecutando Camino A: {str(e)[:100]}",
-                    "score": score_val
-                }, status="error")
-                return False
+        # ===== NOTA: La lógica de score=80 + IDs de cliente se maneja en deudas.py =====
+        # El worker solo recibe el resultado final después de que deudas.py haya ejecutado Camino A
         
         # ===== FLUJO NORMAL (sin score 80 o sin IDs) =====
         # Verificar si es el JSON de Camino A (nuevo o viejo formato)
@@ -1253,7 +1121,7 @@ def send_partial_update(task_id: str, partial_data: dict, status: str = "running
         logger.info(f"[HTTP] Enviado rápidamente")
         return True
     
-    logger.warning(f"[UPDATE] ⚠️ No se pudo enviar update inmediato (continuará procesando)")
+    logger.warning(f"[UPDATE] WARNING: No se pudo enviar update inmediato (continuará procesando)")
     # NO bloquear el proceso si el update falla - es mejor continuar
     return False
 

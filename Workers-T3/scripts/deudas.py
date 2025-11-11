@@ -265,7 +265,6 @@ def main():
                 json_text = stdout_c[json_start:end_pos].strip()
                 try:
                     camino_c_json = json.loads(json_text)
-                    print(f"[CaminoC] JSON parseado correctamente del Camino C", file=sys.stderr)
                 except Exception as e:
                     print(f"[CaminoC] Error parseando JSON del Camino C: {e}", file=sys.stderr)
         
@@ -342,7 +341,19 @@ def main():
                     dni_para_camino_a = dni
                     dni_fallback = camino_c_json.get("dni_fallback")
                     
-                    cmd_a = [sys.executable, '-u', script_a, '--dni', dni_para_camino_a]
+                    # Preparar comando base con archivo de coordenadas correcto
+                    coords_a_file = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
+                    cmd_a = [sys.executable, '-u', script_a, '--dni', dni_para_camino_a, '--coords', coords_a_file]
+                    
+                    # Agregar IDs de cliente si están disponibles del Camino C
+                    ids_cliente_camino_c = camino_c_json.get("ids_cliente", [])
+                    if ids_cliente_camino_c:
+                        ids_cliente_json = json.dumps(ids_cliente_camino_c)
+                        cmd_a.append(ids_cliente_json)
+                        print(f"[CaminoA] Pasando {len(ids_cliente_camino_c)} IDs de cliente del Camino C para filtrar", file=sys.stderr)
+                        print(f"[CaminoA] Primeros 3 IDs: {ids_cliente_camino_c[:3]}", file=sys.stderr)
+                    else:
+                        print(f"[CaminoA] No hay IDs de cliente del Camino C - extracción completa", file=sys.stderr)
                     
                     try:
                         process = subprocess.Popen(
@@ -408,9 +419,15 @@ def main():
                                 print(f"[CaminoA] No se encontraron registros con CUIT {dni_para_camino_a}", file=sys.stderr)
                                 print(f"[CaminoA] Reintentando con DNI fallback: {dni_fallback}", file=sys.stderr)
                                 
-                                # Reintentar con DNI
+                                # Reintentar con DNI - también pasar IDs de cliente
                                 # -u: unbuffered mode para output en tiempo real
-                                cmd_a_fallback = [sys.executable, '-u', script_a, '--dni', dni_fallback]
+                                cmd_a_fallback = [sys.executable, '-u', script_a, '--dni', dni_fallback, '--coords', coords_a_file]
+                                
+                                # Agregar IDs de cliente también en el fallback
+                                if ids_cliente_camino_c:
+                                    ids_cliente_json = json.dumps(ids_cliente_camino_c)
+                                    cmd_a_fallback.append(ids_cliente_json)
+                                    print(f"[CaminoA-FALLBACK] Pasando {len(ids_cliente_camino_c)} IDs de cliente para filtrar", file=sys.stderr)
                                 
                                 try:
                                     process = subprocess.Popen(
@@ -461,7 +478,6 @@ def main():
                                     print(f"[CaminoA] Timeout en fallback con DNI", file=sys.stderr)
                     
                     if returncode == 0:
-                        print(f"[CaminoA] Camino A completado exitosamente")
                         sys.stdout.flush()
                         
                         # ===== ENVIAR UPDATE PARCIAL: EXTRACCIÓN COMPLETADA =====
@@ -490,7 +506,6 @@ def main():
 
                         # Agregar etapa y adjuntar datos estructurados SIN FILTRAR
                         if camino_a_data:
-                            print(f"[DEBUG] Agregando camino_a_data a stages", file=sys.stderr)
                             stages.append({
                                 "info": "Camino A ejecutado",
                                 "image": "",
@@ -498,7 +513,6 @@ def main():
                                 "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
                             })
                         else:
-                            print(f"[DEBUG] camino_a_data es None, agregando stage sin datos", file=sys.stderr)
                             stages.append({
                                 "info": "Camino A ejecutado (sin datos parseados)",
                                 "image": "",
@@ -564,13 +578,6 @@ def main():
         final_info = "Consulta finalizada"
         send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, 
                           {"has_deudas": has_deudas, "success": True})
-
-        # ===== MOSTRAR COMPARATIVA: SCRAPING vs BACKEND =====
-        print("\n" + "="*80, flush=True)
-        print("RESULTADO FINAL - JSON QUE SE ENVIARÁ AL BACKEND", flush=True)
-        print("="*80, flush=True)
-        print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
-        print("="*80 + "\n", flush=True)
 
         # Output JSON limpio con marcador especial para que el worker lo identifique
         print("===JSON_RESULT_START===", flush=True)
