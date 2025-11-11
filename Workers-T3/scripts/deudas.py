@@ -62,76 +62,6 @@ def clean_captures_dir(captures_dir: str):
         print(f"WARNING: Error limpiando capturas_dir {captures_dir}: {e}", file=sys.stderr)
 
 
-def _format_camino_a_for_front(camino_a: dict) -> dict:
-    """Devuelve una versión compacta de Camino A para el front.
-    - Mantiene: dni, records (inicio_total, procesados)
-    - fa_actual: lista con items {apartado, saldo, id} (sin *_raw)
-    - cuenta_financiera: lista con {n, items: [{saldo, id}]}
-    """
-    if not isinstance(camino_a, dict):
-        return {}
-
-    out = {
-        "dni": camino_a.get("dni"),
-        "success": bool(camino_a.get("success", True)),
-        "records": {
-            "inicio_total": None,
-            "procesados": None,
-        },
-        "fa_actual": [],
-        "cuenta_financiera": [],
-    }
-
-    # records
-    try:
-        rec = camino_a.get("records") or {}
-        out["records"]["inicio_total"] = rec.get("inicio_total")
-        out["records"]["procesados"] = rec.get("procesados")
-    except Exception:
-        pass
-
-    # fa_actual
-    try:
-        fa_list = camino_a.get("fa_actual") or []
-        cleaned_fa = []
-        for it in fa_list:
-            if not isinstance(it, dict):
-                continue
-            cleaned_fa.append({
-                "apartado": it.get("apartado"),
-                "saldo": it.get("saldo"),
-                "id": it.get("id"),
-            })
-        out["fa_actual"] = cleaned_fa
-    except Exception:
-        pass
-
-    # cuenta_financiera
-    try:
-        cf_list = camino_a.get("cuenta_financiera") or []
-        cleaned_cf = []
-        for cf in cf_list:
-            if not isinstance(cf, dict):
-                continue
-            items = []
-            for it in (cf.get("items") or []):
-                if not isinstance(it, dict):
-                    continue
-                items.append({
-                    "saldo": it.get("saldo"),
-                    "id": it.get("id"),
-                })
-            cleaned_cf.append({
-                "n": cf.get("n"),
-                "items": items
-            })
-        out["cuenta_financiera"] = cleaned_cf
-    except Exception:
-        pass
-
-    return out
-
-
 def main():
     try:
         if len(sys.argv) < 2:
@@ -301,23 +231,32 @@ def main():
             latest_file = max(files, key=os.path.getctime)
             img_base64 = get_image_base64(latest_file)
 
-        # ===== ENVIAR UPDATE: SCORE OBTENIDO (SIN IMAGEN si score 80-89 para validar deudas primero) =====
-        extra_data = {}
-        # Solo enviar imagen si NO es score 80-89 (esos se validan con deudas primero)
-        if img_base64 and not should_execute_camino_a:
-            extra_data["image"] = img_base64
-            extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
-            
-        send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
-        
+        # ===== ENVIAR UPDATE: SCORE OBTENIDO (solo para casos normales, NO para score 80-89) =====
         print(f"Score: {score}", flush=True)
-
-        # Etapa con resultado (sin imagen si score 80-89, se enviará después de validar deudas)
-        stages.append({
-            "info": f"Score: {score}",
-            "image": img_base64 if not should_execute_camino_a else "",
-            "timestamp": int(os.path.getctime(latest_file)) if (latest_file and not should_execute_camino_a) else 0
-        })
+        
+        # Para score 80-89: NO enviar update de score, ir directo a validación de deudas
+        # Para otros scores: enviar score con imagen
+        if not should_execute_camino_a:
+            extra_data = {}
+            if img_base64:
+                extra_data["image"] = img_base64
+                extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+                
+            send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
+            
+            # Etapa con resultado e imagen
+            stages.append({
+                "info": f"Score: {score}",
+                "image": img_base64,
+                "timestamp": int(os.path.getctime(latest_file)) if latest_file else 0
+            })
+        else:
+            # Score 80-89: guardar stage sin imagen, se enviará después de validar deudas
+            stages.append({
+                "info": f"Score: {score}",
+                "image": "",
+                "timestamp": 0
+            })
 
         
         if should_execute_camino_a:
@@ -337,14 +276,13 @@ def main():
             try:
                 # USAR CAMINO A PROVISIONAL para validación de deudas > $60k
                 script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_provisional.py'))
-                coords_a = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
+                coords_a_file = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
                 if os.path.exists(script_a):
                     dni_para_camino_a = dni
                     dni_fallback = camino_c_json.get("dni_fallback")
                     
-                    # Preparar comando base con archivo de coordenadas correcto
-                    coords_a_file = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
+                    # Preparar comando base con archivo de coordenadas
                     cmd_a = [sys.executable, '-u', script_a, '--dni', dni_para_camino_a, '--coords', coords_a_file]
                     
                     # Agregar IDs de cliente si están disponibles del Camino C
@@ -369,7 +307,6 @@ def main():
                         stdout_lines = []
                         stderr_lines = []
                         
-                        import threading
                         def read_stderr():
                             for line in process.stderr:
                                 stderr_lines.append(line)
@@ -379,8 +316,7 @@ def main():
                         stderr_thread.daemon = True
                         stderr_thread.start()
                         
-                        # Leer stdout con timeout
-                        import signal
+                        # Leer stdout
                         try:
                             for line in process.stdout:
                                 stdout_lines.append(line)
@@ -558,21 +494,16 @@ def main():
                                                     # Actualizar score a 98
                                                     score = "98"
                                                     
-                                                    # Convertir captura a base64 y enviar al frontend
+                                                    # Convertir captura a base64
                                                     if c_corto_data.get("screenshot") and os.path.exists(c_corto_data["screenshot"]):
                                                         image_b64 = get_image_base64(c_corto_data["screenshot"])
                                                         
-                                                        # Enviar update con imagen y score 98
-                                                        extra_data_corto = {
-                                                            "image": image_b64,
-                                                            "timestamp": int(time.time() * 1000)
-                                                        }
-                                                        send_partial_update(dni, "98", "analisis_completado", "Cliente apto para venta", admin_mode, extra_data_corto)
-                                                        
+                                                        # Guardar imagen para enviar en resultado final (NO enviar update parcial aquí)
                                                         stages.append({
                                                             "info": "Cliente apto para venta",
                                                             "image": image_b64,
-                                                            "timestamp": int(time.time())
+                                                            "timestamp": int(time.time()),
+                                                            "score_modificado": True  # Flag para indicar que se debe usar esta imagen
                                                         })
                                                     else:
                                                         print(f"[CaminoC_CORTO] WARN: No se encontró captura en {c_corto_data.get('screenshot')}", file=sys.stderr)
@@ -600,21 +531,14 @@ def main():
                                 
                                 # No agregar datos de Camino A (están vacíos de todos modos)
                             else:
-                                # Caso normal: deudas < $60k, enviar imagen del Camino C original
+                                # Caso normal: deudas < $60k, guardar datos para enviar imagen en update final
                                 stages.append({
                                     "info": "Camino A ejecutado",
-                                    "image": img_base64,  # Enviar la imagen del Camino C original
+                                    "image": img_base64,  # Imagen del Camino C original
                                     "timestamp": int(os.path.getctime(latest_file)) if latest_file else int(time.time()),
-                                    "camino_a": camino_a_data  # PASAR JSON COMPLETO SIN FILTROS
+                                    "camino_a": camino_a_data,  # PASAR JSON COMPLETO SIN FILTROS
+                                    "imagen_camino_c_original": True  # Flag para indicar imagen del Camino C
                                 })
-                                
-                                # Enviar update con la imagen del Camino C original
-                                if img_base64:
-                                    extra_data_final = {
-                                        "image": img_base64,
-                                        "timestamp": int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
-                                    }
-                                    send_partial_update(dni, score, "analisis_completado", f"Score: {score}", admin_mode, extra_data_final)
                         else:
                             stages.append({
                                 "info": "Camino A ejecutado (sin datos parseados)",
@@ -647,18 +571,32 @@ def main():
                     "image": "",
                     "timestamp": int(time.time())
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[CaminoA] ERROR: Excepción en except general: {e}", file=sys.stderr)
 
         # Preparar respuesta final
         final_camino_a = None
+        imagen_final = None
+        imagen_timestamp = None
+        
         try:
-            # Buscar en stages el JSON de Camino A
+            # Buscar en stages el JSON de Camino A y la imagen correspondiente
             for st in reversed(stages):
-                if isinstance(st, dict) and 'camino_a' in st:
-                    final_camino_a = st['camino_a']
-                    break
-        except Exception:
+                if isinstance(st, dict):
+                    if 'camino_a' in st:
+                        final_camino_a = st['camino_a']
+                    
+                    # Imagen del Camino C corto (deudas > $60k)
+                    if st.get('score_modificado') and st.get('image'):
+                        imagen_final = st['image']
+                        imagen_timestamp = st.get('timestamp', int(time.time()))
+                    
+                    # Imagen del Camino C original (deudas < $60k)
+                    elif st.get('imagen_camino_c_original') and st.get('image'):
+                        imagen_final = st['image']
+                        imagen_timestamp = st.get('timestamp', int(time.time()))
+        except Exception as e:
+            print(f"[RESULTADO] Error buscando datos finales: {e}", file=sys.stderr)
             final_camino_a = None
 
         # Si hay datos de Camino A, combinarlos con el JSON del Camino C
@@ -679,8 +617,14 @@ def main():
         # ===== ENVIAR UPDATE PARCIAL FINAL: DATOS LISTOS =====
         has_deudas = bool(final_camino_a and (final_camino_a.get('fa_actual') or final_camino_a.get('cuenta_financiera')))
         final_info = "Consulta finalizada"
-        send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, 
-                          {"has_deudas": has_deudas, "success": True})
+        
+        # Agregar imagen si existe (Camino C corto o Camino C original)
+        extra_data_final = {"has_deudas": has_deudas, "success": True}
+        if imagen_final:
+            extra_data_final["image"] = imagen_final
+            extra_data_final["timestamp"] = int(imagen_timestamp * 1000) if imagen_timestamp and imagen_timestamp < 10000000000 else imagen_timestamp or int(time.time() * 1000)
+        
+        send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, extra_data_final)
 
         # Output JSON limpio con marcador especial para que el worker lo identifique
         print("===JSON_RESULT_START===", flush=True)
