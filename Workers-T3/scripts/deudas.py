@@ -510,11 +510,14 @@ def main():
                         if camino_a_data:
                             # Verificar si el Camino A requiere ejecutar Camino C corto
                             if camino_a_data.get("ejecutar_camino_c_corto"):
-                                print(f"[CaminoA] Deudas > $60k detectadas. Ejecutando Camino C corto...", file=sys.stderr)
+                                print(f"[DEUDAS] Condición especial detectada. Ejecutando Camino C corto...", file=sys.stderr)
                                 
                                 # ===== EJECUTAR CAMINO C CORTO =====
                                 script_c_corto = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_corto.py'))
                                 coords_c = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
+                                
+                                # Enviar update informando que se está procesando
+                                send_partial_update(dni, "80", "procesando_informacion", "Procesando información del cliente", admin_mode)
                                 
                                 cmd_c_corto = [
                                     sys.executable, '-u',
@@ -525,17 +528,25 @@ def main():
                                 ]
                                 
                                 try:
-                                    proc_c_corto = subprocess.run(
+                                    # Ejecutar con output en tiempo real
+                                    proc_c_corto = subprocess.Popen(
                                         cmd_c_corto,
-                                        capture_output=True,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
                                         text=True,
-                                        timeout=120
+                                        bufsize=1
                                     )
+                                    
+                                    c_corto_out = ""
+                                    for line in proc_c_corto.stdout:
+                                        print(line, end='', flush=True)
+                                        c_corto_out += line
+                                    
+                                    proc_c_corto.wait(timeout=120)
                                     
                                     if proc_c_corto.returncode == 0:
                                         # Parsear resultado del Camino C corto
                                         try:
-                                            c_corto_out = proc_c_corto.stdout
                                             json_start_marker = "===JSON_RESULT_START==="
                                             json_end_marker = "===JSON_RESULT_END==="
                                             
@@ -547,28 +558,48 @@ def main():
                                                     json_text = c_corto_out[json_start:end_pos].strip()
                                                     c_corto_data = json.loads(json_text)
                                                     
-                                                    # Actualizar score a 98 y agregar captura
+                                                    # Actualizar score a 98
                                                     score = "98"
                                                     
-                                                    # Convertir captura a base64
-                                                    if c_corto_data.get("screenshot"):
+                                                    # Convertir captura a base64 y enviar al frontend
+                                                    if c_corto_data.get("screenshot") and os.path.exists(c_corto_data["screenshot"]):
                                                         image_b64 = get_image_base64(c_corto_data["screenshot"])
+                                                        
+                                                        # Enviar update con imagen y score 98
+                                                        extra_data_corto = {
+                                                            "image": image_b64,
+                                                            "timestamp": int(time.time() * 1000)
+                                                        }
+                                                        send_partial_update(dni, "98", "analisis_completado", "Cliente apto para venta", admin_mode, extra_data_corto)
+                                                        
                                                         stages.append({
-                                                            "info": "Score modificado (deudas > $60k)",
+                                                            "info": "Cliente apto para venta",
                                                             "image": image_b64,
                                                             "timestamp": int(time.time())
                                                         })
+                                                    else:
+                                                        print(f"[CaminoC_CORTO] WARN: No se encontró captura en {c_corto_data.get('screenshot')}", file=sys.stderr)
                                                     
                                                     print(f"[CaminoC_CORTO] Ejecutado correctamente. Score: 98", file=sys.stderr)
+                                                else:
+                                                    print(f"[CaminoC_CORTO] ERROR: No se encontró marcador JSON_RESULT_END", file=sys.stderr)
+                                            else:
+                                                print(f"[CaminoC_CORTO] ERROR: No se encontró marcador JSON_RESULT_START", file=sys.stderr)
                                         except Exception as e:
                                             print(f"[CaminoC_CORTO] ERROR parseando resultado: {e}", file=sys.stderr)
+                                            import traceback
+                                            traceback.print_exc(file=sys.stderr)
                                     else:
                                         print(f"[CaminoC_CORTO] ERROR: Falló con código {proc_c_corto.returncode}", file=sys.stderr)
+                                        print(f"[CaminoC_CORTO] Output: {c_corto_out[:500]}", file=sys.stderr)
                                 
                                 except subprocess.TimeoutExpired:
-                                    print(f"[CaminoC_CORTO] ERROR: Timeout", file=sys.stderr)
+                                    print(f"[CaminoC_CORTO] ERROR: Timeout (>120s)", file=sys.stderr)
+                                    proc_c_corto.kill()
                                 except Exception as e:
                                     print(f"[CaminoC_CORTO] ERROR: {e}", file=sys.stderr)
+                                    import traceback
+                                    traceback.print_exc(file=sys.stderr)
                                 
                                 # No agregar datos de Camino A (están vacíos de todos modos)
                             else:
@@ -586,7 +617,7 @@ def main():
                                         "image": img_base64,
                                         "timestamp": int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
                                     }
-                                    send_partial_update(dni, score, "deudas_validadas", f"Score: {score} (deudas validadas)", admin_mode, extra_data_final)
+                                    send_partial_update(dni, score, "analisis_completado", f"Score: {score}", admin_mode, extra_data_final)
                         else:
                             stages.append({
                                 "info": "Camino A ejecutado (sin datos parseados)",
