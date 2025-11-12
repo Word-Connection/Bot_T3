@@ -82,6 +82,9 @@ def main():
 
     dni = sys.argv[1]
 
+    # ===== ENVIAR UPDATE INICIAL INMEDIATAMENTE =====
+    send_partial_update(dni, "iniciando", f"Análisis iniciado para DNI {dni}")
+
     stages = []
 
     # Ruta al CSV principal
@@ -192,6 +195,9 @@ def main():
         ]
         
         print(f"DEBUG: Comando a ejecutar: {' '.join(cmd_args)}", file=sys.stderr)
+        
+        # ===== ENVIAR UPDATE DE PROGRESO =====
+        send_partial_update(dni, "running", "Iniciando scraping de movimientos...")
         
         # Ejecutar Camino B (similar a como deudas.py ejecuta Camino C)
         process = subprocess.Popen(
