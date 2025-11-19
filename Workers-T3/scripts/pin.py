@@ -9,6 +9,7 @@ import subprocess
 import json
 import os
 import logging
+import time
 from pathlib import Path
 
 # Configuración de logging
@@ -16,6 +17,21 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s: %(message)s'
 )
+
+
+def send_partial_update(telefono: str, etapa: str, info: str, extra_data: dict | None = None):
+    payload = {
+        "telefono": telefono,
+        "etapa": etapa,
+        "info": info,
+        "timestamp": int(time.time() * 1000)
+    }
+    if extra_data:
+        payload.update(extra_data)
+
+    print("===JSON_PARTIAL_START===", flush=True)
+    print(json.dumps(payload), flush=True)
+    print("===JSON_PARTIAL_END===", flush=True)
 
 def get_project_root():
     """Obtiene la ruta raíz del proyecto"""
@@ -99,6 +115,12 @@ def analyze_pin_result(process):
     
     # Intentar parsear el JSON del resultado
     mensaje_default = "pin enviado"
+    result_metadata = {
+        "screenshot_path": None,
+        "screenshot_base64": None,
+        "entered": None
+    }
+
     if process.returncode == 0:
         # Buscar JSON entre marcadores
         try:
@@ -109,13 +131,17 @@ def analyze_pin_result(process):
                     json_text = stdout[start_idx + len("===JSON_RESULT_START==="):end_idx].strip()
                     result_data = json.loads(json_text)
                     mensaje_default = result_data.get("mensaje", mensaje_default)
+                    result_metadata["screenshot_path"] = result_data.get("screenshot_path")
+                    result_metadata["screenshot_base64"] = result_data.get("screenshot_base64")
+                    result_metadata["entered"] = result_data.get("entered")
                     logging.info(f"Mensaje del Camino D: {mensaje_default}")
         except Exception as e:
             logging.warning(f"No se pudo parsear JSON del Camino D: {e}")
         
         return {
             "estado": "exitoso",
-            "mensaje": mensaje_default
+            "mensaje": mensaje_default,
+            **result_metadata
         }
     else:
         return {
@@ -139,37 +165,44 @@ def main():
     
     logging.info("Iniciando pin.py")
     logging.info(f"Procesando envío de PIN para teléfono {telefono}")
-    
+
     # ===== ENVIAR UPDATE PARCIAL: VALIDACIÓN =====
-    import time
-    validacion_update = {
-        "telefono": telefono,
-        "etapa": "validacion",
-        "info": "Iniciando envío de PIN",
-        "timestamp": int(time.time() * 1000)
-    }
-    print("===JSON_PARTIAL_START===", flush=True)
-    print(json.dumps(validacion_update), flush=True)
-    print("===JSON_PARTIAL_END===", flush=True)
+    send_partial_update(telefono, "validacion", "Iniciando envío de PIN")
     
     try:
         # Configurar directorios
         project_root = get_project_root()
         
         print(f"Iniciando envío de PIN para teléfono {telefono}")
+        send_partial_update(telefono, "preparacion", "Iniciando Camino D para envío de PIN")
         
         # Ejecutar Camino D
         process = execute_camino_d(telefono, project_root)
         
         # Analizar resultado
         resultado_analisis = analyze_pin_result(process)
+        if resultado_analisis.get("estado") == "exitoso":
+            send_partial_update(
+                telefono,
+                "pin_enviado",
+                resultado_analisis.get("mensaje", "PIN enviado")
+            )
+        else:
+            send_partial_update(
+                telefono,
+                "error",
+                resultado_analisis.get("mensaje", "Error en envío")
+            )
         
         # Construir resultado final
         resultado_final = {
             "telefono": telefono,
             "estado": resultado_analisis["estado"],
             "mensaje": resultado_analisis["mensaje"],
-            "timestamp": int(time.time() * 1000)
+            "timestamp": int(time.time() * 1000),
+            "screenshot_path": resultado_analisis.get("screenshot_path"),
+            "screenshot_base64": resultado_analisis.get("screenshot_base64"),
+            "enter_presses": resultado_analisis.get("entered")
         }
         
         # Log del resultado
@@ -199,6 +232,8 @@ def main():
         print(f"[ERROR] {error_msg}")
         
         # Resultado de error
+        send_partial_update(telefono, "error", str(e))
+
         resultado_error = {
             "telefono": telefono,
             "estado": "error",
