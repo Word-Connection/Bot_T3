@@ -983,6 +983,18 @@ def process_pin_operation(task_id: str, telefono: str, data: dict, start_time: f
             "execution_time": execution_time,  # ⭐ Agregar tiempo de ejecución
             "timestamp": int(time.time() * 1000)
         }
+
+        if data.get("screenshot_path"):
+            final_data["screenshot_path"] = data.get("screenshot_path")
+
+        image_b64 = (
+            data.get("image")
+            or data.get("imagen")
+            or data.get("img")
+            or data.get("screenshot_base64")
+        )
+        if image_b64:
+            final_data["image"] = image_b64
         
         print("\n" + "="*80)
         print("[WORKER.PY] ENVIANDO RESULTADO FINAL AL BACKEND")

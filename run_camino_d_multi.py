@@ -112,8 +112,8 @@ def _capture_screenshot(identifier: str) -> tuple[Optional[str], Optional[str]]:
         print(f"[CaminoD] ADVERTENCIA: No se pudo crear directorio de capturas: {mkdir_err}")
         return None, None
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"pin_{identifier}_{timestamp}.png"
+    timestamp = str(int(time.time()))
+    filename = f"score_{identifier}_{timestamp}.png"
     filepath = CAPTURE_DIR / filename
 
     try:
@@ -210,12 +210,13 @@ def run(dni: str, coords_path: Path, enter_times_override: int | None = None):
 
     # Emitir resultado final con marcadores
     result = {
-        "dni": dni, 
-        "success": True, 
+        "dni": dni,
+        "success": True,
         "entered": enter_times,
         "mensaje": "Envío exitoso",
         "screenshot_path": screenshot_path,
-        "screenshot_base64": screenshot_b64
+        "screenshot_base64": screenshot_b64,
+        "image": screenshot_b64
     }
     
     print("===JSON_RESULT_START===")

@@ -118,7 +118,8 @@ def analyze_pin_result(process):
     result_metadata = {
         "screenshot_path": None,
         "screenshot_base64": None,
-        "entered": None
+        "entered": None,
+        "image": None
     }
 
     if process.returncode == 0:
@@ -134,6 +135,8 @@ def analyze_pin_result(process):
                     result_metadata["screenshot_path"] = result_data.get("screenshot_path")
                     result_metadata["screenshot_base64"] = result_data.get("screenshot_base64")
                     result_metadata["entered"] = result_data.get("entered")
+                    image_b64 = result_data.get("image") or result_data.get("screenshot_base64")
+                    result_metadata["image"] = image_b64
                     logging.info(f"Mensaje del Camino D: {mensaje_default}")
         except Exception as e:
             logging.warning(f"No se pudo parsear JSON del Camino D: {e}")
@@ -204,6 +207,10 @@ def main():
             "screenshot_base64": resultado_analisis.get("screenshot_base64"),
             "enter_presses": resultado_analisis.get("entered")
         }
+
+        imagen_base64 = resultado_analisis.get("image") or resultado_analisis.get("screenshot_base64")
+        if imagen_base64:
+            resultado_final["image"] = imagen_base64
         
         # Log del resultado
         if resultado_analisis["estado"] == "exitoso":
