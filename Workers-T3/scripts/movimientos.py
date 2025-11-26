@@ -196,6 +196,14 @@ def main():
         
         print(f"DEBUG: Comando a ejecutar: {' '.join(cmd_args)}", file=sys.stderr)
         
+        # ===== LIMPIAR EL LOG ANTES DE EMPEZAR =====
+        try:
+            if log_path.exists():
+                log_path.unlink()
+                print(f"DEBUG: Log limpiado: {log_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: No se pudo limpiar el log: {e}", file=sys.stderr)
+        
         # ===== ENVIAR UPDATE DE PROGRESO =====
         send_partial_update(dni, "running", "Iniciando scraping de movimientos...")
         
@@ -274,8 +282,12 @@ def main():
                                         if service_id in lineas_procesadas:
                                             continue
                                         
-                                        # Verificar que service_id parece un ID válido (números o formato conocido)
-                                        if not (service_id.isdigit() or service_id in ['Cancelado', 'Terminado']):
+                                        # IMPORTANTE: Filtrar estados que no son IDs de servicio válidos
+                                        if service_id in ['Cancelado', 'Terminado', 'Pendiente', 'En proceso']:
+                                            continue
+                                        
+                                        # Verificar que service_id parece un ID válido (solo números)
+                                        if not service_id.isdigit():
                                             continue
                                         
                                         # Contar esta línea procesada

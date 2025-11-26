@@ -757,31 +757,26 @@ def _collect_movimientos_uno_por_uno(conf: Dict[str, Any], log_path: Path, servi
         # Calcular coordenada Y actual con offset
         current_y = id_servicio_y + (position * offset_y)
         
-        print(f"[MultiB] Posicion {position + 1}: Y={current_y}")
-        
         # Limpiar clipboard
         _clear_clipboard()
-        time.sleep(0.2)
+        time.sleep(0.1)
         
-        # IMPORTANTE: Left-click primero para seleccionar la fila
-        print(f"[MultiB] Left-click para seleccionar fila en ({id_servicio_x}, {current_y})")
-        pg.moveTo(id_servicio_x, current_y, duration=0.15)
-        time.sleep(0.2)
-        pg.click()  # Click izquierdo para seleccionar
-        time.sleep(0.3)
-        
-        # Ahora right-click en la misma posicion
-        print(f"[MultiB] Right-click para menu contextual en ({id_servicio_x}, {current_y})")
-        pg.rightClick()
-        time.sleep(0.3)
-        
-        # Click en opcion Copiar del menu contextual (ajustando Y con el mismo offset)
-        current_copy_y = id_copy_y + (position * offset_y)
-        print(f"[MultiB] Click en Copiar ({id_copy_x}, {current_copy_y})")
-        pg.moveTo(id_copy_x, current_copy_y, duration=0.1)
+        # Left-click para seleccionar la fila
+        pg.moveTo(id_servicio_x, current_y, duration=0.1)
         time.sleep(0.1)
         pg.click()
-        time.sleep(0.5)
+        time.sleep(0.15)
+        
+        # Right-click para menu contextual
+        pg.rightClick()
+        time.sleep(0.2)
+        
+        # Click en Copiar
+        current_copy_y = id_copy_y + (position * offset_y)
+        pg.moveTo(id_copy_x, current_copy_y, duration=0.08)
+        time.sleep(0.08)
+        pg.click()
+        time.sleep(0.3)
         
         # Leer clipboard
         clipboard_content = _get_clipboard_text().strip()
@@ -809,32 +804,34 @@ def _collect_movimientos_uno_por_uno(conf: Dict[str, Any], log_path: Path, servi
         parts = re.split(r'\t+|\s{2,}', data_line)
         parts = [p.strip() for p in parts if p.strip()]
         
-        # DEBUG: Mostrar todas las partes parseadas
-        print(f"[MultiB] DEBUG - Total líneas: {len(lines)}")
-        print(f"[MultiB] DEBUG - Línea de datos: '{data_line[:100]}...'")
-        print(f"[MultiB] DEBUG - Total partes encontradas: {len(parts)}")
-        for i, part in enumerate(parts[:10]):  # Mostrar primeras 10 partes
-            print(f"[MultiB] DEBUG - parts[{i}] = '{part}'")
-        
         # Indices: [0]=Accion, [1]=Producto, [2]=ID servicio, [3]=Estado, [4]=ID orden, [5]=Fecha aplicacion
         id_servicio_extracted = parts[2] if len(parts) > 2 else ""
         fecha_aplicacion = parts[5] if len(parts) > 5 else ""
         
-        # Agregar ID a la lista temporal (solo si es valido)
-        if id_servicio_extracted and id_servicio_extracted.strip():
+        # Validar que el ID sea numérico (para filtrar estados como "Cancelado", "Terminado", etc.)
+        # Si se copia un estado, significa que la celda de ID está vacía
+        estados_invalidos = ['Cancelado', 'En espera', 'Activo', 'Finalizado', 'Futura', 'Inicial', 
+                            'Modificación en curso', 'Modificar', 'Negociación', 'Para cancelar', 
+                            'Para finalizar', 'Suspendido', 'Terminado', 'Pendiente', 'En proceso']
+        
+        id_es_valido = (id_servicio_extracted and 
+                       id_servicio_extracted.strip() and 
+                       id_servicio_extracted.strip().isdigit() and
+                       id_servicio_extracted.strip() not in estados_invalidos)
+        
+        # Agregar ID a la lista temporal (solo si es valido y numérico)
+        if id_es_valido:
             ids_encontrados.append(id_servicio_extracted.strip())
         
         # Registrar en log
         log_entry = f"{service_id}  Pos{position+1} | ID Servicio: {id_servicio_extracted} | Fecha: {fecha_aplicacion} | Full: {clipboard_content[:200]}"
         _append_log_raw(log_path, log_entry)
         
-        print(f"[MultiB] Movimiento {position + 1}: ID={id_servicio_extracted}, Fecha={fecha_aplicacion}")
-        
         # Actualizar para siguiente iteracion
         prev_clipboard = clipboard_content
         position += 1
         
-        time.sleep(base_delay)
+        time.sleep(0.3)
     
     print(f"[MultiB] Total de IDs recolectados (TEMPORAL): {len(ids_encontrados)}")
     print(f"[MultiB] IDs encontrados: {ids_encontrados}")
@@ -1006,50 +1003,37 @@ def run(
         
         # Paso 1: preparar / limpiar campo service id
         _click(svc_x, svc_y, 'Service ID field', _step_delay(step_delays,0,0.5))
-        print(f"[MultiB] === INICIANDO LIMPIEZA Service ID ===")
-        print(f"[MultiB] Preparando para escribir: '{service_id}'")
         
         # Espera antes de cualquier acción
         time.sleep(0.3)
         
-        # Limpieza idéntica al DNI: 2 clicks simples + Delete + backspace
-        print("[MultiB] Limpiando Service ID con 2 clicks + Delete...")
+        # Limpieza: 2 clicks simples + Delete + backspace
         pg.click()
         time.sleep(0.1)
         pg.click()
         time.sleep(0.2)
         pg.press('delete')
-        print("[MultiB] Esperando aparición del punto automático...")
-        time.sleep(0.6)  # Esperar 0.6 segundos para que aparezca el punto
-        print("[MultiB] Eliminando punto con backspace...")
-        pg.press('backspace')  # Eliminar el punto que aparece automáticamente
+        time.sleep(0.6)
+        pg.press('backspace')
         time.sleep(0.2)
         
         # Segundo pase: re-seleccionar campo y borrar 3 veces
-        print("[MultiB] Aplicando segundo pase de limpieza...")
-        print("[MultiB] Re-seleccionando campo Service ID...")
         pg.click(svc_x, svc_y)
         time.sleep(0.2)
         
-        print("[MultiB] Borrando 3 veces...")
         for i in range(3):
             pg.press('backspace')
-            print(f"[MultiB] Backspace {i+1}/3")
             time.sleep(0.1)
         time.sleep(0.2)
-        
-        print("[MultiB] === LIMPIEZA Service ID COMPLETADA ===")
         
         # Paso 2 escribir ID
         _type(service_id, _step_delay(step_delays,1,0.5))
         # Paso 3 Enter
         _press_enter(_step_delay(step_delays,2,0.5))
         
-        # ===== VALIDACIÓN TEMPRANA: Verificar si la línea tiene movimientos =====
-        print(f"[MultiB] Validando si la línea tiene movimientos...")
-        time.sleep(post_enter_delay)  # Esperar a que cargue la línea
+        # Validar si la línea tiene movimientos
+        time.sleep(post_enter_delay)
         
-        # Coordenadas para validación (mismas que en _collect_movimientos_uno_por_uno)
         id_servicio_coords = conf.get('id_servicio', {})
         id_copy_coords = conf.get('id_copy', {})
         
@@ -1058,25 +1042,18 @@ def run(
         id_copy_x = id_copy_coords.get('x', 338)
         id_copy_y = id_copy_coords.get('y', 310)
         
-        # Limpiar portapapeles
-        print("[MultiB] Portapapeles limpiado con pyperclip")
         _clear_clipboard()
         time.sleep(0.2)
         
-        # Left-click para seleccionar fila
-        print(f"[MultiB] Left-click para seleccionar fila en ({id_servicio_x}, {id_servicio_y})")
+        # Validar contenido
         pg.moveTo(id_servicio_x, id_servicio_y, duration=0.15)
         time.sleep(0.2)
         pg.click()
         time.sleep(0.3)
         
-        # Right-click para menu contextual
-        print(f"[MultiB] Right-click para menu contextual en ({id_servicio_x}, {id_servicio_y})")
         pg.rightClick()
         time.sleep(0.3)
         
-        # Click en Copiar
-        print(f"[MultiB] Click en Copiar ({id_copy_x}, {id_copy_y})")
         pg.moveTo(id_copy_x, id_copy_y, duration=0.1)
         time.sleep(0.1)
         pg.click()
