@@ -196,11 +196,11 @@ def main():
         
         print(f"DEBUG: Comando a ejecutar: {' '.join(cmd_args)}", file=sys.stderr)
         
-        # ===== LIMPIAR EL LOG ANTES DE EMPEZAR =====
+        # ===== LIMPIAR EL LOG ANTES DE INICIAR EL MONITOREO =====
         try:
             if log_path.exists():
                 log_path.unlink()
-                print(f"DEBUG: Log limpiado: {log_path}", file=sys.stderr)
+                print(f"DEBUG: Log limpiado antes de iniciar: {log_path}", file=sys.stderr)
         except Exception as e:
             print(f"WARNING: No se pudo limpiar el log: {e}", file=sys.stderr)
         
@@ -244,11 +244,18 @@ def main():
             def monitor_log_file():
                 nonlocal total_movimientos
                 last_position = 0
+                process_finished = False
                 
-                while process.poll() is None or last_position < log_path.stat().st_size if log_path.exists() else False:
+                while True:
                     if not log_path.exists():
                         time.sleep(0.5)
+                        if process.poll() is not None:
+                            break
                         continue
+                    
+                    # Verificar si el proceso terminó
+                    if process.poll() is not None:
+                        process_finished = True
                     
                     try:
                         with log_path.open('r', encoding='utf-8', errors='replace') as f:
@@ -323,6 +330,39 @@ def main():
                     except Exception as e:
                         print(f"WARNING: Error monitoreando log: {e}", file=sys.stderr)
                     
+                    # Si el proceso terminó, hacer una última lectura y salir
+                    if process_finished:
+                        time.sleep(0.5)  # Dar tiempo a que se escriban las últimas líneas
+                        # Última lectura del log
+                        try:
+                            if log_path.exists():
+                                with log_path.open('r', encoding='utf-8', errors='replace') as f:
+                                    f.seek(last_position)
+                                    final_lines = f.readlines()
+                                    for line in final_lines:
+                                        line = line.strip()
+                                        if not line or line.startswith('DNI_'):
+                                            continue
+                                        if '  ' in line:
+                                            parts = line.split('  ', 1)
+                                            if len(parts) == 2:
+                                                service_id = parts[0].strip()
+                                                content = parts[1].strip()
+                                                if service_id and content and service_id.isdigit() and service_id not in lineas_procesadas:
+                                                    lineas_procesadas.add(service_id)
+                                                    if content and not content.startswith("No Tiene"):
+                                                        total_movimientos += 1
+                                                        ultimo_mov = content[:60] if len(content) > 60 else content
+                                                        info_msg = f"Línea {service_id}: Último movimiento {ultimo_mov}"
+                                                        send_partial_update(dni, "linea_procesada", info_msg, {
+                                                            "service_id": service_id,
+                                                            "count": 1,
+                                                            "ultimo": ultimo_mov
+                                                        })
+                        except Exception as e:
+                            print(f"WARNING: Error en lectura final: {e}", file=sys.stderr)
+                        break
+                    
                     time.sleep(0.3)  # Check cada 300ms
             
             log_monitor_thread = threading.Thread(target=monitor_log_file, daemon=True)
@@ -336,7 +376,7 @@ def main():
             # Esperar a que termine
             returncode = process.wait(timeout=600)
             stderr_thread.join(timeout=5)
-            log_monitor_thread.join(timeout=2)  # Esperar thread de monitoreo
+            log_monitor_thread.join(timeout=5)  # Dar más tiempo al thread para procesar las últimas líneas
             
         except subprocess.TimeoutExpired:
             process.kill()
