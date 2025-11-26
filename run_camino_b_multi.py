@@ -858,11 +858,11 @@ def run(
     single_id: Optional[str] = None,
 ):
     pg.FAILSAFE = True
-    start_delay = float(os.getenv('COORDS_START_DELAY','0.8'))
+    start_delay = float(os.getenv('COORDS_START_DELAY','0.5'))
     base_step_delay = float(os.getenv('STEP_DELAY','0.8'))
-    post_enter_delay = float(os.getenv('POST_ENTER_DELAY','2.5'))
-    filter_second_delay = float(os.getenv('FILTER_SECOND_DELAY','0.5'))
-    clear_hold_seconds = float(os.getenv('CLEAR_HOLD_SECONDS','1.5'))
+    post_enter_delay = float(os.getenv('POST_ENTER_DELAY','1.8'))
+    filter_second_delay = float(os.getenv('FILTER_SECOND_DELAY','0.4'))
+    clear_hold_seconds = float(os.getenv('CLEAR_HOLD_SECONDS','1.0'))
     log_path = log_file or Path('multi_copias.log')
     # Reiniciar log en cada ejecución
     try:
@@ -919,25 +919,25 @@ def run(
         if fx or fy:
             print(f"[MultiB] Limpiando {field_label}...")
             pg.click(fx, fy)
-            time.sleep(0.2)
+            time.sleep(0.15)
             
             # Limpieza: 2 clicks + delete + backspace
             pg.click()
-            time.sleep(0.1)
+            time.sleep(0.08)
             pg.click()
-            time.sleep(0.2)
+            time.sleep(0.15)
             pg.press('delete')
-            time.sleep(0.6)
+            time.sleep(0.4)
             pg.press('backspace')
-            time.sleep(0.2)
+            time.sleep(0.15)
             
             # Segundo pase
             pg.click(fx, fy)
-            time.sleep(0.2)
+            time.sleep(0.15)
             for i in range(3):
                 pg.press('backspace')
-                time.sleep(0.1)
-            time.sleep(0.2)
+                time.sleep(0.08)
+            time.sleep(0.15)
     
     # Limpiar los 3 campos siempre al inicio
     _limpiar_campo('service_id_field', 'Service ID')
@@ -961,11 +961,11 @@ def run(
     
     x, y = _xy(conf, field_key)
     print(f"[MultiB] Procesando {field_label}: '{dni}' en coordenadas ({x},{y})")
-    _click(x, y, field_label, base_step_delay)
+    _click(x, y, field_label, 0.3)
     
     # Escribir el DNI/CUIT (los campos ya fueron limpiados al inicio)
     print(f"[MultiB] Escribiendo {field_label}: '{dni}'")
-    _type(dni, base_step_delay)
+    _type(dni, 0.3)
     
     # NUEVO: Si modo búsqueda directa, presionar Enter y recolectar IDs del sistema
     if busqueda_directa_mode:

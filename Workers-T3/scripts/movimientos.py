@@ -253,26 +253,8 @@ def main():
                                 if not line:
                                     continue
                                 
-                                # Detectar formato de búsqueda directa
+                                # Ignorar líneas de búsqueda directa (no son movimientos reales)
                                 if line.startswith('DNI_') and '| ID Servicio:' in line:
-                                    import re
-                                    match = re.search(r'ID Servicio:\s*(\S+)', line)
-                                    fecha_match = re.search(r'Fecha:\s*([^|]+)', line)
-                                    
-                                    if match:
-                                        service_id = match.group(1).strip()
-                                        fecha = fecha_match.group(1).strip() if fecha_match else "Sin fecha"
-                                        
-                                        if service_id and service_id.lower() != 'desconocido' and service_id not in lineas_procesadas:
-                                            lineas_procesadas.add(service_id)
-                                            total_movimientos += 1
-                                            
-                                            info_msg = f"Línea {service_id}: 1 movimiento(s) - Último: {fecha}"
-                                            send_partial_update(dni, "linea_procesada", info_msg, {
-                                                "service_id": service_id,
-                                                "count": 1,
-                                                "ultimo": fecha
-                                            })
                                     continue
                                 
                                 # Formato normal de log: "service_id  contenido"
@@ -282,37 +264,50 @@ def main():
                                         service_id = parts[0].strip()
                                         content = parts[1].strip()
                                         
-                                        if service_id and content and service_id not in lineas_procesadas:
-                                            # Contar esta línea procesada
-                                            lineas_procesadas.add(service_id)
+                                        # Filtrar líneas que son headers o basura
+                                        if not service_id or not content:
+                                            continue
+                                        if service_id in ['ha', 'Acción de orden', 'Producto'] or len(service_id) < 3:
+                                            continue
+                                        if 'Acción de orden' in content or 'Producto    ID de servicio' in content:
+                                            continue
+                                        if service_id in lineas_procesadas:
+                                            continue
+                                        
+                                        # Verificar que service_id parece un ID válido (números o formato conocido)
+                                        if not (service_id.isdigit() or service_id in ['Cancelado', 'Terminado']):
+                                            continue
+                                        
+                                        # Contar esta línea procesada
+                                        lineas_procesadas.add(service_id)
+                                        
+                                        # Formato simple con solo fecha (ej: "2944375483  25/11/2025 13:16:14")
+                                        if content and not content.startswith("No Tiene"):
+                                            total_movimientos += 1
+                                            ultimo_mov = content[:60] if len(content) > 60 else content
                                             
-                                            # Formato simple con solo fecha (ej: "2944375483  25/11/2025 13:16:14")
-                                            if content and not content.startswith("No Tiene"):
-                                                total_movimientos += 1
-                                                ultimo_mov = content[:60] if len(content) > 60 else content
+                                            info_msg = f"Línea {service_id}: Último movimiento {ultimo_mov}"
+                                            send_partial_update(dni, "linea_procesada", info_msg, {
+                                                "service_id": service_id,
+                                                "count": 1,
+                                                "ultimo": ultimo_mov
+                                            })
+                                        # Formato con múltiples movimientos
+                                        elif content != "No Tiene Pedido" and "No Tiene Movimientos" not in content:
+                                            lines = content.replace('\\n', '\n').split('\n')
+                                            valid_movs = [mov.strip() for mov in lines if mov.strip() and mov.strip() != "No Tiene Pedido"]
+                                            
+                                            if valid_movs:
+                                                count_movs = len(valid_movs)
+                                                total_movimientos += count_movs
+                                                ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
                                                 
-                                                info_msg = f"Línea {service_id}: Último movimiento {ultimo_mov}"
+                                                info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
                                                 send_partial_update(dni, "linea_procesada", info_msg, {
                                                     "service_id": service_id,
-                                                    "count": 1,
+                                                    "count": count_movs,
                                                     "ultimo": ultimo_mov
                                                 })
-                                            # Formato con múltiples movimientos
-                                            elif content != "No Tiene Pedido" and "No Tiene Movimientos" not in content:
-                                                lines = content.replace('\\n', '\n').split('\n')
-                                                valid_movs = [mov.strip() for mov in lines if mov.strip() and mov.strip() != "No Tiene Pedido"]
-                                                
-                                                if valid_movs:
-                                                    count_movs = len(valid_movs)
-                                                    total_movimientos += count_movs
-                                                    ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
-                                                    
-                                                    info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
-                                                    send_partial_update(dni, "linea_procesada", info_msg, {
-                                                        "service_id": service_id,
-                                                        "count": count_movs,
-                                                        "ultimo": ultimo_mov
-                                                    })
                     except Exception as e:
                         print(f"WARNING: Error monitoreando log: {e}", file=sys.stderr)
                     
