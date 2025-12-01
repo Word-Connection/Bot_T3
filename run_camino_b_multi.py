@@ -943,10 +943,10 @@ def run(
     print("[MultiB] === LIMPIEZA INICIAL COMPLETADA ===")
 
     # 0) DNI/CUIT inicial (fuera del loop por ID)
-    # Detectar si es CUIT (11 dígitos) o DNI (8 dígitos o menos)
+    # Detectar si es CUIT (10-11 dígitos) o DNI (7-8 dígitos)
     dni_clean = dni.strip()
-    is_cuit = len(dni_clean) == 11 and dni_clean.isdigit()
-    
+    is_cuit = len(dni_clean) >= 10 and dni_clean.isdigit()
+   
     if is_cuit:
         field_key = 'cuit_field'
         field_label = 'CUIT field'
