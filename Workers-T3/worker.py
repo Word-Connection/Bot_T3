@@ -168,8 +168,8 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
         raise
 
 def validate_dni(dni: str) -> bool:
-    """Acepta DNI (7 dígitos) o CUIT (11 dígitos)."""
-    return bool(re.match(r'^\d{7}$', dni)) or bool(re.match(r'^\d{11}$', dni))
+    """Acepta DNI (7-8 dígitos) o CUIT (11 dígitos)."""
+    return bool(re.match(r'^\d{7,8}$', dni)) or bool(re.match(r'^\d{11}$', dni))
 
 def validate_telefono(telefono: str) -> bool:
     return bool(re.match(r'^\d{10}$', telefono))
