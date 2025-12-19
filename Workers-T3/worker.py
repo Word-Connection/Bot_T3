@@ -17,7 +17,11 @@ import websocket
 import threading
 
 load_dotenv()
-os.makedirs("logs", exist_ok=True)
+
+# Obtener el directorio base del script para rutas absolutas
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 # -----------------------------
 # Configuración de argumentos
@@ -56,7 +60,7 @@ console_formatter = logging.Formatter(
 )
 console_handler.setFormatter(console_formatter)
 
-file_handler = logging.FileHandler(f"logs/worker_{args.pc_id}.log", encoding='utf-8')
+file_handler = logging.FileHandler(os.path.join(LOGS_DIR, f"worker_{args.pc_id}.log"), encoding='utf-8')
 file_handler.setLevel(log_level)
 file_formatter = logging.Formatter(
     '{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}'
@@ -1202,8 +1206,7 @@ def main_loop():
     logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Modo: WebSocket")
     logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}")
     
-    # Crear directorio de logs
-    os.makedirs("logs", exist_ok=True)
+    # El directorio de logs ya fue creado al inicio del script
     
     # Registro inicial
     for attempt in range(5):
