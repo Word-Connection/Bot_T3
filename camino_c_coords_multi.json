@@ -97,8 +97,8 @@
     "y": 332
   },
   "nombre_cliente_btn": {
-    "x": 504,
-    "y": 111
+    "x": 308,
+    "y": 52
   },
   "press_enter_after_nombre": {
     "action": "press_enter",
