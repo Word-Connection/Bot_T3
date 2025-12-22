@@ -1,0 +1,307 @@
+{
+  "cliente_section": {
+    "x": 135,
+    "y": 168
+  },
+  "tipo_doc_btn": {
+    "x": 244,
+    "y": 237
+  },
+  "dni_option": {
+    "x": 140,
+    "y": 276
+  },
+  "cuit_option": {
+    "x": 151,
+    "y": 296
+  },
+  "dni_field": {
+    "x": 913,
+    "y": 240
+  },
+  "cuit_tipo_doc_btn": {
+    "x": 179,
+    "y": 262
+  },
+  "cuit_dni_field": {
+    "x": 163,
+    "y": 295
+  },
+  "cuit_field": {
+    "x": 912,
+    "y": 263
+  },
+  "client_id_field": {
+      "x": 100,
+      "y": 237
+  },
+  "client_name_field": {
+      "x": 36,
+      "y": 236
+  },
+  "copi_id_field": {
+      "x": 77,
+      "y": 241
+  },
+  "no_cuit_field": {
+    "x": 1325,
+    "y": 180
+  },
+  "copiar_todo_btn": {
+    "x": 24,
+    "y": 174
+  },
+  "resaltar_btn": {
+    "x": 97,
+    "y": 229
+  },
+  "copiado_btn": {
+    "x": 96,
+    "y": 212
+  },
+  "dni_from_cuit": {
+    "x": 911,
+    "y": 174
+  },
+  "extra_cuit": {
+    "x": 888,
+    "y": 173
+  },
+  "extra_cuit_select_all": {
+    "x": 959,
+    "y": 336
+  },
+  "extra_cuit_copy": {
+    "x": 937,
+    "y": 262
+  },
+  "fraude_section": {
+    "x": 877,
+    "y": 412
+  },
+  "fraude_copy": {
+    "x": 921,
+    "y": 423
+  },
+  "close_fraude_btn": {
+    "x": 1246,
+    "y": 332
+  },
+  "nombre_cliente_btn": {
+    "x": 308,
+    "y": 52
+  },
+  "press_enter_after_nombre": {
+    "action": "press_enter",
+    "delay": 1
+  },
+  "score_area_copy": {
+    "x": 981,
+    "y": 66
+  },
+  "copy_menu_option": {
+    "x": 1016,
+    "y": 76
+  },
+  "score_area_page": {
+    "x": 981,
+    "y": 66
+  },
+  "screenshot_confirm": {
+    "x": 953,
+    "y": 979
+  },
+  "close_tab_btn": {
+    "x": 1896,
+    "y": 138
+  },
+  "home_area": {
+    "x": 888,
+    "y": 110
+  },
+  "screenshot_top_left": {
+    "x": 10,
+    "y": 47
+  },
+  "screenshot_bottom_right": {
+    "x": 1763,
+    "y": 412
+  },
+  "screenshot_region": {
+    "x": 10,
+    "y": 47,
+    "w": 1720,
+    "h": 365
+  },
+  "close_score_tab": {
+    "x": 1902,
+    "y": 139
+  },
+  "validation_telefonico": {
+    "x": 40,
+    "y": 226
+  },
+  "validation_telefonico_copy": {
+    "x": 58,
+    "y": 242
+  },
+  "fa_cobranza_btn": {
+    "x": 580,
+    "y": 328
+  },
+  "fa_cobranza_etapa": {
+    "x": 540,
+    "y": 418
+  },
+  "fa_cobranza_actual": {
+    "x": 555,
+    "y": 454
+  },
+  "fa_cobranza_buscar": {
+    "x": 38,
+    "y": 356
+  },
+  "fa_actual_area_rightclick": {
+    "x": 540,
+    "y": 437
+  },
+  "fa_actual_area_copy": {
+    "x": 555,
+    "y": 443
+  },
+  "fa_actual_saldo_rightclick": {
+    "x": 19,
+    "y": 209
+  },
+  "fa_actual_resaltar_todo": {
+    "x": 91,
+    "y": 374
+  },
+  "fa_actual_saldo_copy": {
+    "x": 59,
+    "y": 298
+  },
+  "fa_actual_id_rightclick": {
+    "x": 26,
+    "y": 174
+  },
+  "fa_actual_id_copy": {
+    "x": 44,
+    "y": 185
+  },
+  "resumen_facturacion_btn": {
+    "x": 700,
+    "y": 329
+  },
+  "cuenta_financiera_btn": {
+    "x": 67,
+    "y": 437
+  },
+  "mostrar_lista_btn": {
+    "x": 50,
+    "y": 498
+  },
+  "cuenta_financiera_label_click": {
+    "x": 83,
+    "y": 440,
+    "comment": "Click en el label de Cuenta Financiera"
+  },
+  "cuenta_financiera_label_rightclick": {
+    "x": 82,
+    "y": 441,
+    "comment": "Right-click para copiar label"
+  },
+  "cuenta_financiera_label_copy_menu": {
+    "x": 110,
+    "y": 454,
+    "comment": "Opción copiar del menú contextual"
+  },
+  "cuenta_financiera_cantidad_click": {
+    "x": 351,
+    "y": 436,
+    "comment": "Click en el número de cantidad"
+  },
+  "cuenta_financiera_cantidad_rightclick": {
+    "x": 352,
+    "y": 436,
+    "comment": "Right-click para copiar cantidad"
+  },
+  "cuenta_financiera_cantidad_copy_menu": {
+    "x": 373,
+    "y": 446,
+    "comment": "Opción copiar del menú contextual"
+  },
+  "cuenta_financiera_first_cell": {
+    "x": 100,
+    "y": 595,
+    "comment": "Primera celda de la lista (ID)"
+  },
+  "cuenta_financiera_first_cell_rightclick": {
+    "x": 100,
+    "y": 595,
+    "comment": "Right-click en primera celda"
+  },
+  "cuenta_financiera_first_cell_copy_menu": {
+    "x": 129,
+    "y": 604,
+    "comment": "Opción copiar del menú contextual"
+  },
+  "copy_area": {
+    "x": 556,
+    "y": 590
+  },
+  "house_area": {
+    "x": 954,
+    "y": 112
+  },
+  "ver_todos_btn": {
+    "x": 1814,
+    "y": 151
+  },
+  "ver_todos_right_click": {
+    "x": 72,
+    "y": 189
+  },
+  "resaltar_todas_btn": {
+    "x": 110,
+    "y": 247
+  },
+  "ver_todos_right_click_2": {
+    "x": 80,
+    "y": 185
+  },
+  "copiar_todas_btn": {
+    "x": 137,
+    "y": 221
+  },
+  "close_ver_todos": {
+    "x": 1888,
+    "y": 129
+  },
+  "primera_cuenta": {
+    "x": 97,
+    "y": 240
+  },
+  "seleccionar_btn": {
+    "x": 50,
+    "y": 980
+  },
+  "clear_clipboard": {
+    "action": "clear_clipboard"
+  },
+  "steps": [
+    "cliente_section",
+    "tipo_doc_btn",
+    "dni_option",
+    "dni_field",
+    "client_id_field",
+    "seleccionar_btn",
+    "nombre_cliente_btn",
+    "press_enter_after_nombre",
+    "score_area",
+    "screenshot_region",
+    "close_tab_btn",
+    "home_area",
+    "clear_clipboard"
+  ]
+}

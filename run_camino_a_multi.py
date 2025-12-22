@@ -941,7 +941,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
             
             # Ejecutar Camino A Único saltando los pasos iniciales
             python_exe = sys.executable
-            unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+            unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_viejo.py')
             
             cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
             print(f"[camino_A] Ejecutando: {' '.join(cmd)}")
@@ -969,7 +969,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
         
         # Ejecutar Camino A Único saltando los pasos iniciales
         python_exe = sys.executable
-        unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+        unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_viejo.py')
         
         cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
         print(f"[camino_A] Ejecutando: {' '.join(cmd)}")

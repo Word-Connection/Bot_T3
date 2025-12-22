@@ -38,7 +38,7 @@ try:
 except Exception:
     pyperclip = None
 
-DEFAULT_COORDS_FILE = 'camino_a_unico_coords_multi.json'
+DEFAULT_COORDS_FILE = 'camino_a_viejo_coords_multi.json'
 
 STEP_DESC = {
     0: 'cliente_section',
@@ -67,7 +67,6 @@ def _load_coords(path: Path) -> Dict[str, Any]:
     except Exception as e:
         print(f"No se pudo leer coords {path}: {e}")
         sys.exit(2)
-
 
 def _xy(conf: Dict[str, Any], key: str) -> tuple[int,int]:
     v = conf.get(key) or {}
@@ -107,13 +106,6 @@ def _click(x: int, y: int, label: str, delay: float):
     time.sleep(delay)
 
 
-def _type(text: str, delay: float):
-    print(f"[CaminoA] Typing text: '{text}' (interval=0.05)")
-    pg.typewrite(text, interval=0.05)
-    print(f"[CaminoA]   -> sleep({delay}s)")
-    time.sleep(delay)
-
-
 def _press_enter(delay_after: float):
     print(f"[CaminoA] Press ENTER key")
     pg.press('enter')
@@ -121,59 +113,12 @@ def _press_enter(delay_after: float):
     time.sleep(delay_after)
 
 
-def _send_down_presses(count: int, interval: float, use_pynput: bool):
-    """Envía flecha abajo 'count' veces. Si use_pynput y disponible, usa pynput (Key.down
-    con press/release explícito). Si no, usa pyautogui.press.
-    """
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        print(f"[CaminoA] Navegación con pynput: {count} x Key.down (interval={interval}s)")
-        for i in range(count):
-            print(f"[CaminoA]   -> press(Key.down) #{i+1}")
-            kb.press(KBKey.down)
-            time.sleep(0.04)
-            kb.release(KBKey.down)
-            time.sleep(interval)
-        return
-    # Fallback pyautogui
-    print(f"[CaminoA] Navegación con pyautogui: {count} x down (interval={interval}s)")
-    try:
-        pg.press('down', presses=count, interval=interval)
-    except TypeError:
-        for i in range(count):
-            print(f"[CaminoA]   -> press('down') #{i+1}")
-            pg.press('down')
-            time.sleep(interval)
-
-def _send_right_presses(count: int, interval: float, use_pynput: bool):
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        for _ in range(count):
-            kb.press(KBKey.right); time.sleep(0.04); kb.release(KBKey.right); time.sleep(interval)
-        return
-    try:
-        pg.press('right', presses=count, interval=interval)
-    except TypeError:
-        for _ in range(count):
-            pg.press('right'); time.sleep(interval)
-
-def _send_left_presses(count: int, interval: float, use_pynput: bool):
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        for _ in range(count):
-            kb.press(KBKey.left); time.sleep(0.04); kb.release(KBKey.left); time.sleep(interval)
-        return
-    try:
-        pg.press('left', presses=count, interval=interval)
-    except TypeError:
-        for _ in range(count):
-            pg.press('left'); time.sleep(interval)
-
 def _extract_first_number(txt: str) -> str:
     if not txt:
         return ''
     m = re.search(r"\d+", txt)
     return m.group(0) if m else ''
+
 
 def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA] Doble click {label} ({x},{y})")
@@ -192,6 +137,7 @@ def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA]   -> sleep({delay_after}s)")
     time.sleep(delay_after)
 
+
 def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA] Right click {label} ({x},{y})")
     if x and y:
@@ -209,6 +155,7 @@ def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
         print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
     print(f"[CaminoA]   -> sleep({delay_after}s)")
     time.sleep(delay_after)
+
 
 def _maybe_close_ok_popup(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float):
     """Intenta cerrar el popup de OK de manera rápida:
@@ -341,86 +288,6 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     return "Llamada"
 
 
-def _scan_popup_regions_and_handle_ok(base_delay: float, log_dir: str = 'capturas_popup') -> bool:
-    """Escanea 4 regiones alrededor del área indicada para encontrar el popup por imagen
-    y, si se encuentra, hace click en el botón OK (centro del match). Además guarda las capturas.
-
-    Requiere que la variable de entorno OK_POPUP_IMAGE apunte a la imagen del botón/ventana a detectar.
-
-    Regresa True si detectó y pulsó OK, False en caso contrario.
-    """
-    img_path = os.getenv('OK_POPUP_IMAGE', '').strip()
-    if not img_path:
-        # Sin imagen de referencia no podemos identificar, pero igualmente capturamos para depurar
-        img_path = ''
-
-    # Coordenadas de sonda (arriba-derecha, abajo-derecha, abajo-izquierda, arriba-izquierda)
-    probes = [
-        (int(os.getenv('POPUP_P1_X', '1179')), int(os.getenv('POPUP_P1_Y', '461'))),
-        (int(os.getenv('POPUP_P2_X', '1180')), int(os.getenv('POPUP_P2_Y', '575'))),
-        (int(os.getenv('POPUP_P3_X', '740')),  int(os.getenv('POPUP_P3_Y', '572'))),
-        (int(os.getenv('POPUP_P4_X', '740')),  int(os.getenv('POPUP_P4_Y', '462'))),
-    ]
-    try:
-        scan_w = int(os.getenv('POPUP_SCAN_W', '260'))
-        scan_h = int(os.getenv('POPUP_SCAN_H', '120'))
-    except Exception:
-        scan_w, scan_h = 260, 120
-    try:
-        confd = float(os.getenv('OK_POPUP_CONFIDENCE', '0.9'))
-    except Exception:
-        confd = 0.9
-
-    # Flag para deshabilitar guardado de capturas de popup
-    disable_popup_captures = os.getenv('DISABLE_POPUP_CAPTURES', '1') in ('1','true','True')
-    if not disable_popup_captures:
-        try:
-            Path(log_dir).mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-
-    ts = time.strftime('%Y%m%d_%H%M%S')
-    detected = False
-    for idx, (px, py) in enumerate(probes, start=1):
-        region = (max(0, px), max(0, py), max(10, scan_w), max(10, scan_h))
-        snap = None
-        try:
-            snap = pg.screenshot(region=region)
-            if not disable_popup_captures:
-                out = Path(log_dir) / f'popup_probe_{idx}_{ts}.png'
-                try:
-                    snap.save(out)
-                except Exception:
-                    pass
-        except Exception:
-            snap = None
-        
-        if img_path:
-            try:
-                box = pg.locateOnScreen(img_path, region=region, confidence=confd)
-            except Exception:
-                box = None
-            if box:
-                try:
-                    cx, cy = pg.center(box)
-                except Exception:
-                    cx = getattr(box, 'left', 0) + getattr(box, 'width', 0)//2
-                    cy = getattr(box, 'top', 0) + getattr(box, 'height', 0)//2
-                _click(cx, cy, 'ok_popup_img_region', 0.1)
-                detected = True
-                break
-
-    time.sleep(min(0.2, base_delay))
-    return detected
-
-def _looks_current(txt: str) -> bool:
-    if not txt:
-        return False
-    s = (txt or '').strip().lower()
-    # Aceptar indicadores en español e inglés
-    return ('current' in s) or ('actual' in s) or ('activo' in s) or ('seleccionado' in s)
-
-
 def _get_clipboard_text() -> str:
     if pyperclip:
         try:
@@ -438,10 +305,6 @@ def _get_clipboard_text() -> str:
     except Exception:
         return ''
 
-
-def _clear_clipboard():
-    """No-op: solicitado no limpiar más el portapapeles."""
-    return
 
 def _stable_read_clipboard_only(max_attempts: int = 8, consecutive: int = 2, read_delay: float = 0.1) -> str:
     """Lee el portapapeles repetidamente SIN enviar Ctrl+C, hasta lograr lecturas estables.
@@ -689,50 +552,6 @@ def _parse_amount_value(txt: str) -> Optional[float]:
         return None
 
 
-def _copy_apartado_with_retries() -> str:
-    """Copia el 'apartado' del foco actual evitando valores tipo monto.
-    1) Intento con clear_first=True
-    2) Si no luce válido, doble click + reintento
-    3) Si no, Tab + reintento
-    4) Si no, Shift+Tab + reintento
-    Devuelve el mejor texto disponible (válido si se logró, o último si no).
-    """
-    # 1) Primer intento sin limpieza para evitar bloquear o spamear limpiezas
-    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 2) Doble click
-    with _suppress_failsafe():
-        try:
-            pg.doubleClick()
-        except Exception:
-            pg.click(); time.sleep(0.05); pg.click()
-    time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 3) Tab
-    pg.press('tab'); time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 4) Shift+Tab (volver)
-    try:
-        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
-    except Exception:
-        pass
-    time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    return txt
-
-
 def _copy_apartado_with_retries_rightclick(x: int, y: int, conf: Dict[str, Any]) -> str:
     """Copia el 'apartado' usando right-click method para cuenta_financiera.
     Usa las mismas estrategias de reintento que _copy_apartado_with_retries pero con right-click.
@@ -774,53 +593,6 @@ def _copy_apartado_with_retries_rightclick(x: int, y: int, conf: Dict[str, Any])
     return txt
 
 
-def _copy_id_with_retries() -> str:
-    """Copia el ID de la columna actual con reintentos de foco.
-    Valida que tenga un bloque de dígitos (>=5) y evita aceptar formatos tipo monto.
-    """
-    def _valid_id(s: str) -> bool:
-        if not s:
-            return False
-        if _currency_like(s):
-            return False
-        return re.search(r"\b\d{5,}\b", s or '') is not None
-
-    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Doble click
-    with _suppress_failsafe():
-        try:
-            pg.doubleClick()
-        except Exception:
-            pg.click(); time.sleep(0.05); pg.click()
-    time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Tab
-    pg.press('tab'); time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Shift+Tab
-    try:
-        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
-    except Exception:
-        pass
-    time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    return txt
-
-
 def _append_log(log_path: Path, dni: str, content: str):
     one = (content or '').replace('\r',' ').replace('\n',' ').strip()
     if len(one) > 400:
@@ -832,62 +604,6 @@ def _append_log(log_path: Path, dni: str, content: str):
     with log_path.open('a', encoding='utf-8') as f:
         f.write(line)
     print(f"[CaminoA] Log: {line.strip()}")
-
-
-def _is_valid_saldo_text(txt: str, compare_n: Optional[int] = None) -> bool:
-    if not txt:
-        return False
-    s = (txt or '').strip()
-    # No debe coincidir con N puro
-    if compare_n is not None and s.strip() == str(compare_n):
-        return False
-    # Debe lucir como monto: parseable o con separadores y al menos 3 dígitos
-    digits = re.sub(r"\D", "", s)
-    if len(digits) < 3:
-        return False
-    if _parse_amount_value(s) is not None:
-        return True
-    return _currency_like(s)
-
-
-def _copy_saldo_fa_with_retries(dx: int, dy: int, compare_n: Optional[int] = None) -> str:
-    # 1) Ctrl+C estable con validador
-    txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                            require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-    if _is_valid_saldo_text(txt, compare_n):
-        return txt
-    # 2) Click foco y reintento
-    if dx or dy:
-        with _suppress_failsafe():
-            pg.moveTo(dx, dy, duration=0.1)
-            pg.click()
-        time.sleep(0.15)
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    # 3) Doble click y reintento
-    if dx or dy:
-        _double_click_xy(dx, dy, 'fa_deuda', 0.2)
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    # 4) Arrastre y reintento
-    if dx or dy:
-        try:
-            with _suppress_failsafe():
-                pg.moveTo(max(0, dx-25), dy, duration=0.06)
-                pg.mouseDown(); time.sleep(0.06)
-                pg.moveTo(dx+180, dy, duration=0.12)
-                pg.mouseUp(); time.sleep(0.1)
-        except Exception:
-            pass
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    return txt or ''
 
 
 def _is_valid_fa_id(txt: str, compare_saldo_txt: str = '', compare_n: Optional[int] = None) -> bool:
@@ -931,155 +647,10 @@ def _copy_fa_id_via_context_with_retries(rax: int, ray: int, cpx: int, cpy: int,
     return last_txt
 
 
-def _copy_fa_saldo_via_context_with_retries(rax: int, ray: int, cpx: int, cpy: int,
-                                            compare_n: Optional[int] = None,
-                                            max_rounds: int = 4) -> str:
-    """Copia el saldo en FA usando click derecho sobre fa_deuda y opción de copiar (fa_deuda_copy).
-    Valida que el texto parezca monto y no sea el N.
-    """
-    last_txt = ''
-    for _ in range(max(1, max_rounds)):
-        if rax or ray:
-            _right_click(rax, ray, 'fa_deuda_context', 0.2)
-            if cpx or cpy:
-                _click(cpx, cpy, 'fa_deuda_copy', 0.15)
-            time.sleep(0.1)
-        txt = _stable_read_clipboard_only(max_attempts=8, consecutive=2, read_delay=0.1)
-        last_txt = txt or last_txt
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    return last_txt
-
-def _copy_fa_saldo_context_simple(rax: int, ray: int, cpx: int, cpy: int) -> str:
-    """Copia el saldo en FA sin validaciones: click derecho en (rax,ray), espera 1s y click en (cpx,cpy).
-    Luego lee el portapapeles de forma estable y lo devuelve (aunque esté vacío o no sea monto).
-    """
-    if rax or ray:
-        _right_click(rax, ray, 'fa_deuda_context', 0.1)
-    time.sleep(0.25)
-    if cpx or cpy:
-        _click(cpx, cpy, 'fa_deuda_copy', 0.1)
-    # Lectura estable mínima
-    txt = _stable_read_clipboard_only(max_attempts=5, consecutive=2, read_delay=0.1)
-    return txt or (_get_clipboard_text() or '')
-
-
 def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float) -> float:
     if step_delays and index < len(step_delays):
         return step_delays[index]
     return fallback
-
-def _robust_copy_number_at(x: int, y: int) -> str:
-    """Intenta copiar texto en (x,y) y extraer el primer número de forma robusta.
-    Estrategia por intentos: click+Ctrl+C, doble click+Ctrl+C, drag select+Ctrl+C.
-    Devuelve el texto copiado (no solo el número) para que el llamador decida el parseo.
-    """
-    def has_digits(t: str) -> bool:
-        return bool(re.search(r"\d+", t or ''))
-
-    # Por solicitud, no limpiar el portapapeles antes de copiar
-
-    # Intento 1: click y copiar
-    if x and y:
-        with _suppress_failsafe():
-            pg.moveTo(x, y, duration=0.08)
-            pg.click(); time.sleep(0.12)
-        pg.hotkey('ctrl','c'); time.sleep(0.08)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Intento 2: doble click
-    if x and y:
-        with _suppress_failsafe():
-            pg.moveTo(x, y, duration=0.08)
-            try:
-                pg.doubleClick()
-            except Exception:
-                pg.click(); time.sleep(0.05); pg.click()
-            time.sleep(0.12)
-        pg.hotkey('ctrl','c'); time.sleep(0.08)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Intento 3: selección por arrastre
-    if x and y:
-        try:
-            with _suppress_failsafe():
-                pg.moveTo(max(0, x-25), y, duration=0.06)
-                pg.mouseDown(); time.sleep(0.06)
-                pg.moveTo(x+140, y, duration=0.12)
-                pg.mouseUp(); time.sleep(0.1)
-        except Exception:
-            pass
-        pg.hotkey('ctrl','c'); time.sleep(0.1)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Último recurso: devolver lo que haya
-    return _get_clipboard_text() or ''
-
-
-def _copy_records_count_via_button(conf: Dict[str, Any], button_key: str,
-                                   step_delays: Optional[List[float]], base_delay: float,
-                                   attempts: int = 3) -> str:
-    """Clickea un botón de 'records' (por ej. 'fa_records_btn' o 'records_N'),
-    cierra el panel y luego intenta copiar el texto que contiene la cantidad de registros.
-    Repite hasta 'attempts' veces si no detecta dígitos.
-    Devuelve el texto crudo copiado (p.ej. '9 Registros' o sólo '9'), sin limpiar portapapeles.
-    """
-    consensus_val = None
-    consensus_hits = 0
-    last_return_txt = ''
-    for i in range(max(1, attempts)):
-        prev = _get_clipboard_text() or ''
-        bx, by = _xy(conf, button_key)
-        if bx or by:
-            _click(bx, by, button_key, base_delay)
-        cx, cy = _xy(conf, 'close_records')
-        if cx or cy:
-            _click(cx, cy, 'close_records', base_delay)
-        time.sleep(1.0)
-        txt = _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False, require_changed=True)
-        if txt and txt != prev and re.search(r"\d+", txt or ''):
-            last_return_txt = txt or ''
-            # Comparar por número para consenso entre textos diferentes (ej. '4 Registros' vs '4')
-            m = re.search(r"\d+", txt)
-            val = int(m.group(0)) if m else None
-            if val is not None:
-                if consensus_val is None:
-                    consensus_val = val
-                    consensus_hits = 1
-                elif val == consensus_val:
-                    consensus_hits += 1
-                else:
-                    consensus_val = val
-                    consensus_hits = 1
-                # Si pedimos más de 1 intento, confirmar al menos 2 coincidencias
-                if attempts <= 1 or consensus_hits >= 2:
-                    return last_return_txt
-        # Si falló, reintentar una vez más re-abriendo/cerrando
-    return last_return_txt or _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False)
-
-
-def _parse_count_with_cap(txt: str, cap_env: str, default_cap: int) -> int:
-    """Extrae el primer entero de txt y aplica un tope (cap). Si supera el tope, devuelve 0 (inválido).
-    cap_env permite configurar por entorno (por ejemplo 'MAX_FA_ACTUALES').
-    """
-    try:
-        cap = int(os.getenv(cap_env, str(default_cap)))
-    except Exception:
-        cap = default_cap
-    m = re.search(r"\d+", txt or '')
-    if not m:
-        return 0
-    try:
-        n = int(m.group(0))
-    except Exception:
-        return 0
-    return n if 0 < n <= cap else 0
 
 
 def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1359,7 +930,6 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
     _click(x, y, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
     
     # No volver a house_area aquí, se hará al final del flujo skip_initial
-
 
 
 def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1856,5 +1426,4 @@ if __name__ == '__main__':
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
 

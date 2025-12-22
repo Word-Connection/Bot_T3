@@ -1,0 +1,138 @@
+{
+  "created_at": "2025-12-22T12:59:46",
+  "duration": 26.259544300000016,
+  "events": [
+
+    {
+      "t": 15.14774750000015,
+      "type": "mouse_click",
+      "x": 19,
+      "y": 209,
+      "button": "Button.right",
+      "pressed": true
+    },
+    {
+      "t": 15.268272700000125,
+      "type": "mouse_click",
+      "x": 19,
+      "y": 209,
+      "button": "Button.right",
+      "pressed": false
+    },
+    {
+      "t": 16.148033399999804,
+      "type": "mouse_click",
+      "x": 91,
+      "y": 374,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 16.243354199999885,
+      "type": "mouse_click",
+      "x": 91,
+      "y": 374,
+      "button": "Button.left",
+      "pressed": false
+    },
+    {
+      "t": 17.691707599999972,
+      "type": "mouse_click",
+      "x": 21,
+      "y": 211,
+      "button": "Button.right",
+      "pressed": true
+    },
+    {
+      "t": 17.803399499999614,
+      "type": "mouse_click",
+      "x": 21,
+      "y": 211,
+      "button": "Button.right",
+      "pressed": false
+    },
+    {
+      "t": 18.691801299999497,
+      "type": "mouse_click",
+      "x": 59,
+      "y": 298,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 18.795447200000126,
+      "type": "mouse_click",
+      "x": 59,
+      "y": 298,
+      "button": "Button.left",
+      "pressed": false
+    },
+    {
+      "t": 20.380194800000027,
+      "type": "mouse_click",
+      "x": 26,
+      "y": 174,
+      "button": "Button.right",
+      "pressed": true
+    },
+    {
+      "t": 20.52335479999965,
+      "type": "mouse_click",
+      "x": 26,
+      "y": 174,
+      "button": "Button.right",
+      "pressed": false
+    },
+    {
+      "t": 21.196245799999815,
+      "type": "mouse_click",
+      "x": 44,
+      "y": 185,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 21.299325599999975,
+      "type": "mouse_click",
+      "x": 44,
+      "y": 185,
+      "button": "Button.left",
+      "pressed": false
+    },
+    {
+      "t": 22.96395239999947,
+      "type": "mouse_click",
+      "x": 1889,
+      "y": 132,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 23.019448299999567,
+      "type": "mouse_click",
+      "x": 1889,
+      "y": 132,
+      "button": "Button.left",
+      "pressed": false
+    },
+    {
+      "t": 24.73189689999981,
+      "type": "mouse_click",
+      "x": 1800,
+      "y": 6,
+      "button": "Button.left",
+      "pressed": true
+    },
+    {
+      "t": 24.811692299999777,
+      "type": "mouse_click",
+      "x": 1799,
+      "y": 6,
+      "button": "Button.left",
+      "pressed": false
+    }
+  ],
+  "meta": {
+    "stop_key": "F12"
+  }
+}
