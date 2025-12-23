@@ -170,6 +170,43 @@ def main():
                 stdout_lines.append(line)
                 print(line.rstrip(), file=sys.stderr)
                 sys.stderr.flush()
+                
+                # Detectar mensaje de score capturado en modo admin
+                if admin_mode and '[CaminoScoreADMIN] SCORE_CAPTURADO:' in line:
+                    # Extraer el score del mensaje
+                    score_text = line.split('SCORE_CAPTURADO:')[-1].strip()
+                    print(f"[ADMIN] Score capturado detectado: {score_text}", file=sys.stderr)
+                    
+                    # Buscar la captura más reciente
+                    pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
+                    files = glob.glob(pattern)
+                    
+                    img_base64 = ""
+                    latest_file = None
+                    if files:
+                        latest_file = max(files, key=os.path.getctime)
+                        img_base64 = get_image_base64(latest_file)
+                        print(f"[ADMIN] Captura encontrada: {latest_file}", file=sys.stderr)
+                    
+                    # Enviar score con imagen
+                    extra_data = {}
+                    if img_base64:
+                        extra_data["image"] = img_base64
+                        extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+                    
+                    send_partial_update(dni, score_text, "score_obtenido", f"Score: {score_text} (modo admin)", admin_mode, extra_data)
+                    print(f"[ADMIN] Update de score enviado al frontend", file=sys.stderr)
+                
+                # Detectar mensaje de búsqueda de deudas
+                elif admin_mode and '[CaminoScoreADMIN] Buscando deudas...' in line:
+                    send_partial_update(dni, "", "buscando_deudas", "Buscando deudas...", admin_mode)
+                    print(f"[ADMIN] Mensaje de búsqueda de deudas enviado", file=sys.stderr)
+                
+                # Detectar mensaje de tiempo estimado en modo admin
+                elif admin_mode and '[CaminoScoreADMIN]' in line and 'cuentas' in line and 'tiempo estimado' in line:
+                    # Extraer el mensaje completo
+                    msg = line.split('[CaminoScoreADMIN]')[-1].strip()
+                    send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
             
             # Esperar a que termine y capturar stderr
             process.wait(timeout=300)
@@ -300,54 +337,31 @@ def main():
             
             send_partial_update(dni, score, "score_obtenido", f"Score: {score} (modo admin)", admin_mode, extra_data)
             
-            # Validar deudas mayores a $60,000
-            deudas_mayores = []
-            for deuda in fa_saldos_admin:
-                try:
-                    saldo_str = str(deuda.get("saldo", "0"))
-                    # Limpiar formato (eliminar $, comas, espacios)
-                    saldo_clean = re.sub(r'[^\d.-]', '', saldo_str)
-                    saldo_num = float(saldo_clean) if saldo_clean else 0
-                    
-                    if abs(saldo_num) >= 60000:
-                        deudas_mayores.append({
-                            "id_fa": deuda.get("id_fa", ""),
-                            "saldo": saldo_str,
-                            "saldo_num": saldo_num
-                        })
-                except Exception as e:
-                    print(f"[ADMIN] Error parseando saldo: {e}", file=sys.stderr)
+            # Preparar resultado final para modo admin (sin validación de $60k)
+            print(f"[ADMIN] Total deudas recolectadas: {len(fa_saldos_admin)}")
             
-            print(f"[ADMIN] Deudas >= $60,000: {len(deudas_mayores)}")
-            
-            # Preparar resultado final para modo admin
             final_result = {
                 "dni": dni,
                 "score": score,
                 "admin_mode": True,
                 "etapa": "completado_admin",
-                "info": f"Consulta administrativa completada - {len(deudas_mayores)} deudas >= $60k",
+                "info": f"Consulta administrativa completada - {len(fa_saldos_admin)} deudas recolectadas",
                 "success": True,
                 "timestamp": int(time.time() * 1000),
-                "fa_saldos": fa_saldos_admin,
-                "deudas_mayores_60k": deudas_mayores,
-                "tiene_deudas_mayores": len(deudas_mayores) > 0
+                "fa_saldos": fa_saldos_admin
             }
             
-            if img_base64:
-                final_result["image"] = img_base64
+            # La imagen ya se envió en el update parcial del score, no incluirla en el resultado final
             
-            # Enviar update final con deudas
+            # Enviar update final con todas las deudas
             send_partial_update(
                 dni, 
                 score, 
-                "deudas_validadas", 
-                f"Deudas validadas: {len(deudas_mayores)} >= $60k de {len(fa_saldos_admin)} totales",
+                "deudas_recolectadas", 
+                f"Deudas recolectadas: {len(fa_saldos_admin)} totales",
                 admin_mode,
                 {
-                    "fa_saldos": fa_saldos_admin,
-                    "deudas_mayores_60k": deudas_mayores,
-                    "tiene_deudas_mayores": len(deudas_mayores) > 0
+                    "fa_saldos": fa_saldos_admin
                 }
             )
             

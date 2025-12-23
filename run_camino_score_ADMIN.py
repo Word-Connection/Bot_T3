@@ -334,20 +334,21 @@ def _capture_region(rx: int, ry: int, rw: int, rh: int, out_path: Path) -> bool:
     return False
 
 
-def extract_ids_cliente_from_table(table_text: str) -> List[str]:
+def extract_ids_cliente_from_table(table_text: str) -> List[Dict[str, str]]:
     """
-    Extrae los IDs de cliente de la tabla copiada.
+    Extrae los IDs de cliente y tipo de documento de la tabla copiada.
+    La columna "Tipo de Documento" está en la posición 2 (índice 1).
     La columna "Id del cliente" está en la posición 7 (índice 6).
     
     Ejemplo de tabla:
     ID de Contacto    Tipo de Documento    Número de Documento    ...    Id del cliente    ...
-    30996880          ...                  ...                           101186384          ...
-    30996880          ...                  ...                           44402491           ...
+    30996880          DNI                  29940807                      101186384          ...
+    30996880          CUIT                 20299408074                   44402491           ...
     
     Returns:
-        Lista de IDs de cliente únicos encontrados (excluyendo vacíos y la cabecera)
+        Lista de diccionarios con {"id_cliente": "...", "tipo_documento": "..."}
     """
-    ids_cliente = []
+    cuentas = []
     lines = table_text.strip().split('\n')
     
     print(f"[CaminoScoreADMIN] Parseando tabla para extraer IDs de cliente...")
@@ -362,42 +363,52 @@ def extract_ids_cliente_from_table(table_text: str) -> List[str]:
             print(f"[CaminoScoreADMIN] Línea {i+1}: Cabecera detectada")
             continue
         
-        # La columna "Id del cliente" está en índice 6
+        # La columna "Id del cliente" está en índice 6, "Tipo de Documento" en índice 1
         if len(cols) > 6:
             id_cliente = cols[6].strip()
+            tipo_documento = cols[1].strip().upper() if len(cols) > 1 else "DNI"
             
             # Validar que sea un número válido (4+ dígitos)
             if id_cliente and id_cliente.isdigit() and len(id_cliente) >= 4:
-                ids_cliente.append(id_cliente)
-                print(f"[CaminoScoreADMIN] Línea {i+1}: ID cliente '{id_cliente}' extraído")
+                cuentas.append({
+                    "id_cliente": id_cliente,
+                    "tipo_documento": tipo_documento
+                })
+                print(f"[CaminoScoreADMIN] Línea {i+1}: ID cliente '{id_cliente}' ({tipo_documento}) extraído")
             else:
                 print(f"[CaminoScoreADMIN] Línea {i+1}: ID cliente vacío o inválido, ignorando")
         else:
             print(f"[CaminoScoreADMIN] Línea {i+1}: Formato incorrecto ({len(cols)} columnas)")
     
     # Eliminar duplicados manteniendo el orden
-    ids_unicos = []
+    cuentas_unicas = []
     seen = set()
-    for id_val in ids_cliente:
+    for cuenta in cuentas:
+        id_val = cuenta["id_cliente"]
         if id_val not in seen:
-            ids_unicos.append(id_val)
+            cuentas_unicas.append(cuenta)
             seen.add(id_val)
     
     print(f"[CaminoScoreADMIN] ===== RESUMEN DE IDS CLIENTE =====")
-    print(f"[CaminoScoreADMIN] Total de IDs únicos encontrados: {len(ids_unicos)}")
-    if ids_unicos:
-        print(f"[CaminoScoreADMIN] Primeros 5 IDs: {ids_unicos[:5]}")
-        if len(ids_unicos) > 5:
-            print(f"[CaminoScoreADMIN] Últimos 5 IDs: {ids_unicos[-5:]}")
+    print(f"[CaminoScoreADMIN] Total de IDs únicos encontrados: {len(cuentas_unicas)}")
+    if cuentas_unicas:
+        print(f"[CaminoScoreADMIN] Primeros 5 IDs: {[c['id_cliente'] for c in cuentas_unicas[:5]]}")
+        if len(cuentas_unicas) > 5:
+            print(f"[CaminoScoreADMIN] Últimos 5 IDs: {[c['id_cliente'] for c in cuentas_unicas[-5:]]}")
     print(f"[CaminoScoreADMIN] =====================================")
     
-    return ids_unicos
+    return cuentas_unicas
 
 
-def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float) -> List[Dict[str, str]]:
+def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_documento: str = "DNI") -> List[Dict[str, str]]:
     """
     Ejecuta el flujo completo de búsqueda de deudas para una cuenta.
-    Retorna lista de deudas con formato: [{"id_fa": "...", "saldo": "..."}, ...]
+    Retorna lista de deudas con formato: [{"id_fa": "...", "saldo": "...", "tipo_documento": "..."}, ...]
+    
+    Args:
+        conf: Configuración de coordenadas
+        base_delay: Delay base entre acciones
+        tipo_documento: "DNI" o "CUIT" - tipo de documento de esta cuenta
     """
     deudas = []
     
@@ -498,9 +509,9 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float) -> List[Dict[
             deudas.append({
                 "id_fa": id_fa,
                 "saldo": saldo_fa,
-                "cuit": "CUIT"
+                "tipo_documento": tipo_documento
             })
-            print(f"[CaminoADMIN-Cuenta] ✓ Agregado FA Actual: ID={id_fa}, Saldo={saldo_fa}")
+            print(f"[CaminoADMIN-Cuenta] ✓ Agregado FA Actual: ID={id_fa}, Saldo={saldo_fa}, Tipo={tipo_documento}")
         else:
             print(f"[CaminoADMIN-Cuenta] WARNING: ID o Saldo vacío, no se agrega")
         
@@ -627,9 +638,9 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float) -> List[Dict[
                                                     deudas.append({
                                                         "id_fa": id_cf,
                                                         "saldo": saldo_cf,
-                                                        "cuit": "CUIT"
+                                                        "tipo_documento": tipo_documento
                                                     })
-                                                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={id_cf}, Saldo={saldo_cf}")
+                                                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={id_cf}, Saldo={saldo_cf}, Tipo={tipo_documento}")
                                                 
                                                 # Volver 3 posiciones a la izquierda (columna ID)
                                                 for _ in range(3):
@@ -1182,72 +1193,44 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     else:
         print('[CaminoScoreADMIN] ADVERTENCIA: No hay coordenadas para score_area_page ni score_area_copy')
 
+    # Capturar screenshot del score
+    shot_path = shot_dir / f"score_{dni}_{int(time.time())}.png"
+    
+    # Click en screenshot_confirm antes de capturar
+    scx, scy = _xy(conf, 'screenshot_confirm')
+    if scx or scy:
+        print(f"[CaminoScoreADMIN] Haciendo click en screenshot_confirm ({scx},{scy}) antes de capturar")
+        _click(scx, scy, 'screenshot_confirm', 0.3)
+        time.sleep(0.3)
+
+    rx, ry, rw, rh = _resolve_screenshot_region(conf)
+    ok = False
+    if rw and rh:
+        ok = _capture_region(rx, ry, rw, rh, shot_path)
+        if ok:
+            print(f"[CaminoScoreADMIN] Captura guardada: {shot_path}")
+    
+    # Mensaje para que deudas.py envíe update parcial con score e imagen
+    print(f"[CaminoScoreADMIN] SCORE_CAPTURADO:{score_value}")
+    
+    # Enviar mensaje de búsqueda de deudas iniciada DESPUÉS de capturar el score
+    print(f"[CaminoScoreADMIN] Buscando deudas...")
+    
+    # Enviar mensaje de tiempo estimado al frontend
+    if ids_cliente:
+        num_cuentas = len(ids_cliente)
+        tiempo_segundos = num_cuentas * 40
+        minutos = tiempo_segundos // 60
+        segundos = tiempo_segundos % 60
+        
+        mensaje_estimacion = f"Analizando {num_cuentas} cuenta{'s' if num_cuentas > 1 else ''}, tiempo estimado {minutos}:{segundos:02d} minutos"
+        print(f"[CaminoScoreADMIN] {mensaje_estimacion}")
+
     print("[CaminoADMIN-Cuenta] Cerrando una vez para ver deudas...")
     x,y = _xy(conf,'close_tab_btn')
     if x or y:
             _click(x, y, 'close_tab_btn', 0.4)
             time.sleep(0.3)
-
-    # # ===== Extracción de DNI si es CUIT (para fallback en Camino A) =====
-    # dni_real_extraido = None
-    # if is_cuit:
-    #     print("[CaminoScoreADMIN] CUIT detectado, extrayendo DNI asociado para fallback...")
-        
-    #     # Click en la posición del DNI (911, 174)
-    #     dni_x, dni_y = _xy(conf, 'dni_from_cuit')
-    #     if dni_x or dni_y:
-    #         print(f"[CaminoScoreADMIN] Click en dni_from_cuit ({dni_x}, {dni_y})")
-    #         pg.click(dni_x, dni_y)
-    #         time.sleep(0.3)
-            
-    #         # NUEVO FLUJO: Click derecho → Seleccionar todo → Click derecho → Copiar
-    #         # 1. Right-click para abrir menú contextual
-    #         print(f"[CaminoScoreADMIN] Right-click en dni_from_cuit para abrir menú")
-    #         pg.click(dni_x, dni_y, button='right')
-    #         time.sleep(0.3)
-            
-    #         # 2. Click en "Seleccionar todo" (959, 336)
-    #         select_all_x, select_all_y = _xy(conf, 'extra_cuit_select_all')
-    #         if select_all_x or select_all_y:
-    #             print(f"[CaminoScoreADMIN] Click en 'Seleccionar todo' ({select_all_x}, {select_all_y})")
-    #             _click(select_all_x, select_all_y, 'extra_cuit_select_all', 0.3)
-    #             time.sleep(0.3)
-    #         else:
-    #             print("[CaminoScoreADMIN] ADVERTENCIA: extra_cuit_select_all no definido, usando Ctrl+A")
-    #             pg.hotkey('ctrl', 'a')
-    #             time.sleep(0.3)
-            
-    #         # 3. Right-click nuevamente sobre el DNI para copiar
-    #         print(f"[CaminoScoreADMIN] Right-click en dni_from_cuit para copiar")
-    #         pg.click(dni_x, dni_y, button='right')
-    #         time.sleep(0.3)
-            
-    #         # 4. Click en extra_cuit_copy para copiar el DNI
-    #         copy_x, copy_y = _xy(conf, 'extra_cuit_copy')
-    #         if copy_x or copy_y:
-    #             # Limpiar portapapeles antes de copiar
-    #             _clear_clipboard()
-    #             time.sleep(0.2)
-                
-    #             print(f"[CaminoScoreADMIN] Click en 'Copiar' ({copy_x}, {copy_y})")
-    #             _click(copy_x, copy_y, 'extra_cuit_copy', 0.5)
-    #             time.sleep(0.5)
-                
-    #             # Leer el DNI del portapapeles
-    #             dni_clipboard = _get_clipboard_text().strip()
-                
-    #             # Extraer solo números del clipboard
-    #             dni_numerico = re.sub(r'\D', '', dni_clipboard)
-                
-    #             if dni_numerico and len(dni_numerico) >= 7:
-    #                 dni_real_extraido = dni_numerico
-    #                 print(f"[CaminoScoreADMIN] DNI extraído del CUIT: {dni_real_extraido}")
-    #             else:
-    #                 print(f"[CaminoScoreADMIN] ADVERTENCIA: DNI extraído inválido: '{dni_clipboard}'")
-    #         else:
-    #             print("[CaminoScoreADMIN] ADVERTENCIA: extra_cuit_copy no definido en coordenadas")
-    #     else:
-    #         print("[CaminoScoreADMIN] ADVERTENCIA: dni_from_cuit no definido en coordenadas")
 
     # =========================================================================
     # BÚSQUEDA DE DEUDAS - Camino Score ADMIN
@@ -1259,8 +1242,10 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     
     # Buscar deudas de la primera cuenta (ya estamos en la cuenta seleccionada)
     print(f"[CaminoScoreADMIN] Buscando deudas para la primera cuenta...")
+    # Determinar tipo de documento de la primera cuenta
+    tipo_doc_primera = ids_cliente[0]["tipo_documento"] if ids_cliente and len(ids_cliente) > 0 else "DNI"
     try:
-        deudas_primera = _buscar_deudas_cuenta(conf, base_delay)
+        deudas_primera = _buscar_deudas_cuenta(conf, base_delay, tipo_doc_primera)
         if deudas_primera:
             print(f"[CaminoScoreADMIN] Primera cuenta: {len(deudas_primera)} deudas encontradas")
             fa_saldos_todos.extend(deudas_primera)
@@ -1282,8 +1267,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         # Iterar desde la segunda cuenta (índice 1) hasta la última
         for idx in range(1, len(ids_cliente)):
             cuenta_num = idx + 1
+            cuenta_info = ids_cliente[idx]
             print(f"\n[CaminoScoreADMIN] ===== PROCESANDO CUENTA {cuenta_num}/{len(ids_cliente)} =====")
-            print(f"[CaminoScoreADMIN] ID Cliente: {ids_cliente[idx]}")
+            print(f"[CaminoScoreADMIN] ID Cliente: {cuenta_info['id_cliente']} ({cuenta_info['tipo_documento']})")
             
             try:
                 # 1. Click en client_id_field para abrir el dropdown
@@ -1302,9 +1288,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                 _click(seleccionar_btn[0], seleccionar_btn[1], 'seleccionar_btn', 0.5)
                 time.sleep(1.0)
                 
-                # 4. Buscar deudas para esta cuenta
+                # 4. Buscar deudas para esta cuenta con el tipo de documento correcto
                 print(f"[CaminoScoreADMIN] Buscando deudas para cuenta {cuenta_num}...")
-                deudas_cuenta = _buscar_deudas_cuenta(conf, base_delay)
+                deudas_cuenta = _buscar_deudas_cuenta(conf, base_delay, cuenta_info['tipo_documento'])
                 
                 if deudas_cuenta:
                     print(f"[CaminoScoreADMIN] Cuenta {cuenta_num}: {len(deudas_cuenta)} deudas encontradas")
@@ -1344,6 +1330,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     # Devolver JSON con el resultado (formato simplificado)
     result = {
         "dni": dni,
+        "score": score_value,
         "fa_saldos": fa_saldos_todos if fa_saldos_todos else []
     }
     
