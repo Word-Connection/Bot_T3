@@ -59,14 +59,14 @@ git status >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo Inicializando repositorio git...
     git init
-    git remote add origin https://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@github.com/Word-Connection/Bot_T3.git
+    git remote add origin https://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@github.com/Word-Connection/Bot_T3.git
     git fetch origin main
     git checkout -B main origin/main
 ) else (
     echo Descartando todos los cambios locales...
     
     REM --- Configurar remote temporal con token para el pull ---
-    git remote set-url origin https://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@github.com/Word-Connection/Bot_T3.git
+    git remote set-url origin https://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@github.com/Word-Connection/Bot_T3.git
     
     REM --- Descartar todos los cambios locales ---
     git reset --hard HEAD >nul 2>&1

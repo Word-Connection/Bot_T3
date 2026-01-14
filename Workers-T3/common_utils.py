@@ -347,3 +347,54 @@ def parse_amount_to_float(val: Any) -> Optional[float]:
             return None
     
     return None
+
+
+def sanitize_fa_saldos(fa_saldos: Any, min_digits: int = 4) -> list:
+    """Sanitiza una lista de entradas de fa_saldos.
+
+    Reglas:
+    - Cada item debe ser un dict con keys 'id_fa' y 'saldo'.
+    - 'id_fa' debe contener una secuencia de dígitos de al menos `min_digits` para considerarse válida.
+    - Se extrae la primera secuencia de dígitos válida encontrada y se usa como id_fa.
+    - Se omiten entradas que no cumplan la validación.
+
+    Args:
+        fa_saldos: lista de items (o cualquier otra cosa que se convertirá a lista vacía)
+        min_digits: mínimo de dígitos para aceptar un id
+
+    Returns:
+        Lista limpia de dicts con 'id_fa' y 'saldo' (strings)
+    """
+    import re
+    cleaned = []
+    if not fa_saldos:
+        return cleaned
+    try:
+        iterable = list(fa_saldos)
+    except Exception:
+        return cleaned
+
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+        id_raw = str(item.get('id_fa', '') or '').strip()
+        saldo_raw = str(item.get('saldo', '') or '').strip()
+        if not id_raw:
+            # nothing to do
+            continue
+        m = re.search(r"(\d{%d,})" % min_digits, id_raw)
+        if not m:
+            # Try to find digits anywhere (even if shorter) but only keep if reasonable
+            m2 = re.search(r"(\d{3,})", id_raw)
+            if not m2:
+                # No digits candidate — filter out
+                print(f"[sanitize] Filtrando entrada inválida fa_saldos: {id_raw}", file=sys.stderr)
+                continue
+            id_found = m2.group(0)
+        else:
+            id_found = m.group(0)
+        cleaned.append({
+            'id_fa': str(id_found),
+            'saldo': saldo_raw
+        })
+    return cleaned

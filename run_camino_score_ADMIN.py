@@ -31,7 +31,77 @@ try:
 except Exception:
     pyperclip = None
 
+# # -----------------------------
+# Logging and helpers for partial updates and JSON results
+# -----------------------------
+import logging
+logger = logging.getLogger("camino_score_admin")
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter("[%(levelname)s][%(name)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+try:
+    from common_utils import send_partial_update as _send_update_base
+    HAS_COMMON_UTILS = True
+except Exception:
+    HAS_COMMON_UTILS = False
+
+
+def send_partial(identifier: str, etapa: str, info: str, extra_data: Optional[Dict[str, Any]] = None, admin_mode: bool = False, score: str = ""):
+    """Send a partial update via common_utils if available, or print markers to stdout."""
+    if HAS_COMMON_UTILS:
+        _send_update_base(identifier=identifier, etapa=etapa, info=info, score=score, admin_mode=admin_mode, extra_data=extra_data, identifier_key="dni")
+    else:
+        update_data = {
+            "dni": identifier,
+            "etapa": etapa,
+            "info": info,
+            "timestamp": int(time.time() * 1000)
+        }
+        if score:
+            update_data["score"] = score
+        if admin_mode:
+            update_data["admin_mode"] = True
+        if extra_data:
+            update_data.update(extra_data)
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(update_data, ensure_ascii=False))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
+
+
+def print_json_result(data: Dict[str, Any]):
+    """Print final JSON result with markers for worker parsing."""
+    print("===JSON_RESULT_START===")
+    print(json.dumps(data, ensure_ascii=False))
+    print("===JSON_RESULT_END===")
+    sys.stdout.flush()
+
 DEFAULT_COORDS_FILE = 'camino_score_ADMIN_coords.json'
+
+
+# --- Speed control: allow scaling delays via environment variable SPEED_FACTOR ---
+try:
+    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '0.35')))
+except Exception:
+    SPEED_FACTOR = 0.35
+try:
+    MIN_SLEEP = max(0.01, float(os.getenv('MIN_SLEEP', '0.02')))
+except Exception:
+    MIN_SLEEP = 0.02
+
+def _sleep(t: float):
+    """Sleep scaled by SPEED_FACTOR with a minimum cap (MIN_SLEEP)."""
+    try:
+        s = float(t) * SPEED_FACTOR
+    except Exception:
+        s = float(t)
+    if s < MIN_SLEEP:
+        s = MIN_SLEEP
+    time.sleep(s)
 
 
 def _load_coords(path: Path) -> Dict[str, Any]:
@@ -87,13 +157,34 @@ def _resolve_screenshot_region(conf: Dict[str, Any]) -> Tuple[int,int,int,int]:
     return 0,0,0,0
 
 
+# Global speed controls (ensure defined before use) — default more aggressive for speed
+try:
+    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '0.35')))
+except Exception:
+    SPEED_FACTOR = 0.35
+try:
+    MIN_SLEEP = max(0.01, float(os.getenv('MIN_SLEEP', '0.02')))
+except Exception:
+    MIN_SLEEP = 0.02
+
+def _sleep(t: float):
+    """Scaled sleep: applies SPEED_FACTOR and enforces MIN_SLEEP to avoid too-small waits."""
+    try:
+        s = float(t) * SPEED_FACTOR
+    except Exception:
+        s = float(t)
+    if s < MIN_SLEEP:
+        s = MIN_SLEEP
+    time.sleep(s)
+
+
 def _click(x: int, y: int, label: str, delay: float):
     if x and y:
         pg.moveTo(x, y, duration=0.12)
         pg.click()
     else:
         print(f"[CaminoScoreADMIN] ADVERTENCIA coordenadas {label}=(0,0)")
-    time.sleep(delay)
+    _sleep(delay)
 
 
 def _multi_click(x: int, y: int, label: str, times: int, button: str = 'left', interval: float = 0.0):
@@ -102,19 +193,28 @@ def _multi_click(x: int, y: int, label: str, times: int, button: str = 'left', i
         for i in range(times):
             pg.click(button=button)
             if interval and i < times - 1:
-                time.sleep(interval)
+                _sleep(interval)
     else:
         print(f"[CaminoScoreADMIN] ADVERTENCIA coordenadas {label}=(0,0)")
 
 
+def _extract_first_number(txt: str) -> str:
+    """Devuelve la primera secuencia de dígitos encontrada en `txt` o cadena vacía si no hay ninguna."""
+    if not txt:
+        return ''
+    m = re.search(r"\d+", txt)
+    return m.group(0) if m else ''
+
+
+
 def _type(text: str, delay: float):
     pg.typewrite(text, interval=0.05)
-    time.sleep(delay)
+    _sleep(delay)
 
 
 def _press_enter(delay_after: float):
     pg.press('enter')
-    time.sleep(delay_after)
+    _sleep(delay_after)
 
 
 def _send_down_presses(count: int, interval: float, use_pynput: bool):
@@ -123,9 +223,9 @@ def _send_down_presses(count: int, interval: float, use_pynput: bool):
         kb = KBController()
         for i in range(count):
             kb.press(KBKey.down)
-            time.sleep(0.04)
+            _sleep(0.04)
             kb.release(KBKey.down)
-            time.sleep(interval)
+            _sleep(interval)
         return
     # Fallback pyautogui
     try:
@@ -209,12 +309,12 @@ def _validate_selected_record_c(conf: Dict[str, Any], base_delay: float, max_cop
     - "Corrupto": tiene números en el ID O contiene "Seleccionar", debe ir al siguiente
     """
     print("[CaminoScoreADMIN] Validando registro seleccionado...")
-    time.sleep(1.5)
+    _sleep(1.5)
     
     # Presionar Enter UNA SOLA VEZ
     pg.press('enter')
     print("[CaminoScoreADMIN] Enter presionado")
-    time.sleep(1.5)
+    _sleep(1.5)
     
     # Ir al área del nombre para validar si está corrupto
     x, y = _xy(conf, 'client_name_field')
@@ -431,21 +531,21 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
     print("[CaminoADMIN-Cuenta] Step 4: Buscar")
     x,y = _xy(conf,'fa_cobranza_buscar')
     _click(x,y,'fa_cobranza_buscar', base_delay)
-    time.sleep(1.5)
+    _sleep(1.5)
     
     # 5. Right-click en área actual para validar
     print("[CaminoADMIN-Cuenta] Step 5: Right-click área actual")
     _clear_clipboard()
-    time.sleep(0.4)
+    _sleep(0.4)
     area_x, area_y = _xy(conf, 'fa_actual_area_rightclick')
     pg.click(area_x, area_y, button='right')
-    time.sleep(0.5)
+    _sleep(0.5)
     
     # 6. Click en copiar para validar
     print("[CaminoADMIN-Cuenta] Step 6: Copiar para validar")
     copy_x, copy_y = _xy(conf, 'fa_actual_area_copy')
     _click(copy_x, copy_y, 'fa_actual_area_copy', 0.5)
-    time.sleep(0.5)
+    _sleep(0.5)
     
     validation_text = _get_clipboard_text().strip().lower()
     print(f"[CaminoADMIN-Cuenta] Texto validación: '{validation_text}'")
@@ -533,128 +633,149 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
     print("[CaminoADMIN-Cuenta] Validando Cuenta Financiera...")
     cf_label_x, cf_label_y = _xy(conf, 'cuenta_financiera_label_click')
     if cf_label_x or cf_label_y:
-        _click(cf_label_x, cf_label_y, 'cuenta_financiera_label_click', 0.5)
-        time.sleep(0.4)
+        # Repetir hasta encontrar 'Acuerdo de Facturación'
+        cf_loop_iter = 0
+        cf_loop_max = 30  # seguridad para evitar bucles infinitos
+        cf_offset = 0  # cuántas CF hemos procesado (para saber cuántos downs hacer)
         
-        _clear_clipboard()
-        time.sleep(0.4)
-        
-        # Right-click para copiar label
-        cf_rc_x, cf_rc_y = _xy(conf, 'cuenta_financiera_label_rightclick')
-        if cf_rc_x or cf_rc_y:
-            print(f"[CaminoADMIN-Cuenta] Right-click en label ({cf_rc_x}, {cf_rc_y})")
-            pg.click(cf_rc_x, cf_rc_y, button='right')
-            time.sleep(0.8)
+        while True:
+            cf_loop_iter += 1
+            if cf_loop_iter > cf_loop_max:
+                print(f"[CaminoADMIN-Cuenta] ADVERTENCIA: límite de iteraciones de Cuenta Financiera alcanzado ({cf_loop_max}), saliendo")
+                break
+
+            # Procesar esta Cuenta Financiera:
+            # 1. Click en el label, moverse 2 a la derecha, copiar cantidad
+            print(f"[CaminoADMIN-Cuenta] Procesando Cuenta Financiera #{cf_offset + 1}")
+            _click(cf_label_x, cf_label_y, 'cuenta_financiera_label_click_focus', 0.15)
+            _sleep(0.12)
             
-            # Click en copiar del menú
-            cf_copy_menu_x, cf_copy_menu_y = _xy(conf, 'cuenta_financiera_label_copy_menu')
-            if cf_copy_menu_x or cf_copy_menu_y:
-                _click(cf_copy_menu_x, cf_copy_menu_y, 'cuenta_financiera_label_copy_menu', 0.5)
-                time.sleep(0.5)
-                
-                validation_text = _get_clipboard_text().strip().lower()
-                print(f"[CaminoADMIN-Cuenta] Texto validación CF: '{validation_text}'")
-                
-                # Validar si es "Cuenta Financiera" (no "Acuerdo de Facturación")
-                if 'cuenta financiera' in validation_text:
-                    print("[CaminoADMIN-Cuenta] ✓ Sección Cuenta Financiera encontrada")
-                    
-                    # Click en el número de cantidad
-                    cf_cant_click_x, cf_cant_click_y = _xy(conf, 'cuenta_financiera_cantidad_click')
-                    if cf_cant_click_x or cf_cant_click_y:
-                        _click(cf_cant_click_x, cf_cant_click_y, 'cuenta_financiera_cantidad_click', 0.5)
-                        time.sleep(0.4)
-                        
-                        _clear_clipboard()
-                        time.sleep(0.4)
-                        
-                        # Right-click para copiar cantidad
-                        cf_cant_rc_x, cf_cant_rc_y = _xy(conf, 'cuenta_financiera_cantidad_rightclick')
-                        if cf_cant_rc_x or cf_cant_rc_y:
-                            print(f"[CaminoADMIN-Cuenta] Right-click en cantidad ({cf_cant_rc_x}, {cf_cant_rc_y})")
-                            pg.click(cf_cant_rc_x, cf_cant_rc_y, button='right')
-                            time.sleep(0.8)
-                            
-                            # Click en copiar del menú
-                            cf_cant_copy_x, cf_cant_copy_y = _xy(conf, 'cuenta_financiera_cantidad_copy_menu')
-                            if cf_cant_copy_x or cf_cant_copy_y:
-                                _click(cf_cant_copy_x, cf_cant_copy_y, 'cuenta_financiera_cantidad_copy_menu', 0.5)
-                                time.sleep(0.5)
-                                
-                                cantidad_text = _get_clipboard_text().strip()
-                                print(f"[CaminoADMIN-Cuenta] Cantidad de cuentas financieras: '{cantidad_text}'")
-                                
-                                # Convertir a número
-                                try:
-                                    cantidad_cf = int(re.sub(r'\D', '', cantidad_text))
-                                    print(f"[CaminoADMIN-Cuenta] Cantidad parseada: {cantidad_cf}")
-                                except (ValueError, AttributeError):
-                                    cantidad_cf = 0
-                                    print("[CaminoADMIN-Cuenta] No se pudo parsear cantidad, asumiendo 0")
-                                
-                                if cantidad_cf > 0:
-                                    # 8. Click en Mostrar Lista
-                                    print("[CaminoADMIN-Cuenta] Step: Mostrar Lista")
-                                    ml_x, ml_y = _xy(conf,'mostrar_lista_btn')
-                                    if ml_x or ml_y:
-                                        _click(ml_x, ml_y, 'mostrar_lista_btn', base_delay)
-                                        time.sleep(1.5)
-                                        
-                                        # 9. Click en primera celda de la lista
-                                        first_cell_x, first_cell_y = _xy(conf, 'cuenta_financiera_first_cell')
-                                        if first_cell_x or first_cell_y:
-                                            _click(first_cell_x, first_cell_y, 'cuenta_financiera_first_cell', 0.5)
-                                            time.sleep(0.5)
-                                            
-                                            # 10. Loop para copiar cada fila (ID y Saldo)
-                                            for i in range(cantidad_cf):
-                                                print(f"[CaminoADMIN-Cuenta] Procesando fila {i+1}/{cantidad_cf} de Cuenta Financiera...")
-                                                
-                                                # Ctrl+C para copiar ID
-                                                _clear_clipboard()
-                                                time.sleep(0.3)
-                                                pg.hotkey('ctrl', 'c')
-                                                time.sleep(0.4)
-                                                
-                                                id_cf = _get_clipboard_text().strip()
-                                                print(f"[CaminoADMIN-Cuenta] ID copiado: '{id_cf}'")
-                                                
-                                                # Ir 3 posiciones a la derecha (columna saldo)
-                                                for _ in range(3):
-                                                    pg.press('right')
-                                                    time.sleep(0.2)
-                                                
-                                                # Ctrl+C para copiar Saldo
-                                                _clear_clipboard()
-                                                time.sleep(0.3)
-                                                pg.hotkey('ctrl', 'c')
-                                                time.sleep(0.4)
-                                                
-                                                saldo_cf = _get_clipboard_text().strip()
-                                                print(f"[CaminoADMIN-Cuenta] Saldo copiado: '{saldo_cf}'")
-                                                
-                                                # Agregar a deudas (evitar duplicados)
-                                                if id_cf and not any(d.get("id_fa") == id_cf for d in deudas):
-                                                    deudas.append({
-                                                        "id_fa": id_cf,
-                                                        "saldo": saldo_cf,
-                                                        "tipo_documento": tipo_documento
-                                                    })
-                                                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={id_cf}, Saldo={saldo_cf}, Tipo={tipo_documento}")
-                                                
-                                                # Volver 3 posiciones a la izquierda (columna ID)
-                                                for _ in range(3):
-                                                    pg.press('left')
-                                                    time.sleep(0.2)
-                                                
-                                                # Bajar una fila (solo si no es la última)
-                                                if i < cantidad_cf - 1:
-                                                    pg.press('down')
-                                                    time.sleep(0.3)
-                                else:
-                                    print("[CaminoADMIN-Cuenta] ✗ Cantidad de cuentas financieras = 0, saltando...")
+            # Moverse hacia abajo según el offset (primera vez 0, segunda 1, tercera 2, etc.)
+            for _ in range(cf_offset):
+                pg.press('down'); _sleep(0.08)
+            
+            # Moverse 2 a la derecha para llegar a la columna de cantidad
+            for _ in range(2):
+                pg.press('right'); _sleep(0.06)
+
+            # Copiar cantidad
+            _clear_clipboard(); _sleep(0.06)
+            pg.hotkey('ctrl', 'c'); _sleep(0.12)
+            cantidad_text = _get_clipboard_text().strip()
+            print(f"[CaminoADMIN-Cuenta] Cantidad de cuentas financieras (por Ctrl+C): '{cantidad_text}'")
+
+            try:
+                cantidad_cf = int(re.sub(r'\D', '', cantidad_text) or '0')
+                print(f"[CaminoADMIN-Cuenta] Cantidad parseada: {cantidad_cf}")
+            except Exception:
+                cantidad_cf = 0
+                print("[CaminoADMIN-Cuenta] No se pudo parsear cantidad, asumiendo 0")
+
+            # Si no hay items, incrementar offset y verificar la siguiente
+            if cantidad_cf <= 0:
+                print("[CaminoADMIN-Cuenta] Cantidad<=0, verificando siguiente fila")
+                cf_offset += 1
+                # Verificar si la siguiente fila es otra CF
+                _click(cf_label_x, cf_label_y, 'cuenta_financiera_label_click', 0.2)
+                _sleep(0.12)
+                for _ in range(cf_offset):
+                    pg.press('down'); _sleep(0.08)
+                _clear_clipboard(); _sleep(0.12)
+                pg.hotkey('ctrl', 'c'); _sleep(0.18)
+                next_label = _get_clipboard_text().strip().lower()
+                if 'cuenta financiera' in next_label:
+                    continue
                 else:
-                    print("[CaminoADMIN-Cuenta] ✗ No se encontró 'Cuenta Financiera' (posible 'Acuerdo de Facturación'), saltando...")
+                    break
+
+            # Preparar cf_entry si existen `results` (compatibilidad con Camino A)
+            try:
+                if results is not None:
+                    cf_entry = {"raw": cantidad_text or "", "n": cantidad_cf, "items": []}
+                    results.setdefault("cuenta_financiera", []).append(cf_entry)
+                else:
+                    cf_entry = None
+            except NameError:
+                cf_entry = None
+
+            # 2. Click en 'Mostrar Lista'
+            ml_x, ml_y = _xy(conf, 'mostrar_lista_btn')
+            if ml_x or ml_y:
+                print("[CaminoADMIN-Cuenta] Step: Mostrar Lista")
+                _click(ml_x, ml_y, 'mostrar_lista_btn', base_delay)
+                _sleep(0.6)
+
+            # 3. Click en primera celda
+            first_cell_x, first_cell_y = _xy(conf, 'cuenta_financiera_first_cell')
+            if first_cell_x or first_cell_y:
+                _click(first_cell_x, first_cell_y, 'cuenta_financiera_first_cell', 0.4)
+            _sleep(0.4)
+
+            # 4. Procesar todas las filas de esta CF
+            for i in range(cantidad_cf):
+                print(f"[CaminoADMIN-Cuenta] Procesando fila {i+1}/{cantidad_cf} de Cuenta Financiera #{cf_offset + 1}...")
+
+                # Copiar ID (Ctrl+C)
+                _clear_clipboard(); _sleep(0.06)
+                pg.hotkey('ctrl', 'c'); _sleep(0.12)
+                id_cf = _get_clipboard_text().strip()
+                print(f"[CaminoADMIN-Cuenta] ID copiado: '{id_cf}'")
+
+                # Mover 3 posiciones a la derecha y copiar saldo
+                for _ in range(3):
+                    pg.press('right'); _sleep(0.06)
+                _clear_clipboard(); _sleep(0.06)
+                pg.hotkey('ctrl', 'c'); _sleep(0.12)
+                saldo_cf = _get_clipboard_text().strip()
+                print(f"[CaminoADMIN-Cuenta] Saldo copiado: '{saldo_cf}'")
+
+                # Registrar si no existe
+                if id_cf and not any(d.get("id_fa") == id_cf for d in deudas):
+                    deudas.append({'id_fa': id_cf, 'saldo': saldo_cf, 'tipo_documento': tipo_documento})
+                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={(_extract_first_number(id_cf or '') or id_cf or '')}, Saldo={saldo_cf}, Tipo={tipo_documento}")
+
+                if cf_entry is not None:
+                    cf_entry['items'].append({'saldo_raw': saldo_cf or '', 'saldo': _parse_amount_value(saldo_cf or ''), 'id_raw': id_cf or '', 'id': (_extract_first_number(id_cf or '') or None)})
+
+                # Volver 3 a la izquierda para mantener foco en la columna ID
+                for _ in range(3):
+                    pg.press('left'); _sleep(0.06)
+
+                # Bajar una fila si corresponde
+                if i < cantidad_cf - 1:
+                    pg.press('down'); _sleep(0.12)
+
+            # 5. Al terminar esta CF, verificar si hay otra
+            # Click en el label, bajar (offset+1) veces, copiar
+            _click(cf_label_x, cf_label_y, 'cuenta_financiera_label_click', 0.2)
+            _sleep(0.12)
+            for _ in range(cf_offset + 1):
+                pg.press('down'); _sleep(0.08)
+
+            # Copiar con Ctrl+C para obtener el nombre de la siguiente sección
+            _clear_clipboard(); _sleep(0.12)
+            try:
+                pg.hotkey('ctrl', 'c'); _sleep(0.18)
+                next_label = _get_clipboard_text().strip().lower()
+                print(f"[CaminoADMIN-Cuenta] Label siguiente (offset {cf_offset + 1}): '{next_label}'")
+            except Exception as e:
+                print(f"[CaminoADMIN-Cuenta] Error copiando con Ctrl+C: {e}")
+                next_label = ''
+
+            # Decidir según el texto copiado
+            if not next_label:
+                print("[CaminoADMIN-Cuenta] Label siguiente vacío, saliendo del bucle")
+                break
+            elif 'cuenta financiera' in next_label:
+                # Hay otra Cuenta Financiera, incrementar offset y continuar
+                cf_offset += 1
+                print(f"[CaminoADMIN-Cuenta] Otra 'Cuenta Financiera' detectada (total procesadas: {cf_offset}), continuando...")
+                continue
+            else:
+                # Es otra cosa (ej. "Acuerdo de Facturación"), salir del bucle
+                print(f"[CaminoADMIN-Cuenta] Label '{next_label}' no es Cuenta Financiera, saliendo del bucle")
+                break
+
     else:
         print("[CaminoADMIN-Cuenta] WARNING: cuenta_financiera_label_click no definido")
     
@@ -683,22 +804,34 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     start_delay = float(os.getenv('COORDS_START_DELAY','0.375'))
     base_delay = float(os.getenv('STEP_DELAY','0.25'))
     post_enter = float(os.getenv('POST_ENTER_DELAY','1.0'))
+
+    # Apply global speed factor to main delays so user can tune overall speed
+    start_delay = float(start_delay) * SPEED_FACTOR
+    base_delay = float(base_delay) * SPEED_FACTOR
+    post_enter = float(post_enter) * SPEED_FACTOR
     log_path = log_file or Path('camino_c_copias.log')
     shot_dir = screenshot_dir or Path('capturas_camino_c')
-    
+
+    # Limpiar el archivo de log antes de escribir nuevas entradas
+    try:
+        log_path.write_text('', encoding='utf-8')
+    except Exception as e:
+        print(f"[CaminoScoreADMIN] No se pudo limpiar el log: {e}")
+
     # Limpiar carpeta de capturas antes de crear nuevas
     if shot_dir.exists():
         import shutil
         shutil.rmtree(shot_dir)
         print(f"[CaminoScoreADMIN] Carpeta {shot_dir} limpiada")
-    
+
     shot_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Variable para almacenar el score obtenido (disponible en todo el scope)
     score_value = "No encontrado"
 
+    print(f"[CaminoScoreADMIN] Effective SPEED_FACTOR: {SPEED_FACTOR}")
     print(f"Iniciando en {start_delay}s...")
-    time.sleep(start_delay)
+    _sleep(start_delay)
 
     conf = _load_coords(coords_path)
 
@@ -800,9 +933,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         if ver_todos_x or ver_todos_y:
             print(f"[CaminoScoreADMIN] Click en ver_todos_btn ({ver_todos_x},{ver_todos_y})")
             _click(ver_todos_x, ver_todos_y, 'ver_todos_btn', 1.5)
-            
-            # 2. Copiar toda la tabla (patrón del Camino A)
-            # Right-click en copiar_todo_btn
+            _sleep(0.5)
             copiar_todo_x, copiar_todo_y = _xy(conf, 'copiar_todo_btn')
             if copiar_todo_x or copiar_todo_y:
                 print(f"[CaminoScoreADMIN] Right-click en copiar_todo_btn ({copiar_todo_x},{copiar_todo_y})")
@@ -858,7 +989,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         
         # Ir directo al paso de nombre_cliente_btn para copiar score
         # (línea ~797 del código original)
-        time.sleep(2.0)
+        _sleep(2.0)
         
         # Nombre cliente
         x,y = _xy(conf,'nombre_cliente_btn')
@@ -937,13 +1068,15 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             "dni": dni,
             "fa_saldos": []
         }
-        
-        print(f"[CaminoScoreADMIN] ===== RESULTADOS FINALES =====")
-        print("===JSON_RESULT_START===", flush=True)
-        print(json.dumps(result, indent=2), flush=True)
-        print("===JSON_RESULT_END===", flush=True)
-        
-        print('[CaminoScoreADMIN] Finalizado - Caso especial cuenta única.')
+        # Send partial score update with screenshot path if exists
+        extra = {}
+        if shot_path and shot_path.exists():
+            extra["screenshot_path"] = str(shot_path)
+        send_partial(dni, "score_obtenido", f"Score: {score_value}", extra_data=extra)
+        # Emit final JSON with markers
+        send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"num_registros": 0})
+        print_json_result(result)
+        logger.info('Finalizado - Caso especial cuenta única.')
         return
     
     # Continuar con flujo normal si NO es "Telefónico"
@@ -997,11 +1130,12 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             "info": "Cliente no creado, verifíquelo en la imagen"
         }
 
-        # Imprimir con marcadores para que el worker lo parsee correctamente
-        print(f"[CaminoScoreADMIN] ===== RESULTADOS FINALES =====")
-        print("===JSON_RESULT_START===", flush=True)
-        print(json.dumps(result, indent=2), flush=True)
-        print("===JSON_RESULT_END===", flush=True)
+        extra = {}
+        if shot_path and shot_path.exists():
+            extra["screenshot_path"] = str(shot_path)
+        send_partial(dni, "error_analisis", "Cliente no creado", extra_data=extra)
+        print_json_result(result)
+        logger.info('[CaminoScoreADMIN] Finalizado - Cliente no creado')
 
         # Cerrar tab y volver a home antes de terminar
         print("[CaminoScoreADMIN] Cerrando tab y volviendo a home...")
@@ -1108,11 +1242,10 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                     }
                     
                     print(f"[CaminoScoreADMIN] ===== RESULTADOS FINALES =====")
-                    print("===JSON_RESULT_START===", flush=True)
-                    print(json.dumps(result, indent=2), flush=True)
-                    print("===JSON_RESULT_END===", flush=True)
+                    print_json_result(result)
                     
-                    print("[CaminoScoreADMIN] Finalizado - Fraude detectado")
+                    send_partial(dni, "error_analisis", "FRAUDE", extra_data={"info": "Caso de fraude detectado en la consulta"})
+                    logger.info("Finalizado - Fraude detectado")
                     return
                 else:
                     print("[CaminoScoreADMIN] No se detectó fraude, continuando con flujo normal")
@@ -1212,19 +1345,26 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     
     # Mensaje para que deudas.py envíe update parcial con score e imagen
     print(f"[CaminoScoreADMIN] SCORE_CAPTURADO:{score_value}")
-    
+    # Send partial score update (include screenshot path if available)
+    extra = {}
+    if shot_path and shot_path.exists():
+        extra["screenshot_path"] = str(shot_path)
+    send_partial(dni, "score_obtenido", f"Score: {score_value}", extra_data=extra)
+
     # Enviar mensaje de búsqueda de deudas iniciada DESPUÉS de capturar el score
     print(f"[CaminoScoreADMIN] Buscando deudas...")
-    
+    send_partial(dni, "buscando_deudas", "Buscando deudas...")
+
     # Enviar mensaje de tiempo estimado al frontend
     if ids_cliente:
         num_cuentas = len(ids_cliente)
-        tiempo_segundos = num_cuentas * 40
+        tiempo_segundos = num_cuentas * 28
         minutos = tiempo_segundos // 60
         segundos = tiempo_segundos % 60
         
         mensaje_estimacion = f"Analizando {num_cuentas} cuenta{'s' if num_cuentas > 1 else ''}, tiempo estimado {minutos}:{segundos:02d} minutos"
         print(f"[CaminoScoreADMIN] {mensaje_estimacion}")
+        send_partial(dni, "validando_deudas", mensaje_estimacion)
 
     print("[CaminoADMIN-Cuenta] Cerrando una vez para ver deudas...")
     x,y = _xy(conf,'close_tab_btn')
@@ -1287,7 +1427,44 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                 print(f"[CaminoScoreADMIN] Seleccionando cuenta {cuenta_num}...")
                 _click(seleccionar_btn[0], seleccionar_btn[1], 'seleccionar_btn', 0.5)
                 time.sleep(1.0)
-                
+
+                # Verificación: confirmar que realmente entramos a la cuenta
+                # (copiar en la misma coordenada donde aparece 'Telefónico' para cuentas únicas)
+                _clear_clipboard()
+                time.sleep(0.4)
+                cnx, cny = _xy(conf, 'client_name_field')
+                entered_ok = True  # por defecto asumimos ok si no podemos verificar
+                if cnx or cny:
+                    # Right-click en el nombre y click en copi_id_field para copiar texto de verificación
+                    try:
+                        print(f"[CaminoScoreADMIN] Verificando entrada a cuenta {cuenta_num} (copiando client name)...")
+                        pg.click(cnx, cny, button='right')
+                        time.sleep(0.4)
+                        ccx, ccy = _xy(conf, 'copi_id_field')
+                        if ccx or ccy:
+                            _click(ccx, ccy, 'copi_id_field', 0.4)
+                            time.sleep(0.5)
+                            copied_post_sel = _get_clipboard_text().strip().lower()
+                            print(f"[CaminoScoreADMIN] Texto copiado tras seleccionar: '{copied_post_sel}'")
+                            if copied_post_sel not in ('telefónico', 'telefonico'):
+                                # No entró correctamente; suele salir un cartel central. Presionar Enter y saltar a la siguiente cuenta
+                                print("[CaminoScoreADMIN] No se confirmó entrada a la cuenta (no 'Telefónico'), cerrando cartel y pasando a la siguiente cuenta")
+                                pg.press('enter')
+                                time.sleep(0.5)
+                                entered_ok = False
+                        else:
+                            print("[CaminoScoreADMIN] WARNING: 'copi_id_field' no definido; no se puede verificar entrada")
+                    except Exception as e:
+                        print(f"[CaminoScoreADMIN] ERROR verificando entrada a cuenta: {e}")
+                        entered_ok = True
+                else:
+                    print("[CaminoScoreADMIN] WARNING: 'client_name_field' no definido; omitiendo verificación de entrada")
+
+                if not entered_ok:
+                    # Saltar a la siguiente cuenta sin buscar deudas para esta
+                    print(f"[CaminoScoreADMIN] Saltando búsqueda de la cuenta {cuenta_num} por fallo al entrar")
+                    continue
+
                 # 4. Buscar deudas para esta cuenta con el tipo de documento correcto
                 print(f"[CaminoScoreADMIN] Buscando deudas para cuenta {cuenta_num}...")
                 deudas_cuenta = _buscar_deudas_cuenta(conf, base_delay, cuenta_info['tipo_documento'])
@@ -1319,7 +1496,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     hx, hy = _xy(conf,'home_area')
     if hx or hy:
         _click(hx, hy, 'home_area', _step_delay(step_delays,11,base_delay))
-    time.sleep(1.0)
+    _sleep(1.0)
     
     print(f"\n[CaminoScoreADMIN] ===== BÚSQUEDA DE DEUDAS COMPLETADA =====")
     print(f"[CaminoScoreADMIN] Total de deudas recolectadas: {len(fa_saldos_todos)}")
@@ -1327,19 +1504,40 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     # Limpiar portapapeles al final para evitar contaminación entre consultas
     _clear_clipboard()
 
-    # Devolver JSON con el resultado (formato simplificado)
+    # Normalize and sanitize fa_saldos_todos to ensure valid ids and avoid None values
+    try:
+        from common_utils import sanitize_fa_saldos
+        sanitized = sanitize_fa_saldos(fa_saldos_todos, min_digits=4)
+    except Exception:
+        # Fallback local sanitize
+        def _local_sanitize(fa_saldos):
+            import re
+            cleaned = []
+            for item in (fa_saldos or []):
+                if not isinstance(item, dict):
+                    continue
+                id_raw = str(item.get('id_fa', '') or '').strip()
+                saldo_raw = str(item.get('saldo', '') or '').strip()
+                if not id_raw:
+                    continue
+                m = re.search(r"(\d{4,})", id_raw)
+                if not m:
+                    print(f"[sanitize] Filtrando entrada inválida fa_saldos: {id_raw}", file=sys.stderr)
+                    continue
+                cleaned.append({ 'id_fa': m.group(0), 'saldo': saldo_raw })
+            return cleaned
+        sanitized = _local_sanitize(fa_saldos_todos)
+
     result = {
         "dni": dni,
         "score": score_value,
-        "fa_saldos": fa_saldos_todos if fa_saldos_todos else []
+        "fa_saldos": sanitized
     }
-    
-    print(f"[CaminoScoreADMIN] ===== RESULTADOS FINALES =====")
-    print("===JSON_RESULT_START===", flush=True)
-    print(json.dumps(result, indent=2), flush=True)
-    print("===JSON_RESULT_END===", flush=True)
-    
-    print('[CaminoScoreADMIN] Finalizado.')
+
+    # Send partial and emit final JSON with markers
+    send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"num_registros": len(sanitized)})
+    print_json_result(result)
+    logger.info('[CaminoScoreADMIN] Finalizado.')
 
 
 def _parse_args():
@@ -1350,6 +1548,8 @@ def _parse_args():
     ap.add_argument('--step-delays', default='', help='Delays por paso, coma')
     ap.add_argument('--log-file', default='camino_score_admin.log', help='Archivo de salida')
     ap.add_argument('--shots-dir', default='capturas_camino_score_admin', help='Directorio para capturas')
+    ap.add_argument('--speed-factor', type=float, default=None, help='Override SPEED_FACTOR (scales delays). >1 slows down, <1 speeds up')
+    ap.add_argument('--slow', action='store_true', help='Alias to set a safe slow speed (SPEED_FACTOR=1.0) if --speed-factor not provided')
     return ap.parse_args()
 
 
@@ -1366,6 +1566,17 @@ if __name__ == '__main__':
                     step_delays_list.append(float(tok))
                 except ValueError:
                     pass
+        # Apply CLI speed factor overrides, if any
+        try:
+            if getattr(args, 'speed_factor', None) is not None:
+                SPEED_FACTOR = max(0.01, float(args.speed_factor))
+                print(f"[CaminoScoreADMIN] SPEED_FACTOR override: {SPEED_FACTOR}")
+            elif getattr(args, 'slow', False):
+                SPEED_FACTOR = max(0.01, 1.0)
+                print(f"[CaminoScoreADMIN] Slow mode enabled: SPEED_FACTOR set to {SPEED_FACTOR}")
+        except Exception as e:
+            print(f"[CaminoScoreADMIN] Error applying speed override: {e}")
+
         run(args.dni, Path(args.coords), step_delays_list or None, Path(args.log_file), Path(args.shots_dir))
     except KeyboardInterrupt:
         print('Interrumpido por usuario')

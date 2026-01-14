@@ -13,3 +13,4 @@ whatsapp_sessions/
 # Builds
 build/
 dist/
+logs

@@ -434,6 +434,13 @@ def main():
                             for line in process.stdout:
                                 stdout_lines.append(line)
                                 print(line.rstrip(), file=sys.stderr)  # Forward to stderr for real-time visibility
+                                
+                                # Detectar mensaje de tiempo estimado en Camino A
+                                if '[CaminoJulian]' in line and 'cuentas' in line and 'tiempo estimado' in line:
+                                    # Extraer el mensaje completo
+                                    msg = line.split('[CaminoJulian]')[-1].strip()
+                                    send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
+                                    print(f"[CaminoA] Mensaje de tiempo estimado enviado: {msg}", file=sys.stderr)
                         except Exception as e:
                             print(f"Error leyendo stdout: {e}", file=sys.stderr)
                         
@@ -451,15 +458,34 @@ def main():
                     # ===== VERIFICAR SI NECESITA FALLBACK A DNI =====
                     camino_a_data = None
                     if returncode == 0:
-                        # Parsear resultado del primer intento
+                        # Parsear resultado del primer intento (preferir marcadores o matching exacto de JSON)
                         try:
                             a_out = stdout_full or ""
-                            json_start = a_out.find('{')
-                            if json_start != -1:
-                                json_end = a_out.rfind('}')
-                                if json_end != -1 and json_end > json_start:
-                                    json_str = a_out[json_start:json_end+1]
-                                    camino_a_data = json.loads(json_str)
+                            # Preferir marcador
+                            if "===JSON_RESULT_START===" in a_out:
+                                start_pos = a_out.find("===JSON_RESULT_START===")
+                                json_start = a_out.find('\n', start_pos) + 1
+                                end_pos = a_out.find("===JSON_RESULT_END===", json_start)
+                                if end_pos != -1:
+                                    json_text = a_out[json_start:end_pos].strip()
+                                    camino_a_data = json.loads(json_text)
+                            # Fallback: intentar parsear primer JSON por matching de llaves
+                            if not camino_a_data:
+                                pos = a_out.find('{')
+                                if pos != -1:
+                                    depth = 0
+                                    json_str = None
+                                    for idx in range(pos, len(a_out)):
+                                        ch = a_out[idx]
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                json_str = a_out[pos:idx+1]
+                                                break
+                                    if json_str:
+                                        camino_a_data = json.loads(json_str)
                         except Exception:
                             pass
                         
@@ -533,21 +559,44 @@ def main():
                         
                         # NO enviar updates intermedios - ir directo al resultado
                         
-                        # Intentar parsear JSON de Camino A desde stdout
+                        # Intentar parsear JSON de Camino A desde stdout (preferir marcadores si existen)
                         camino_a_data = None
                         try:
-                            # El JSON está en stdout_full
-                            # Buscar el objeto JSON (empieza con '{' y termina con '}')
                             a_out = stdout_full or ""
-                            
-                            # Encontrar el primer '{' que inicia el JSON
-                            json_start = a_out.find('{')
-                            if json_start != -1:
-                                # Encontrar el último '}' que cierra el JSON
-                                json_end = a_out.rfind('}')
-                                if json_end != -1 and json_end > json_start:
-                                    json_str = a_out[json_start:json_end+1]
-                                    camino_a_data = json.loads(json_str)
+                            # 1) Si el script imprimió marcadores ===JSON_RESULT_START=== / ===JSON_RESULT_END===, usarlos
+                            if "===JSON_RESULT_START===" in a_out:
+                                start_pos = a_out.find("===JSON_RESULT_START===")
+                                json_start = a_out.find('\n', start_pos) + 1
+                                end_pos = a_out.find("===JSON_RESULT_END===", json_start)
+                                if end_pos != -1:
+                                    json_text = a_out[json_start:end_pos].strip()
+                                    camino_a_data = json.loads(json_text)
+                            # 2) Si tenemos common util, intentar parsear con su helper (más tolerante)
+                            if not camino_a_data and 'parse_json_from_markers' in globals():
+                                try:
+                                    parsed = parse_json_from_markers(a_out, strict=True)
+                                    if parsed:
+                                        camino_a_data = parsed
+                                except Exception:
+                                    pass
+
+                            # 3) Fallback: intentar extraer el primer objeto JSON por matching de llaves
+                            if not camino_a_data:
+                                pos = a_out.find('{')
+                                if pos != -1:
+                                    depth = 0
+                                    json_str = None
+                                    for idx in range(pos, len(a_out)):
+                                        ch = a_out[idx]
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                json_str = a_out[pos:idx+1]
+                                                break
+                                    if json_str:
+                                        camino_a_data = json.loads(json_str)
                         except Exception as e:
                             print(f"[CaminoA] Error parseando JSON: {e}", file=sys.stderr)
                             import traceback
