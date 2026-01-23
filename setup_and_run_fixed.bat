@@ -199,6 +199,10 @@ if exist "Workers-T3\.env" (
         if "%%a"=="CONNECTION_TIMEOUT" echo CONNECTION_TIMEOUT: %%b
         if "%%a"=="LOG_LEVEL" echo LOG_LEVEL: %%b
         if "%%a"=="TIMEZONE" echo TIMEZONE: %%b
+        if "%%a"=="WORKER_ADMIN" (
+            set "CURRENT_WORKER_ADMIN=%%b"
+            echo WORKER_ADMIN: %%b
+        )
     )
     
     echo =====================================
@@ -223,6 +227,7 @@ if exist "Workers-T3\.env" (
     set "CURRENT_WORKER_TYPE=deudas"
     set "CURRENT_BACKEND_URL=http://192.168.9.160:8000"
     set "CURRENT_API_KEY=lucas123"
+    set "CURRENT_WORKER_ADMIN=0"
     
     goto :configurar_env
 )
@@ -259,6 +264,18 @@ echo API_KEY actual: !CURRENT_API_KEY!
 set /p "NEW_API_KEY=Nueva API Key [!CURRENT_API_KEY!]: "
 if "!NEW_API_KEY!"=="" set "NEW_API_KEY=!CURRENT_API_KEY!"
 
+REM --- Configurar WORKER_ADMIN ---
+echo.
+echo WORKER_ADMIN actual: !CURRENT_WORKER_ADMIN!
+echo (S = habilitado, N = deshabilitado)
+set /p "NEW_WORKER_ADMIN=Habilitar modo ADMIN? (S/N) [!CURRENT_WORKER_ADMIN!]: "
+if "!NEW_WORKER_ADMIN!"=="" set "NEW_WORKER_ADMIN=!CURRENT_WORKER_ADMIN!"
+if /i "!NEW_WORKER_ADMIN!"=="S" set "NEW_WORKER_ADMIN=1"
+if /i "!NEW_WORKER_ADMIN!"=="N" set "NEW_WORKER_ADMIN=0"
+REM Permitimos tambien ingresar 1/0 directamente
+if "!NEW_WORKER_ADMIN!"=="1" set "NEW_WORKER_ADMIN=1"
+if "!NEW_WORKER_ADMIN!"=="0" set "NEW_WORKER_ADMIN=0"
+
 REM --- Mostrar resumen de la configuracion ---
 echo.
 echo =====================================
@@ -281,6 +298,7 @@ if /i "!CONFIRMAR_CONFIG!"=="S" (
         echo WORKER_TYPE=!NEW_WORKER_TYPE!
         echo BACKEND_URL=!NEW_BACKEND_URL!
         echo API_KEY=!NEW_API_KEY!
+        echo WORKER_ADMIN=!NEW_WORKER_ADMIN!
         echo PROCESS_DELAY=30
         echo CONNECTION_TIMEOUT=300
         echo LOG_LEVEL=INFO
@@ -318,7 +336,8 @@ for /f "tokens=1,2 delims==" %%a in (Workers-T3\.env) do (
     if "%%a"=="WORKER_TYPE" set "WORKER_TYPE=%%b"
     if "%%a"=="BACKEND_URL" set "BACKEND_URL=%%b"
     if "%%a"=="API_KEY" set "API_KEY=%%b"
-)
+    if "%%a"=="WORKER_ADMIN" set "WORKER_ADMIN=%%b"
+) 
 
 REM --- Verificar variables requeridas ---
 if "!PC_ID!"=="" (
@@ -351,18 +370,26 @@ echo PC_ID: !PC_ID!
 echo Tipo: !WORKER_TYPE!
 echo Backend: !BACKEND_URL!
 echo API Key: !API_KEY!
+echo Admin: !WORKER_ADMIN!
 echo =====================================
 echo.
 
 REM --- Crear directorio de logs si no existe ---
 if not exist "Workers-T3\logs" mkdir "Workers-T3\logs"
 
+REM --- Preparar flag admin ---
+if "!WORKER_ADMIN!"=="1" (
+    set "ADMIN_FLAG=--admin"
+) else (
+    set "ADMIN_FLAG="
+)
+
 REM --- Ejecutar worker ---
 echo Iniciando Worker T3...
 echo (Presiona Ctrl+C para detener)
 echo.
 
-python Workers-T3\worker.py --tipo !WORKER_TYPE! --api_key !API_KEY! --pc_id !PC_ID!
+python Workers-T3\worker.py --tipo !WORKER_TYPE! --api_key !API_KEY! --pc_id !PC_ID! !ADMIN_FLAG!
 
 echo.
 echo =====================================

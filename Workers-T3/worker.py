@@ -56,6 +56,7 @@ os.makedirs("logs", exist_ok=True)
 parser = argparse.ArgumentParser(description="Cliente Worker Unificado para T3")
 parser.add_argument("--pc_id", default=os.getenv("PC_ID"), help="ID de la PC (ej: pc1)")
 parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE"), help="Tipo de automatización (deudas/movimientos/pin)")
+parser.add_argument("--admin", action="store_true", default=os.getenv("WORKER_ADMIN", "0").lower() in ("1","true","yes","on"), help="Flag para indicar que este worker puede ejecutar tareas administrativas (solo válido para tipo 'deudas')")
 parser.add_argument("--backend", default=os.getenv("BACKEND_URL", "http://192.168.9.160:8000"), help="URL del backend")
 parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", "30")), help="Tiempo de procesamiento simulado (segundos)")
 parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "3")), help="Intervalo entre polls (segundos)")
@@ -102,6 +103,7 @@ logger = logging.getLogger(f"worker_{args.pc_id}")
 # -----------------------------
 PC_ID = args.pc_id
 TIPO = args.tipo
+ADMIN = args.admin
 BACKEND = args.backend
 PROCESS_DELAY = args.delay
 POLL_INTERVAL = args.poll_interval
@@ -211,11 +213,12 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
 # Funciones principales
 # -----------------------------
 def register_pc() -> bool:
-    logger.info(f"[REGISTRO] Registrando PC '{PC_ID}' tipo '{TIPO}' en {BACKEND}")
+    logger.info(f"[REGISTRO] Registrando PC '{PC_ID}' tipo '{TIPO}' admin={ADMIN} en {BACKEND}")
     if TIPO not in VALID_TASK_TYPES:
         logger.error(f"[ERROR] Tipo inválido: {TIPO}")
         return False
-    result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
+    # Incluir flag admin en el payload para que el backend sepa si este worker puede ejecutar tareas administrativas
+    result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}", json_data={"admin": ADMIN})
     if result and result.get("status") == "ok":
         logger.info(f"[OK] PC registrada correctamente | pc_id={result.get('pc_id')}, tipo={result.get('tipo')}")
         return True
@@ -227,7 +230,7 @@ def send_heartbeat() -> bool:
     try:
         # El backend actualiza el heartbeat automáticamente en get_task
         # pero también podemos usar register_pc para mantener online
-        result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
+        result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}", json_data={"admin": ADMIN})
         if result and result.get("status") == "ok":
             logger.debug(f"[HEARTBEAT] Enviado correctamente")
             return True
@@ -240,7 +243,8 @@ def send_heartbeat() -> bool:
 
 def get_task() -> Optional[dict]:
     logger.info("[POLL] Intentando obtener tarea...")
-    payload = {"pc_id": PC_ID, "tipo": TIPO}
+    # Incluir flag admin para que el backend pueda filtrar tareas administrativas si aplica
+    payload = {"pc_id": PC_ID, "tipo": TIPO, "admin": ADMIN}
     result = make_request("POST", "/workers/get_task", payload)
     if not result:
         return None
@@ -257,6 +261,15 @@ def get_task() -> Optional[dict]:
         task_tipo = task.get("tipo", "")
         
         logger.info(f"[TAREA-TIPO] Worker esperaba: '{TIPO}' | Tarea tiene tipo: '{task_tipo}' | Es PIN: {is_pin_task}")
+
+        # Si la tarea está marcada como admin=True, solo los workers 'deudas' con ADMIN=True deben procesarla
+        task_admin = bool(task.get('admin', False))
+        if task_admin:
+            logger.info(f"[TAREA-ADMIN] Tarea marcada como administrativa (admin=True)")
+            if not (TIPO == 'deudas' and ADMIN):
+                logger.warning(f"[RECHAZO] Tarea administrativa recibida pero este worker no está configurado como admin; rechazando")
+                logger.warning(f"[RECHAZO] Task ID: {task.get('task_id')}")
+                return None
         
         # VALIDACIÓN: Verificar que la tarea sea del tipo correcto para este worker
         if TIPO == "pin":
@@ -1246,8 +1259,9 @@ def main_loop():
     use_websocket = True  # Intentar usar WebSocket por defecto
     
     worker_type_display = "PIN" if TIPO == "pin" else TIPO.upper()
-    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Modo: WebSocket")
-    logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}")
+    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Admin: {ADMIN} | Modo: WebSocket")
+    admin_note = " y atenderá tareas administrativas (admin=true)" if ADMIN else ""
+    logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}{admin_note}")
     
     # Crear directorio de logs
     os.makedirs("logs", exist_ok=True)

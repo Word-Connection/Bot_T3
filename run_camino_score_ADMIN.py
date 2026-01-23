@@ -84,14 +84,15 @@ DEFAULT_COORDS_FILE = 'camino_score_ADMIN_coords.json'
 
 
 # --- Speed control: allow scaling delays via environment variable SPEED_FACTOR ---
+# NOTE: Default values increased to slow down Camino Score ADMIN scraping (can be overridden by env or CLI)
 try:
-    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '0.35')))
+    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '1.0')))
 except Exception:
-    SPEED_FACTOR = 0.35
+    SPEED_FACTOR = 1.0
 try:
-    MIN_SLEEP = max(0.01, float(os.getenv('MIN_SLEEP', '0.02')))
+    MIN_SLEEP = max(0.02, float(os.getenv('MIN_SLEEP', '0.05')))
 except Exception:
-    MIN_SLEEP = 0.02
+    MIN_SLEEP = 0.05
 
 def _sleep(t: float):
     """Sleep scaled by SPEED_FACTOR with a minimum cap (MIN_SLEEP)."""
@@ -157,15 +158,16 @@ def _resolve_screenshot_region(conf: Dict[str, Any]) -> Tuple[int,int,int,int]:
     return 0,0,0,0
 
 
-# Global speed controls (ensure defined before use) — default more aggressive for speed
+# Global speed controls (ensure defined before use) — defaults tuned for safety/slowness
+# NOTE: Default values increased to slow down Camino Score ADMIN scraping (can be overridden by env or CLI)
 try:
-    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '0.35')))
+    SPEED_FACTOR = max(0.1, float(os.getenv('SPEED_FACTOR', '1.0')))
 except Exception:
-    SPEED_FACTOR = 0.35
+    SPEED_FACTOR = 1.0
 try:
-    MIN_SLEEP = max(0.01, float(os.getenv('MIN_SLEEP', '0.02')))
+    MIN_SLEEP = max(0.02, float(os.getenv('MIN_SLEEP', '0.05')))
 except Exception:
-    MIN_SLEEP = 0.02
+    MIN_SLEEP = 0.05
 
 def _sleep(t: float):
     """Scaled sleep: applies SPEED_FACTOR and enforces MIN_SLEEP to avoid too-small waits."""
@@ -604,14 +606,25 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
         id_fa = _get_clipboard_text().strip()
         print(f"[CaminoADMIN-Cuenta] ID copiado: '{id_fa}'")
         
-        # Agregar a deudas
+        # Agregar a deudas (filtrar id <= 0)
         if id_fa and saldo_fa:
-            deudas.append({
-                "id_fa": id_fa,
-                "saldo": saldo_fa,
-                "tipo_documento": tipo_documento
-            })
-            print(f"[CaminoADMIN-Cuenta] ✓ Agregado FA Actual: ID={id_fa}, Saldo={saldo_fa}, Tipo={tipo_documento}")
+            # Extraer número del ID
+            id_numeric = _extract_first_number(id_fa)
+            try:
+                id_num_value = int(id_numeric) if id_numeric else 0
+            except ValueError:
+                id_num_value = 0
+            
+            # Filtrar IDs que sean 0 o negativos
+            if id_num_value > 0:
+                deudas.append({
+                    "id_fa": id_fa,
+                    "saldo": saldo_fa,
+                    "tipo_documento": tipo_documento
+                })
+                print(f"[CaminoADMIN-Cuenta] ✓ Agregado FA Actual: ID={id_fa}, Saldo={saldo_fa}, Tipo={tipo_documento}")
+            else:
+                print(f"[CaminoADMIN-Cuenta] FILTRADO: ID inválido o <= 0 ('{id_fa}'), no se agrega")
         else:
             print(f"[CaminoADMIN-Cuenta] WARNING: ID o Saldo vacío, no se agrega")
         
@@ -645,7 +658,7 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
                 break
 
             # Procesar esta Cuenta Financiera:
-            # 1. Click en el label, moverse 2 a la derecha, copiar cantidad
+            # 1. Click en el label y validar que realmente es "Cuenta Financiera"
             print(f"[CaminoADMIN-Cuenta] Procesando Cuenta Financiera #{cf_offset + 1}")
             _click(cf_label_x, cf_label_y, 'cuenta_financiera_label_click_focus', 0.15)
             _sleep(0.12)
@@ -653,6 +666,16 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
             # Moverse hacia abajo según el offset (primera vez 0, segunda 1, tercera 2, etc.)
             for _ in range(cf_offset):
                 pg.press('down'); _sleep(0.08)
+            
+            # VALIDAR que realmente estamos en "Cuenta Financiera" antes de procesar
+            _clear_clipboard(); _sleep(0.12)
+            pg.hotkey('ctrl', 'c'); _sleep(0.18)
+            current_label = _get_clipboard_text().strip().lower()
+            print(f"[CaminoADMIN-Cuenta] Label actual (offset {cf_offset}): '{current_label}'")
+            
+            if 'cuenta financiera' not in current_label:
+                print(f"[CaminoADMIN-Cuenta] Label '{current_label}' no es Cuenta Financiera, saliendo del bucle")
+                break
             
             # Moverse 2 a la derecha para llegar a la columna de cantidad
             for _ in range(2):
@@ -729,10 +752,21 @@ def _buscar_deudas_cuenta(conf: Dict[str, Any], base_delay: float, tipo_document
                 saldo_cf = _get_clipboard_text().strip()
                 print(f"[CaminoADMIN-Cuenta] Saldo copiado: '{saldo_cf}'")
 
-                # Registrar si no existe
+                # Registrar si no existe (filtrar id <= 0)
                 if id_cf and not any(d.get("id_fa") == id_cf for d in deudas):
-                    deudas.append({'id_fa': id_cf, 'saldo': saldo_cf, 'tipo_documento': tipo_documento})
-                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={(_extract_first_number(id_cf or '') or id_cf or '')}, Saldo={saldo_cf}, Tipo={tipo_documento}")
+                    # Extraer número del ID
+                    id_numeric = _extract_first_number(id_cf)
+                    try:
+                        id_num_value = int(id_numeric) if id_numeric else 0
+                    except ValueError:
+                        id_num_value = 0
+                    
+                    # Filtrar IDs que sean 0 o negativos
+                    if id_num_value > 0:
+                        deudas.append({'id_fa': id_cf, 'saldo': saldo_cf, 'tipo_documento': tipo_documento})
+                        print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={(_extract_first_number(id_cf or '') or id_cf or '')}, Saldo={saldo_cf}, Tipo={tipo_documento}")
+                    else:
+                        print(f"[CaminoADMIN-Cuenta] FILTRADO: ID inválido o <= 0 ('{id_cf}'), no se agrega")
 
                 if cf_entry is not None:
                     cf_entry['items'].append({'saldo_raw': saldo_cf or '', 'saldo': _parse_amount_value(saldo_cf or ''), 'id_raw': id_cf or '', 'id': (_extract_first_number(id_cf or '') or None)})
@@ -1505,6 +1539,7 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
     _clear_clipboard()
 
     # Normalize and sanitize fa_saldos_todos to ensure valid ids and avoid None values
+    # Also filter out IDs that are 0 or negative
     try:
         from common_utils import sanitize_fa_saldos
         sanitized = sanitize_fa_saldos(fa_saldos_todos, min_digits=4)
@@ -1523,6 +1558,15 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                 m = re.search(r"(\d{4,})", id_raw)
                 if not m:
                     print(f"[sanitize] Filtrando entrada inválida fa_saldos: {id_raw}", file=sys.stderr)
+                    continue
+                # Filter out IDs that are 0 or negative
+                try:
+                    id_value = int(m.group(0))
+                    if id_value <= 0:
+                        print(f"[sanitize] Filtrando ID <= 0: {id_value}", file=sys.stderr)
+                        continue
+                except ValueError:
+                    print(f"[sanitize] Error parseando ID numérico: {m.group(0)}", file=sys.stderr)
                     continue
                 cleaned.append({ 'id_fa': m.group(0), 'saldo': saldo_raw })
             return cleaned
