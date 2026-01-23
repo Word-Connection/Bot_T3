@@ -38,7 +38,56 @@ try:
 except Exception:
     pyperclip = None
 
-DEFAULT_COORDS_FILE = 'camino_a_unico_coords_multi.json'
+# -----------------------------
+# Logging y helpers de comunicación
+# -----------------------------
+import logging
+logger = logging.getLogger("camino_a_viejo")
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter("[%(levelname)s][%(name)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+try:
+    from common_utils import send_partial_update as _send_update_base
+    HAS_COMMON_UTILS = True
+except Exception:
+    HAS_COMMON_UTILS = False
+
+
+def send_partial(identifier: str, etapa: str, info: str, extra_data: Optional[Dict[str, Any]] = None, admin_mode: bool = False, score: str = ""):
+    """Envía un update parcial al worker (usa common_utils si está disponible)."""
+    if HAS_COMMON_UTILS:
+        _send_update_base(identifier=identifier, etapa=etapa, info=info, score=score, admin_mode=admin_mode, extra_data=extra_data, identifier_key="dni")
+    else:
+        update_data = {
+            "dni": identifier,
+            "etapa": etapa,
+            "info": info,
+            "timestamp": int(time.time() * 1000)
+        }
+        if score:
+            update_data["score"] = score
+        if admin_mode:
+            update_data["admin_mode"] = True
+        if extra_data:
+            update_data.update(extra_data)
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(update_data, ensure_ascii=False))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
+
+
+def print_json_result(data: Dict[str, Any]):
+    """Imprime resultado final usando marcadores para que el worker lo parsee."""
+    print("===JSON_RESULT_START===")
+    print(json.dumps(data, ensure_ascii=False))
+    print("===JSON_RESULT_END===")
+    sys.stdout.flush()
+
+DEFAULT_COORDS_FILE = 'camino_a_viejo_coords_multi.json'
 
 STEP_DESC = {
     0: 'cliente_section',
@@ -67,7 +116,6 @@ def _load_coords(path: Path) -> Dict[str, Any]:
     except Exception as e:
         print(f"No se pudo leer coords {path}: {e}")
         sys.exit(2)
-
 
 def _xy(conf: Dict[str, Any], key: str) -> tuple[int,int]:
     v = conf.get(key) or {}
@@ -107,13 +155,6 @@ def _click(x: int, y: int, label: str, delay: float):
     time.sleep(delay)
 
 
-def _type(text: str, delay: float):
-    print(f"[CaminoA] Typing text: '{text}' (interval=0.05)")
-    pg.typewrite(text, interval=0.05)
-    print(f"[CaminoA]   -> sleep({delay}s)")
-    time.sleep(delay)
-
-
 def _press_enter(delay_after: float):
     print(f"[CaminoA] Press ENTER key")
     pg.press('enter')
@@ -121,59 +162,12 @@ def _press_enter(delay_after: float):
     time.sleep(delay_after)
 
 
-def _send_down_presses(count: int, interval: float, use_pynput: bool):
-    """Envía flecha abajo 'count' veces. Si use_pynput y disponible, usa pynput (Key.down
-    con press/release explícito). Si no, usa pyautogui.press.
-    """
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        print(f"[CaminoA] Navegación con pynput: {count} x Key.down (interval={interval}s)")
-        for i in range(count):
-            print(f"[CaminoA]   -> press(Key.down) #{i+1}")
-            kb.press(KBKey.down)
-            time.sleep(0.04)
-            kb.release(KBKey.down)
-            time.sleep(interval)
-        return
-    # Fallback pyautogui
-    print(f"[CaminoA] Navegación con pyautogui: {count} x down (interval={interval}s)")
-    try:
-        pg.press('down', presses=count, interval=interval)
-    except TypeError:
-        for i in range(count):
-            print(f"[CaminoA]   -> press('down') #{i+1}")
-            pg.press('down')
-            time.sleep(interval)
-
-def _send_right_presses(count: int, interval: float, use_pynput: bool):
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        for _ in range(count):
-            kb.press(KBKey.right); time.sleep(0.04); kb.release(KBKey.right); time.sleep(interval)
-        return
-    try:
-        pg.press('right', presses=count, interval=interval)
-    except TypeError:
-        for _ in range(count):
-            pg.press('right'); time.sleep(interval)
-
-def _send_left_presses(count: int, interval: float, use_pynput: bool):
-    if use_pynput and _HAS_PYNPUT:
-        kb = KBController()
-        for _ in range(count):
-            kb.press(KBKey.left); time.sleep(0.04); kb.release(KBKey.left); time.sleep(interval)
-        return
-    try:
-        pg.press('left', presses=count, interval=interval)
-    except TypeError:
-        for _ in range(count):
-            pg.press('left'); time.sleep(interval)
-
 def _extract_first_number(txt: str) -> str:
     if not txt:
         return ''
     m = re.search(r"\d+", txt)
     return m.group(0) if m else ''
+
 
 def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA] Doble click {label} ({x},{y})")
@@ -192,6 +186,7 @@ def _double_click_xy(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA]   -> sleep({delay_after}s)")
     time.sleep(delay_after)
 
+
 def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
     print(f"[CaminoA] Right click {label} ({x},{y})")
     if x and y:
@@ -209,6 +204,7 @@ def _right_click(x: int, y: int, label: str, delay_after: float = 0.2):
         print(f"[CaminoA] ADVERTENCIA coordenadas {label}=(0,0)")
     print(f"[CaminoA]   -> sleep({delay_after}s)")
     time.sleep(delay_after)
+
 
 def _maybe_close_ok_popup(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float):
     """Intenta cerrar el popup de OK de manera rápida:
@@ -341,86 +337,6 @@ def _validate_selected_record(conf: Dict[str, Any], base_delay: float, max_copy_
     return "Llamada"
 
 
-def _scan_popup_regions_and_handle_ok(base_delay: float, log_dir: str = 'capturas_popup') -> bool:
-    """Escanea 4 regiones alrededor del área indicada para encontrar el popup por imagen
-    y, si se encuentra, hace click en el botón OK (centro del match). Además guarda las capturas.
-
-    Requiere que la variable de entorno OK_POPUP_IMAGE apunte a la imagen del botón/ventana a detectar.
-
-    Regresa True si detectó y pulsó OK, False en caso contrario.
-    """
-    img_path = os.getenv('OK_POPUP_IMAGE', '').strip()
-    if not img_path:
-        # Sin imagen de referencia no podemos identificar, pero igualmente capturamos para depurar
-        img_path = ''
-
-    # Coordenadas de sonda (arriba-derecha, abajo-derecha, abajo-izquierda, arriba-izquierda)
-    probes = [
-        (int(os.getenv('POPUP_P1_X', '1179')), int(os.getenv('POPUP_P1_Y', '461'))),
-        (int(os.getenv('POPUP_P2_X', '1180')), int(os.getenv('POPUP_P2_Y', '575'))),
-        (int(os.getenv('POPUP_P3_X', '740')),  int(os.getenv('POPUP_P3_Y', '572'))),
-        (int(os.getenv('POPUP_P4_X', '740')),  int(os.getenv('POPUP_P4_Y', '462'))),
-    ]
-    try:
-        scan_w = int(os.getenv('POPUP_SCAN_W', '260'))
-        scan_h = int(os.getenv('POPUP_SCAN_H', '120'))
-    except Exception:
-        scan_w, scan_h = 260, 120
-    try:
-        confd = float(os.getenv('OK_POPUP_CONFIDENCE', '0.9'))
-    except Exception:
-        confd = 0.9
-
-    # Flag para deshabilitar guardado de capturas de popup
-    disable_popup_captures = os.getenv('DISABLE_POPUP_CAPTURES', '1') in ('1','true','True')
-    if not disable_popup_captures:
-        try:
-            Path(log_dir).mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-
-    ts = time.strftime('%Y%m%d_%H%M%S')
-    detected = False
-    for idx, (px, py) in enumerate(probes, start=1):
-        region = (max(0, px), max(0, py), max(10, scan_w), max(10, scan_h))
-        snap = None
-        try:
-            snap = pg.screenshot(region=region)
-            if not disable_popup_captures:
-                out = Path(log_dir) / f'popup_probe_{idx}_{ts}.png'
-                try:
-                    snap.save(out)
-                except Exception:
-                    pass
-        except Exception:
-            snap = None
-        
-        if img_path:
-            try:
-                box = pg.locateOnScreen(img_path, region=region, confidence=confd)
-            except Exception:
-                box = None
-            if box:
-                try:
-                    cx, cy = pg.center(box)
-                except Exception:
-                    cx = getattr(box, 'left', 0) + getattr(box, 'width', 0)//2
-                    cy = getattr(box, 'top', 0) + getattr(box, 'height', 0)//2
-                _click(cx, cy, 'ok_popup_img_region', 0.1)
-                detected = True
-                break
-
-    time.sleep(min(0.2, base_delay))
-    return detected
-
-def _looks_current(txt: str) -> bool:
-    if not txt:
-        return False
-    s = (txt or '').strip().lower()
-    # Aceptar indicadores en español e inglés
-    return ('current' in s) or ('actual' in s) or ('activo' in s) or ('seleccionado' in s)
-
-
 def _get_clipboard_text() -> str:
     if pyperclip:
         try:
@@ -440,8 +356,26 @@ def _get_clipboard_text() -> str:
 
 
 def _clear_clipboard():
-    """No-op: solicitado no limpiar más el portapapeles."""
-    return
+    """Limpia el contenido del portapapeles y loggea como en Camino Score Admin."""
+    if pyperclip:
+        try:
+            pyperclip.copy("")
+            print("[CaminoScoreADMIN] Portapapeles limpiado con pyperclip")
+            return
+        except Exception:
+            pass
+    try:
+        import tkinter as tk
+        r = tk.Tk(); r.withdraw()
+        try:
+            r.clipboard_clear()
+            r.update()
+            print("[CaminoScoreADMIN] Portapapeles limpiado con tkinter")
+        finally:
+            r.destroy()
+    except Exception as e:
+        print(f"[CaminoScoreADMIN] No se pudo limpiar portapapeles: {e}")
+
 
 def _stable_read_clipboard_only(max_attempts: int = 8, consecutive: int = 2, read_delay: float = 0.1) -> str:
     """Lee el portapapeles repetidamente SIN enviar Ctrl+C, hasta lograr lecturas estables.
@@ -689,50 +623,6 @@ def _parse_amount_value(txt: str) -> Optional[float]:
         return None
 
 
-def _copy_apartado_with_retries() -> str:
-    """Copia el 'apartado' del foco actual evitando valores tipo monto.
-    1) Intento con clear_first=True
-    2) Si no luce válido, doble click + reintento
-    3) Si no, Tab + reintento
-    4) Si no, Shift+Tab + reintento
-    Devuelve el mejor texto disponible (válido si se logró, o último si no).
-    """
-    # 1) Primer intento sin limpieza para evitar bloquear o spamear limpiezas
-    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 2) Doble click
-    with _suppress_failsafe():
-        try:
-            pg.doubleClick()
-        except Exception:
-            pg.click(); time.sleep(0.05); pg.click()
-    time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 3) Tab
-    pg.press('tab'); time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    if _looks_like_apartado(txt):
-        return txt
-
-    # 4) Shift+Tab (volver)
-    try:
-        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
-    except Exception:
-        pass
-    time.sleep(0.12)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False, require_changed=True)
-    return txt
-
-
 def _copy_apartado_with_retries_rightclick(x: int, y: int, conf: Dict[str, Any]) -> str:
     """Copia el 'apartado' usando right-click method para cuenta_financiera.
     Usa las mismas estrategias de reintento que _copy_apartado_with_retries pero con right-click.
@@ -774,53 +664,6 @@ def _copy_apartado_with_retries_rightclick(x: int, y: int, conf: Dict[str, Any])
     return txt
 
 
-def _copy_id_with_retries() -> str:
-    """Copia el ID de la columna actual con reintentos de foco.
-    Valida que tenga un bloque de dígitos (>=5) y evita aceptar formatos tipo monto.
-    """
-    def _valid_id(s: str) -> bool:
-        if not s:
-            return False
-        if _currency_like(s):
-            return False
-        return re.search(r"\b\d{5,}\b", s or '') is not None
-
-    txt = _stable_copy_text(max_attempts=3, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Doble click
-    with _suppress_failsafe():
-        try:
-            pg.doubleClick()
-        except Exception:
-            pg.click(); time.sleep(0.05); pg.click()
-    time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Tab
-    pg.press('tab'); time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    if _valid_id(txt):
-        return txt
-    # Shift+Tab
-    try:
-        pg.keyDown('shift'); pg.press('tab'); pg.keyUp('shift')
-    except Exception:
-        pass
-    time.sleep(0.1)
-    txt = _stable_copy_text(max_attempts=2, consecutive=2, read_delay=0.08,
-                            require_non_empty=False, clear_first=False,
-                            validator=_valid_id)
-    return txt
-
-
 def _append_log(log_path: Path, dni: str, content: str):
     one = (content or '').replace('\r',' ').replace('\n',' ').strip()
     if len(one) > 400:
@@ -832,62 +675,6 @@ def _append_log(log_path: Path, dni: str, content: str):
     with log_path.open('a', encoding='utf-8') as f:
         f.write(line)
     print(f"[CaminoA] Log: {line.strip()}")
-
-
-def _is_valid_saldo_text(txt: str, compare_n: Optional[int] = None) -> bool:
-    if not txt:
-        return False
-    s = (txt or '').strip()
-    # No debe coincidir con N puro
-    if compare_n is not None and s.strip() == str(compare_n):
-        return False
-    # Debe lucir como monto: parseable o con separadores y al menos 3 dígitos
-    digits = re.sub(r"\D", "", s)
-    if len(digits) < 3:
-        return False
-    if _parse_amount_value(s) is not None:
-        return True
-    return _currency_like(s)
-
-
-def _copy_saldo_fa_with_retries(dx: int, dy: int, compare_n: Optional[int] = None) -> str:
-    # 1) Ctrl+C estable con validador
-    txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                            require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-    if _is_valid_saldo_text(txt, compare_n):
-        return txt
-    # 2) Click foco y reintento
-    if dx or dy:
-        with _suppress_failsafe():
-            pg.moveTo(dx, dy, duration=0.1)
-            pg.click()
-        time.sleep(0.15)
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    # 3) Doble click y reintento
-    if dx or dy:
-        _double_click_xy(dx, dy, 'fa_deuda', 0.2)
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    # 4) Arrastre y reintento
-    if dx or dy:
-        try:
-            with _suppress_failsafe():
-                pg.moveTo(max(0, dx-25), dy, duration=0.06)
-                pg.mouseDown(); time.sleep(0.06)
-                pg.moveTo(dx+180, dy, duration=0.12)
-                pg.mouseUp(); time.sleep(0.1)
-        except Exception:
-            pass
-        txt = _stable_copy_text(max_attempts=10, consecutive=2, read_delay=0.1,
-                                require_non_empty=True, validator=lambda t: _is_valid_saldo_text(t, compare_n))
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    return txt or ''
 
 
 def _is_valid_fa_id(txt: str, compare_saldo_txt: str = '', compare_n: Optional[int] = None) -> bool:
@@ -931,155 +718,10 @@ def _copy_fa_id_via_context_with_retries(rax: int, ray: int, cpx: int, cpy: int,
     return last_txt
 
 
-def _copy_fa_saldo_via_context_with_retries(rax: int, ray: int, cpx: int, cpy: int,
-                                            compare_n: Optional[int] = None,
-                                            max_rounds: int = 4) -> str:
-    """Copia el saldo en FA usando click derecho sobre fa_deuda y opción de copiar (fa_deuda_copy).
-    Valida que el texto parezca monto y no sea el N.
-    """
-    last_txt = ''
-    for _ in range(max(1, max_rounds)):
-        if rax or ray:
-            _right_click(rax, ray, 'fa_deuda_context', 0.2)
-            if cpx or cpy:
-                _click(cpx, cpy, 'fa_deuda_copy', 0.15)
-            time.sleep(0.1)
-        txt = _stable_read_clipboard_only(max_attempts=8, consecutive=2, read_delay=0.1)
-        last_txt = txt or last_txt
-        if _is_valid_saldo_text(txt, compare_n):
-            return txt
-    return last_txt
-
-def _copy_fa_saldo_context_simple(rax: int, ray: int, cpx: int, cpy: int) -> str:
-    """Copia el saldo en FA sin validaciones: click derecho en (rax,ray), espera 1s y click en (cpx,cpy).
-    Luego lee el portapapeles de forma estable y lo devuelve (aunque esté vacío o no sea monto).
-    """
-    if rax or ray:
-        _right_click(rax, ray, 'fa_deuda_context', 0.1)
-    time.sleep(0.25)
-    if cpx or cpy:
-        _click(cpx, cpy, 'fa_deuda_copy', 0.1)
-    # Lectura estable mínima
-    txt = _stable_read_clipboard_only(max_attempts=5, consecutive=2, read_delay=0.1)
-    return txt or (_get_clipboard_text() or '')
-
-
 def _step_delay(step_delays: Optional[List[float]], index: int, fallback: float) -> float:
     if step_delays and index < len(step_delays):
         return step_delays[index]
     return fallback
-
-def _robust_copy_number_at(x: int, y: int) -> str:
-    """Intenta copiar texto en (x,y) y extraer el primer número de forma robusta.
-    Estrategia por intentos: click+Ctrl+C, doble click+Ctrl+C, drag select+Ctrl+C.
-    Devuelve el texto copiado (no solo el número) para que el llamador decida el parseo.
-    """
-    def has_digits(t: str) -> bool:
-        return bool(re.search(r"\d+", t or ''))
-
-    # Por solicitud, no limpiar el portapapeles antes de copiar
-
-    # Intento 1: click y copiar
-    if x and y:
-        with _suppress_failsafe():
-            pg.moveTo(x, y, duration=0.08)
-            pg.click(); time.sleep(0.12)
-        pg.hotkey('ctrl','c'); time.sleep(0.08)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Intento 2: doble click
-    if x and y:
-        with _suppress_failsafe():
-            pg.moveTo(x, y, duration=0.08)
-            try:
-                pg.doubleClick()
-            except Exception:
-                pg.click(); time.sleep(0.05); pg.click()
-            time.sleep(0.12)
-        pg.hotkey('ctrl','c'); time.sleep(0.08)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Intento 3: selección por arrastre
-    if x and y:
-        try:
-            with _suppress_failsafe():
-                pg.moveTo(max(0, x-25), y, duration=0.06)
-                pg.mouseDown(); time.sleep(0.06)
-                pg.moveTo(x+140, y, duration=0.12)
-                pg.mouseUp(); time.sleep(0.1)
-        except Exception:
-            pass
-        pg.hotkey('ctrl','c'); time.sleep(0.1)
-        txt = _get_clipboard_text()
-        if has_digits(txt):
-            return txt or ''
-
-    # Último recurso: devolver lo que haya
-    return _get_clipboard_text() or ''
-
-
-def _copy_records_count_via_button(conf: Dict[str, Any], button_key: str,
-                                   step_delays: Optional[List[float]], base_delay: float,
-                                   attempts: int = 3) -> str:
-    """Clickea un botón de 'records' (por ej. 'fa_records_btn' o 'records_N'),
-    cierra el panel y luego intenta copiar el texto que contiene la cantidad de registros.
-    Repite hasta 'attempts' veces si no detecta dígitos.
-    Devuelve el texto crudo copiado (p.ej. '9 Registros' o sólo '9'), sin limpiar portapapeles.
-    """
-    consensus_val = None
-    consensus_hits = 0
-    last_return_txt = ''
-    for i in range(max(1, attempts)):
-        prev = _get_clipboard_text() or ''
-        bx, by = _xy(conf, button_key)
-        if bx or by:
-            _click(bx, by, button_key, base_delay)
-        cx, cy = _xy(conf, 'close_records')
-        if cx or cy:
-            _click(cx, cy, 'close_records', base_delay)
-        time.sleep(1.0)
-        txt = _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False, require_changed=True)
-        if txt and txt != prev and re.search(r"\d+", txt or ''):
-            last_return_txt = txt or ''
-            # Comparar por número para consenso entre textos diferentes (ej. '4 Registros' vs '4')
-            m = re.search(r"\d+", txt)
-            val = int(m.group(0)) if m else None
-            if val is not None:
-                if consensus_val is None:
-                    consensus_val = val
-                    consensus_hits = 1
-                elif val == consensus_val:
-                    consensus_hits += 1
-                else:
-                    consensus_val = val
-                    consensus_hits = 1
-                # Si pedimos más de 1 intento, confirmar al menos 2 coincidencias
-                if attempts <= 1 or consensus_hits >= 2:
-                    return last_return_txt
-        # Si falló, reintentar una vez más re-abriendo/cerrando
-    return last_return_txt or _stable_copy_text(consecutive=2, read_delay=0.1, require_non_empty=False)
-
-
-def _parse_count_with_cap(txt: str, cap_env: str, default_cap: int) -> int:
-    """Extrae el primer entero de txt y aplica un tope (cap). Si supera el tope, devuelve 0 (inválido).
-    cap_env permite configurar por entorno (por ejemplo 'MAX_FA_ACTUALES').
-    """
-    try:
-        cap = int(os.getenv(cap_env, str(default_cap)))
-    except Exception:
-        cap = default_cap
-    m = re.search(r"\d+", txt or '')
-    if not m:
-        return 0
-    try:
-        n = int(m.group(0))
-    except Exception:
-        return 0
-    return n if 0 < n <= cap else 0
 
 
 def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1110,6 +752,10 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
     cf_count_x = int(conf.get('cf_count_x', 373) or 373)
     max_cf_accounts = int(os.getenv('MAX_CF_ACCOUNTS', '5'))
     prev_first_item_id: Optional[str] = None
+    # Default document type — Camino A older workflow does not provide tipo_documento per account
+    tipo_documento = "DNI"
+    # Acumular deudas en results['deudas'] si results existe (compatibilidad con formato Score Admin)
+    deudas = results.setdefault('deudas', []) if results is not None else []
 
     for cf_index in range(max_cf_accounts):
         current_cf_y = 0
@@ -1146,9 +792,18 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
             time.sleep(0.6)
 
         # Validar apartado (debe ser Cuenta Financiera)
-        # Usar las coordenadas del último click (bx y current_cf_y o by para CF 0)
-        apartado_x = bx
-        apartado_y = current_cf_y if cf_index > 0 else by
+        # Preferir clicks en el label específicamente si existen en coords (más robusto)
+        label_click_x, label_click_y = _xy(conf, 'cuenta_financiera_label_click')
+        label_right_x, label_right_y = _xy(conf, 'cuenta_financiera_label_rightclick')
+        # Elegir posición para copiar el apartado: preferir rightclick coord si existe, sino el label_click, sino la posición base
+        if label_click_x or label_click_y:
+            _click(label_click_x, label_click_y, 'cuenta_financiera_label_click', 0.2)
+            time.sleep(0.25)
+        apartado_x = label_right_x or bx
+        apartado_y = label_right_y or (current_cf_y if cf_index > 0 else by)
+        # Clear clipboard like Score Admin and announce right-click on label
+        _clear_clipboard()
+        print(f"[CaminoADMIN-Cuenta] Right-click en label ({apartado_x}, {apartado_y})")
         apartado_cf = _copy_apartado_with_retries_rightclick(apartado_x, apartado_y, conf)
         if not _is_cuenta_financiera_label(apartado_cf or ''):
             if cf_index == 0:
@@ -1159,11 +814,18 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
         if apartado_cf:
             _append_log(log_path, dni, f"apartado {apartado_cf}")
 
-        # Leer el apartado/contador "N" usando coordenadas si están definidas; sino fallback a 5 derechas
+        # Leer el apartado/contador "N" usando coordenadas específicas si están definidas;
+        # preferir 'cuenta_financiera_cantidad_click' (score-admin style), luego cf_count_x/cf_count_area, luego fallback
         used_coord_for_count = False
         count_focus_x, count_focus_y = 0, 0
-        # Prioridad: X fija primero, luego área completa, luego (opcional) fallback de flechas
-        if cf_count_x and current_cf_y:
+        cant_click_x, cant_click_y = _xy(conf, 'cuenta_financiera_cantidad_click')
+        cant_right_x, cant_right_y = _xy(conf, 'cuenta_financiera_cantidad_rightclick')
+        if cant_click_x or cant_click_y:
+            _click(cant_click_x, cant_click_y, 'cuenta_financiera_cantidad_click', 0.2)
+            used_coord_for_count = True
+            count_focus_x, count_focus_y = cant_right_x or cant_click_x, cant_right_y or cant_click_y
+            print(f"[CaminoA] Conteo N por cuenta_financiera_cantidad_click en ({count_focus_x},{count_focus_y})")
+        elif cf_count_x and current_cf_y:
             _click(cf_count_x, int(current_cf_y), 'cf_count_x_current_row', 0.2)
             used_coord_for_count = True
             count_focus_x, count_focus_y = int(cf_count_x), int(current_cf_y)
@@ -1173,6 +835,12 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
             used_coord_for_count = True
             count_focus_x, count_focus_y = cf_count_area_x, cf_count_area_y
             print(f"[CaminoA] Conteo N por área en ({count_focus_x},{count_focus_y})")
+
+        # Clear clipboard like Score Admin and announce right-click on cantidad
+        if count_focus_x or count_focus_y:
+            _clear_clipboard()
+            print(f"[CaminoADMIN-Cuenta] Right-click en cantidad ({count_focus_x}, {count_focus_y})")
+
         else:
             # Sin fallback de flechas: usar X fija por defecto (373) con la fila actual
             if current_cf_y:
@@ -1206,7 +874,13 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
                 max_attempts=20, consecutive=2, read_delay=0.12,
                 require_non_empty=True, validator=_valid_cf_count, require_changed=False
             )
+            if num_txt:
+                print(f"[CaminoADMIN-Cuenta] Cantidad de cuentas financieras: '{num_txt}'")
             if _valid_cf_count(num_txt):
+                try:
+                    print(f"[CaminoADMIN-Cuenta] Cantidad parseada: {int(re.search(r'\d+', num_txt).group(0))}")
+                except Exception:
+                    pass
                 break
             # Si no es válido, volver a presionar para copiar (nuevos intentos en el próximo ciclo)
             time.sleep(0.12)
@@ -1242,7 +916,7 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
             except Exception:
                 n_to_copy = 1
 
-        print(f"[CaminoA] Items a copiar tras cuenta_financiera: {n_to_copy} (raw='{(num_txt or '')[:40]}')")
+        print("[CaminoADMIN-Cuenta] Step: Mostrar Lista")
 
         # Inicializar entrada para esta Cuenta Financiera en resultados estructurados
         if results is not None:
@@ -1251,106 +925,100 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
         else:
             cf_entry = None
 
-        # Mostrar lista y enfocar área de copia
-        x, y = _xy(conf, 'mostrar_lista_btn')
-        _click(x, y, 'mostrar_lista_btn', _step_delay(step_delays,13,base_delay))
-        time.sleep(0.6)
-        x_copy, y_copy = _xy(conf, 'copy_area')
-        _click(x_copy, y_copy, 'copy_area', 0.2)
+        # Mostrar lista y enfocar área de copia (una sola vez)
+        ml_x, ml_y = _xy(conf,'mostrar_lista_btn')
+        if ml_x or ml_y:
+            _click(ml_x, ml_y, 'mostrar_lista_btn', base_delay)
+            time.sleep(1.5)
 
-        # Copiar primer saldo + ID y comparar con CF previa
-        # Usando coordenadas: saldo en (x_copy, y_copy); ID en (copy_left_x, y_copy)
-        _click(x_copy, y_copy, 'copy_area_saldo_row_0', 0.05)
-        first_saldo = _right_click_copy_text(x_copy, y_copy, conf, consecutive=2, read_delay=0.1)
-        
-        # Si el saldo es exactamente 0, saltar copia del ID y continuar
-        first_saldo_val = _parse_amount_value(first_saldo or '')
-        first_id_txt = ''
-        first_id_extracted = ''
-        if first_saldo_val is not None and abs(first_saldo_val) < 0.0005:
-            print("[CaminoA] Saldo es 0, saltando copia de ID")
-            _click(x_copy, y_copy, 'copy_area_return_row_0', 0.05)
-        else:
-            _click(int(copy_left_x), y_copy, 'copy_area_id_row_0', 0.05)
-            first_id_txt = _right_click_copy_text(int(copy_left_x), y_copy, conf, consecutive=2, read_delay=0.1)
-            first_id_extracted = _extract_first_number(first_id_txt or '') or (first_id_txt or '').strip()
-            _click(x_copy, y_copy, 'copy_area_return_row_0', 0.05)
+            # 9. Click en primera celda de la lista
+            first_cell_x, first_cell_y = _xy(conf, 'cuenta_financiera_first_cell')
+            if first_cell_x or first_cell_y:
+                _click(first_cell_x, first_cell_y, 'cuenta_financiera_first_cell', 0.5)
+                time.sleep(0.5)
 
-        # Agregar primer ítem a resultados
-        if cf_entry is not None:
-            cf_entry["items"].append({
-                "saldo_raw": first_saldo or "",
-                "saldo": _parse_amount_value(first_saldo or ""),
-                "id_raw": first_id_txt or "",
-                "id": (_extract_first_number(first_id_txt or "") or None)
-            })
+                # 10. Capturar la primera fila una sola vez y usarla como punto de partida
+                cantidad_cf = n_to_copy
+                if cantidad_cf <= 0:
+                    continue
 
-        if cf_index > 0 and prev_first_item_id and first_id_extracted and first_id_extracted == prev_first_item_id:
-            print("[CaminoA] Primer ID de saldo coincide con la CF anterior; se aborta esta CF sin loguear.")
-            break
-        prev_first_item_id = first_id_extracted
+                # COPIAR PRIMER ID (una vez)
+                _clear_clipboard()
+                time.sleep(0.3)
+                pg.hotkey('ctrl', 'c')
+                time.sleep(0.4)
+                first_id = _get_clipboard_text().strip()
+                print(f"[CaminoADMIN-Cuenta] ID copiado: '{first_id}'")
 
-        # Log primer ítem
-        val_first = _parse_amount_value(first_saldo or '')
-        content = first_saldo if first_saldo else 'No Tiene Pedido'
-        if val_first is not None and abs(val_first) > 0.0005:
-            content = f"{first_saldo} | ID: {first_id_txt}"
-        _append_log(log_path, dni, content)
+                # Mover 3 a la derecha y copiar saldo de la primera fila
+                for _ in range(3):
+                    pg.press('right')
+                    time.sleep(0.2)
+                _clear_clipboard()
+                time.sleep(0.3)
+                pg.hotkey('ctrl', 'c')
+                time.sleep(0.4)
+                first_saldo = _get_clipboard_text().strip()
+                print(f"[CaminoADMIN-Cuenta] Saldo copiado: '{first_saldo}'")
 
-        # Resto de los ítems
-        for row_idx in range(1, max(0, n_to_copy - 1) + 1):
-            # Para los primeros 3 saldos (índices 0,1,2 - ya copiamos el 0), usar offset normal
-            # Para saldo 4+ (índice 3+), hacer click en extra_saldo para avanzar
-            if row_idx <= 2:
-                # Saldos 2 y 3 (índices 1 y 2): usar offset normal
-                row_y = y_copy + (row_idx * cf_row_step)
-            else:
-                # Saldo 4+ (índice 3+): click en extra_saldo, luego usar altura del saldo 3
-                extra_saldo_x, extra_saldo_y = _xy(conf, 'extra_saldo')
-                if extra_saldo_x and extra_saldo_y:
-                    _click(extra_saldo_x, extra_saldo_y, f'extra_saldo_click_{row_idx}', 0.3)
-                    print(f"[CaminoA] Click en extra_saldo para saldo #{row_idx+1}")
-                # Mantener la altura del saldo 3 (índice 2)
-                row_y = y_copy + (2 * cf_row_step)
-            
-            # Saldo
-            _click(x_copy, row_y, f'copy_area_saldo_row_{row_idx}', 0.05)
-            saldo_txt = _right_click_copy_text(x_copy, row_y, conf, consecutive=2, read_delay=0.1)
-            
-            # Si el saldo es exactamente 0, saltar copia del ID y continuar
-            val = _parse_amount_value(saldo_txt or '')
-            if val is not None and abs(val) < 0.0005:
-                print(f"[CaminoA] Saldo {row_idx} es 0, saltando copia de ID")
-                _click(x_copy, row_y, f'copy_area_return_row_{row_idx}', 0.05)
-                # Agregar a resultados con ID vacío
+                # Comprobar coincidencia con la CF anterior antes de registrar
+                first_id_extracted = _extract_first_number(first_id or '') or (first_id or '').strip()
+                if cf_index > 0 and prev_first_item_id and first_id_extracted and first_id_extracted == prev_first_item_id:
+                    print("[CaminoA] Primer ID de saldo coincide con la CF anterior; se aborta esta CF sin loguear.")
+                    # Cerrar pestaña y salir
+                    x_close, y_close = _xy(conf, 'close_tab_btn')
+                    _click(x_close, y_close, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
+                    break
+
+                # Registrar primera fila
+                if first_id and not any(d.get('id_fa') == first_id for d in deudas):
+                    deudas.append({'id_fa': first_id, 'saldo': first_saldo, 'tipo_documento': tipo_documento})
+                    print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={first_id_extracted}, Saldo={first_saldo}, Tipo={tipo_documento}")
                 if cf_entry is not None:
-                    cf_entry["items"].append({
-                        "saldo_raw": saldo_txt or "",
-                        "saldo": val,
-                        "id_raw": "",
-                        "id": None
-                    })
-                to_log = saldo_txt if saldo_txt else 'No Tiene Pedido'
-                _append_log(log_path, dni, to_log)
-                continue
-            
-            # ID (columna izquierda específica)
-            _click(int(copy_left_x), row_y, f'copy_area_id_row_{row_idx}', 0.05)
-            id_txt = _right_click_copy_text(int(copy_left_x), row_y, conf, consecutive=2, read_delay=0.1)
-            # Volver a saldo para mantener coherencia de foco
-            _click(x_copy, row_y, f'copy_area_return_row_{row_idx}', 0.05)
-            # Agregar a resultados
-            if cf_entry is not None:
-                cf_entry["items"].append({
-                    "saldo_raw": saldo_txt or "",
-                    "saldo": val,
-                    "id_raw": id_txt or "",
-                    "id": (_extract_first_number(id_txt or "") or None)
-                })
-            to_log = saldo_txt if saldo_txt else 'No Tiene Pedido'
-            if val is not None and abs(val) > 0.0005:
-                to_log = f"{saldo_txt} | ID: {id_txt}"
-            _append_log(log_path, dni, to_log)
+                    cf_entry['items'].append({'saldo_raw': first_saldo or '', 'saldo': _parse_amount_value(first_saldo or ''), 'id_raw': first_id or '', 'id': (_extract_first_number(first_id or '') or None)})
+
+                prev_first_item_id = first_id_extracted
+
+                # Iterar por las filas restantes (si las hay)
+                for i in range(1, cantidad_cf):
+                    print(f"[CaminoADMIN-Cuenta] Procesando fila {i+1}/{cantidad_cf} de Cuenta Financiera...")
+                    # Bajar una fila para enfocarla
+                    pg.press('down')
+                    time.sleep(0.3)
+
+                    # Copiar ID
+                    _clear_clipboard()
+                    time.sleep(0.2)
+                    pg.hotkey('ctrl', 'c')
+                    time.sleep(0.4)
+                    id_cf = _get_clipboard_text().strip()
+                    print(f"[CaminoADMIN-Cuenta] ID copiado: '{id_cf}'")
+
+                    # Mover 3 a la derecha y copiar saldo
+                    for _ in range(3):
+                        pg.press('right')
+                        time.sleep(0.2)
+                    _clear_clipboard()
+                    time.sleep(0.3)
+                    pg.hotkey('ctrl', 'c')
+                    time.sleep(0.4)
+                    saldo_cf = _get_clipboard_text().strip()
+                    print(f"[CaminoADMIN-Cuenta] Saldo copiado: '{saldo_cf}'")
+
+                    # Registrar si no existe
+                    if id_cf and not any(d.get('id_fa') == id_cf for d in deudas):
+                        deudas.append({'id_fa': id_cf, 'saldo': saldo_cf, 'tipo_documento': tipo_documento})
+                        print(f"[CaminoADMIN-Cuenta] Agregado CF: ID={(_extract_first_number(id_cf or '') or id_cf or '')}, Saldo={saldo_cf}, Tipo={tipo_documento}")
+
+                    # Volver 3 a la izquierda para mantener foco en la columna ID
+                    for _ in range(3):
+                        pg.press('left')
+                        time.sleep(0.2)
+
+                # Si la cuenta financiera reportó solo 1 ítem y estamos en la primera CF, no intentar CFs adicionales
+                if cf_index == 0 and n_to_copy == 1:
+                    print("[CaminoA] Cantidad=1 detectada para esta Cuenta Financiera; no se intentarán CFs adicionales.")
+                    break
 
     # No es necesario actualizar offset manualmente; se usa cf_index
 
@@ -1359,7 +1027,6 @@ def _process_resumen_cuenta_y_copias(conf: Dict[str, Any], step_delays: Optional
     _click(x, y, 'close_tab_btn', _step_delay(step_delays,15,base_delay))
     
     # No volver a house_area aquí, se hará al final del flujo skip_initial
-
 
 
 def _process_fa_actuales(conf: Dict[str, Any], step_delays: Optional[List[float]], base_delay: float,
@@ -1562,15 +1229,19 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         _click(x,y,'home_area', base_delay)
         
         # Convertir formato a fa_saldos para compatibilidad con Camino A
-        print('[CaminoA] Convirtiendo resultados al formato fa_saldos...', flush=True)
+        logger.info('Convirtiendo resultados al formato fa_saldos')
         fa_saldos = []
         
         # Agregar items de fa_actual
         if "fa_actual" in results:
             for item in results["fa_actual"]:
+                id_val = item.get("id")
+                id_fa = str(id_val) if id_val is not None else ""
+                saldo_val = item.get("saldo")
+                saldo = str(saldo_val) if saldo_val is not None else ""
                 fa_saldos.append({
-                    "id_fa": str(item.get("id", "")),
-                    "saldo": str(item.get("saldo", ""))
+                    "id_fa": id_fa,
+                    "saldo": saldo
                 })
         
         # Agregar items de cuenta_financiera (si no están duplicados)
@@ -1578,8 +1249,13 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             for grupo in results["cuenta_financiera"]:
                 if "items" in grupo:
                     for item in grupo["items"]:
-                        id_fa = str(item.get("id", ""))
-                        saldo = str(item.get("saldo", ""))
+                        id_val = item.get("id")
+                        if not id_val:
+                            # Ignorar filas sin ID válido
+                            continue
+                        id_fa = str(id_val)
+                        saldo_val = item.get("saldo")
+                        saldo = str(saldo_val) if saldo_val is not None else ""
                         # Verificar si ya existe (evitar duplicados)
                         if not any(fa.get("id_fa") == id_fa for fa in fa_saldos):
                             fa_saldos.append({
@@ -1593,10 +1269,10 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
             "fa_saldos": fa_saldos
         }
         
-        # Imprimir resultados finales
-        print("===== RESULTADOS FINALES =====", flush=True)
-        print(json.dumps(final_results), flush=True)
-        print('[CaminoA] Finalizado en modo skip_initial', flush=True)
+        # Enviar update y emitir JSON con marcadores
+        send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"num_registros": len(fa_saldos)})
+        print_json_result(final_results)
+        logger.info('Finalizado en modo skip_initial')
         return
     
     # FLUJO NORMAL (cuando skip_initial es False)
@@ -1798,20 +1474,17 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
 
     # Por solicitud, no limpiar el portapapeles al final
 
-    print('[CaminoA] Finalizado. Preparando JSON de resultados...', flush=True)
-    print(f'[CaminoA] FA Actual items: {len(results.get("fa_actual", []))}', flush=True)
-    print(f'[CaminoA] Cuenta Financiera items: {len(results.get("cuenta_financiera", []))}', flush=True)
+    logger.info('Finalizado. Preparando JSON de resultados...')
+    logger.info(f'FA Actual items: {len(results.get("fa_actual", []))}')
+    logger.info(f'Cuenta Financiera items: {len(results.get("cuenta_financiera", []))}')
 
-    # Emitir JSON final con resultados estructurados (el consumidor puede buscar el primer '{' y parsear)
+    # Emitir JSON final con resultados estructurados (marcadores para que worker lo parsee)
     try:
-        import json as _json
-        json_output = _json.dumps(results, ensure_ascii=False, indent=2)
-        print('[CaminoA] JSON generado exitosamente. Longitud:', len(json_output), flush=True)
-        print(json_output, flush=True)
-        sys.stdout.flush()
-        print('[CaminoA] JSON emitido a stdout', flush=True)
+        send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"fa_actual": len(results.get("fa_actual", [])), "cuenta_financiera": len(results.get("cuenta_financiera", []))})
+        print_json_result(results)
+        logger.info('JSON emitido correctamente')
     except Exception as _ejson:
-        print(f"[CaminoA] ADVERTENCIA: No se pudo emitir JSON de resultados: {_ejson}", flush=True)
+        logger.warning(f'No se pudo emitir JSON de resultados: {_ejson}')
         import traceback
         traceback.print_exc()
 
@@ -1829,11 +1502,11 @@ def _parse_args():
 
 if __name__ == '__main__':
     try:
-        print('[CaminoA] ===== INICIO DE EJECUCION =====', flush=True)
+        logger.info('===== INICIO DE EJECUCION =====')
         args = _parse_args()
-        print(f'[CaminoA] DNI recibido: {args.dni}', flush=True)
-        print(f'[CaminoA] Archivo coords: {args.coords}', flush=True)
-        print(f'[CaminoA] Archivo log: {args.log_file}', flush=True)
+        logger.info(f'DNI recibido: {args.dni}')
+        logger.info(f'Archivo coords: {args.coords}')
+        logger.info(f'Archivo log: {args.log_file}')
         step_delays_list: List[float] = []
         if args.step_delays:
             for tok in args.step_delays.split(','):
@@ -1844,17 +1517,19 @@ if __name__ == '__main__':
                     step_delays_list.append(float(tok))
                 except ValueError:
                     pass
-        print('[CaminoA] Llamando a run()...', flush=True)
+        logger.info('Llamando a run()...')
         run(args.dni, Path(args.coords), step_delays_list or None, Path(args.log_file), skip_initial=args.skip_initial)
-        print('[CaminoA] ===== FIN EXITOSO =====', flush=True)
+        logger.info('===== FIN EXITOSO =====')
     except KeyboardInterrupt:
-        print('[CaminoA] Interrumpido por usuario', flush=True)
+        logger.info('Interrumpido por usuario')
         sys.exit(130)
     except Exception as e:
-        print(f'[CaminoA] ===== ERROR FATAL =====', flush=True)
-        print(f'[CaminoA] Error: {type(e).__name__}: {e}', flush=True)
-        import traceback
-        traceback.print_exc()
+        logger.exception('ERROR FATAL')
+        # Asegurar que el worker reciba un JSON de error
+        try:
+            err = {"dni": args.dni if 'args' in locals() else None, "error": f"{type(e).__name__}: {e}"}
+            print_json_result(err)
+        except Exception:
+            pass
         sys.exit(1)
-
 

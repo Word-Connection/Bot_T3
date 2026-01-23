@@ -33,18 +33,11 @@ def _key_to_str(key) -> str:
     return _NORMALIZE_KEYS.get(s, s)
 
 def main():
-    ap = argparse.ArgumentParser(description="Grabador de camino (mouse+teclado) -> JSON")
+    ap = argparse.ArgumentParser(description="Grabador de camino (clicks + teclado) -> JSON")
     ap.add_argument("--out", default="camino.json", help="Archivo de salida (default: camino.json)")
-    ap.add_argument("--include-moves", action="store_true",
-                    help="Incluir movimientos del mouse (throttle por --move-interval)")
-    ap.add_argument("--move-interval", type=float, default=None,
-                    help="Intervalo mínimo entre 'mouse_move' (segundos). Default 0.12 si se habilitan movimientos.")
     ap.add_argument("--stop-key", default="F12", help="Tecla para finalizar (default: F12)")
     args = ap.parse_args()
 
-    # Soporte por variables de entorno (compat con README)
-    include_moves = args.include_moves or os.getenv("VISUAL_REC_MOUSE_MOVE", "0") in ("1", "true", "True")
-    move_interval = args.move_interval if args.move_interval is not None else float(os.getenv("VISUAL_REC_MOVE_INTERVAL", "0.12"))
     stop_key_name = os.getenv("VISUAL_REC_STOP_KEY", args.stop_key).upper()
 
     out_path = Path(args.out)
@@ -53,29 +46,13 @@ def main():
     created_at = datetime.now().isoformat(timespec="seconds")
     t0 = time.perf_counter()
     events = []
-    last_move_t = 0.0
     stop_key = getattr(keyboard.Key, stop_key_name.lower(), keyboard.Key.f12)  # F12 por defecto
 
     print(f"[INFO] Grabando eventos en: {out_path.resolve()}")
     print(f"[INFO] Fin con {stop_key_name}. ESC inserta marcador.")
-    print(f"[INFO] include_moves={include_moves} move_interval={move_interval}s")
+    print(f"[INFO] Grabando: CLICKS (izquierdo/derecho) + TECLAS")
 
-    # Callbacks Mouse
-    def on_move(x, y):
-        nonlocal last_move_t
-        if not include_moves:
-            return
-        now = time.perf_counter()
-        if now - last_move_t < move_interval:
-            return
-        last_move_t = now
-        events.append({
-            "t": now - t0,
-            "type": "mouse_move",
-            "x": int(x),
-            "y": int(y),
-        })
-
+    # Callbacks Mouse - Solo clicks
     def on_click(x, y, button, pressed):
         events.append({
             "t": time.perf_counter() - t0,
@@ -84,16 +61,6 @@ def main():
             "y": int(y),
             "button": str(button).replace("Button.", "Button."),
             "pressed": bool(pressed),
-        })
-
-    def on_scroll(x, y, dx, dy):
-        events.append({
-            "t": time.perf_counter() - t0,
-            "type": "mouse_scroll",
-            "x": int(x),
-            "y": int(y),
-            "dx": int(dx),
-            "dy": int(dy),
         })
 
     # Callbacks Teclado
@@ -123,8 +90,8 @@ def main():
             "key": _key_to_str(key),
         })
 
-    # Crear listeners
-    m_listener = mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll)
+    # Crear listeners (sin movimientos ni scroll)
+    m_listener = mouse.Listener(on_click=on_click)
     k_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
 
     # Iniciar
@@ -148,8 +115,6 @@ def main():
         "duration": duration,
         "events": events,
         "meta": {
-            "include_moves": bool(include_moves),
-            "move_interval": float(move_interval),
             "stop_key": stop_key_name,
         }
     }

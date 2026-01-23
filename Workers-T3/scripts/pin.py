@@ -12,6 +12,22 @@ import logging
 import time
 from pathlib import Path
 
+# Importar utilidades comunes
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from common_utils import (
+        send_partial_update as _send_update_base,
+        validate_telefono,
+        get_timestamp_ms,
+        normalize_timestamp
+    )
+    HAS_COMMON_UTILS = True
+except ImportError:
+    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
+    HAS_COMMON_UTILS = False
+    def validate_telefono(tel):
+        return tel.isdigit() and len(tel) == 10
+
 # Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
@@ -20,18 +36,29 @@ logging.basicConfig(
 
 
 def send_partial_update(telefono: str, etapa: str, info: str, extra_data: dict | None = None):
-    payload = {
-        "telefono": telefono,
-        "etapa": etapa,
-        "info": info,
-        "timestamp": int(time.time() * 1000)
-    }
-    if extra_data:
-        payload.update(extra_data)
+    """Envía update parcial usando función centralizada."""
+    if HAS_COMMON_UTILS:
+        _send_update_base(
+            identifier=telefono,
+            etapa=etapa,
+            info=info,
+            extra_data=extra_data,
+            identifier_key="telefono"
+        )
+    else:
+        # Fallback manual
+        payload = {
+            "telefono": telefono,
+            "etapa": etapa,
+            "info": info,
+            "timestamp": int(time.time() * 1000)
+        }
+        if extra_data:
+            payload.update(extra_data)
 
-    print("===JSON_PARTIAL_START===", flush=True)
-    print(json.dumps(payload), flush=True)
-    print("===JSON_PARTIAL_END===", flush=True)
+        print("===JSON_PARTIAL_START===", flush=True)
+        print(json.dumps(payload), flush=True)
+        print("===JSON_PARTIAL_END===", flush=True)
 
 def get_project_root():
     """Obtiene la ruta raíz del proyecto"""
@@ -161,8 +188,8 @@ def main():
     
     telefono = sys.argv[1]
     
-    # Validación básica de teléfono (10 dígitos)
-    if not telefono.isdigit() or len(telefono) != 10:
+    # Validación usando common_utils
+    if not validate_telefono(telefono):
         print("ERROR: El teléfono debe tener exactamente 10 dígitos")
         sys.exit(1)
     
@@ -198,11 +225,12 @@ def main():
             )
         
         # Construir resultado final
+        timestamp_final = get_timestamp_ms() if HAS_COMMON_UTILS else int(time.time() * 1000)
         resultado_final = {
             "telefono": telefono,
             "estado": resultado_analisis["estado"],
             "mensaje": resultado_analisis["mensaje"],
-            "timestamp": int(time.time() * 1000),
+            "timestamp": timestamp_final,
             "screenshot_path": resultado_analisis.get("screenshot_path"),
             "screenshot_base64": resultado_analisis.get("screenshot_base64"),
             "enter_presses": resultado_analisis.get("entered")
@@ -241,11 +269,12 @@ def main():
         # Resultado de error
         send_partial_update(telefono, "error", str(e))
 
+        timestamp_error = get_timestamp_ms() if HAS_COMMON_UTILS else int(time.time() * 1000)
         resultado_error = {
             "telefono": telefono,
             "estado": "error",
             "mensaje": str(e),
-            "timestamp": int(time.time() * 1000)
+            "timestamp": timestamp_error
         }
         
         # ===== ENVIAR RESULTADO DE ERROR CON MARCADORES =====

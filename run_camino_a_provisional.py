@@ -56,6 +56,55 @@ try:
 except Exception:
     _HAS_PIL = False
 
+# -----------------------------
+# Logging y helpers de comunicación con el worker
+# -----------------------------
+import logging
+logger = logging.getLogger("camino_a")
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter("[%(levelname)s][%(name)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+try:
+    from common_utils import send_partial_update as _send_update_base
+    HAS_COMMON_UTILS = True
+except Exception:
+    HAS_COMMON_UTILS = False
+
+
+def send_partial(identifier: str, etapa: str, info: str, extra_data: Optional[Dict[str, Any]] = None, admin_mode: bool = False, score: str = ""):
+    """Envía un update parcial al worker (usa common_utils si está disponible)."""
+    if HAS_COMMON_UTILS:
+        _send_update_base(identifier=identifier, etapa=etapa, info=info, score=score, admin_mode=admin_mode, extra_data=extra_data, identifier_key="dni")
+    else:
+        update_data = {
+            "dni": identifier,
+            "etapa": etapa,
+            "info": info,
+            "timestamp": int(time.time() * 1000)
+        }
+        if score:
+            update_data["score"] = score
+        if admin_mode:
+            update_data["admin_mode"] = True
+        if extra_data:
+            update_data.update(extra_data)
+        print("===JSON_PARTIAL_START===")
+        print(json.dumps(update_data, ensure_ascii=False))
+        print("===JSON_PARTIAL_END===")
+        sys.stdout.flush()
+
+
+def print_json_result(data: Dict[str, Any]):
+    """Imprime resultado final usando marcadores para que el worker lo parsee."""
+    print("===JSON_RESULT_START===")
+    print(json.dumps(data, ensure_ascii=False))
+    print("===JSON_RESULT_END===")
+    sys.stdout.flush()
+
 DEFAULT_COORDS_FILE = 'camino_a_coords_multi.json'
 
 REQUIRED_KEYS = [
@@ -822,9 +871,12 @@ def _buscar_por_id_cliente(conf: Dict[str, Any], id_cliente: str, base_delay: fl
     return fa_saldos
 
 def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_cliente_filter: Optional[List[str]] = None):
-    print(f'[camino_A] Iniciado para DNI={dni}')
+    logger.info(f'[camino_A] Iniciado para DNI={dni}')
     if ids_cliente_filter:
-        print(f'[camino_A] Modo filtrado: {len(ids_cliente_filter)} IDs de cliente del Camino C')
+        logger.info(f'[camino_A] Modo filtrado: {len(ids_cliente_filter)} IDs de cliente del Camino C')
+        send_partial(dni, "ids_recibidos", f"{len(ids_cliente_filter)} IDs recibidos del Camino C")
+    # Enviar update inicial
+    send_partial(dni, "iniciando", f"Análisis iniciado para DNI {dni}")
     pg.FAILSAFE = True
     
     start_delay = 0.5
@@ -941,7 +993,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
             
             # Ejecutar Camino A Único saltando los pasos iniciales
             python_exe = sys.executable
-            unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+            unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_viejo.py')
             
             cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
             print(f"[camino_A] Ejecutando: {' '.join(cmd)}")
@@ -969,7 +1021,7 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
         
         # Ejecutar Camino A Único saltando los pasos iniciales
         python_exe = sys.executable
-        unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_unico.py')
+        unico_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'run_camino_a_viejo.py')
         
         cmd = [python_exe, unico_script, '--dni', dni, '--skip-initial']
         print(f"[camino_A] Ejecutando: {' '.join(cmd)}")
@@ -1026,9 +1078,12 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
             "error": "Cliente no creado en sistema",
             "screenshot": str(shot_path) if shot_path.exists() else None
         }
-        print("===== RESULTADOS FINALES =====")
-        print(json.dumps(results))
-        print(f"[camino_A] Finalizado. DNI/CUIT no encontrado en sistema")
+        extra = {}
+        if results.get("screenshot"):
+            extra["screenshot"] = results["screenshot"]
+        send_partial(dni, "error_analisis", "Cliente no creado en sistema", extra_data=extra)
+        print_json_result(results)
+        logger.info(f"[camino_A] Finalizado. DNI/CUIT no encontrado en sistema")
         return
     
     fa_data_list = _parse_fa_ids_from_table(table_text)
@@ -1040,6 +1095,14 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
     print(f"[camino_A] Cerrando ventana 'Ver Todos'...")
     close_x, close_y = _xy(conf, 'close_tab_btn')
     _click(close_x, close_y, 'close_tab_btn (cerrar Ver Todos)', 0.8)
+    
+    # Calcular y mostrar tiempo estimado
+    if num_registros > 0:
+        segundos_por_cuenta = 7  # Tiempo estimado por cuenta en Camino A
+        tiempo_total_segundos = num_registros * segundos_por_cuenta
+        minutos = tiempo_total_segundos // 60
+        segundos = tiempo_total_segundos % 60
+        print(f"[CaminoJulian] Analizando {num_registros} cuentas, tiempo estimado {minutos}:{segundos:02d} minutos")
     
     # Verificar si hay más de 20 registros (necesita configuración manual)
     if num_registros > 20:
@@ -1104,15 +1167,15 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
         # Cargar coordenadas del archivo Único
         unico_coords_path = coords_path.parent / 'camino_a_unico_coords_multi.json'
         if not unico_coords_path.exists():
-            print(f"[camino_A] ERROR: No se encontró archivo {unico_coords_path}")
-            print(json.dumps(results))
+            logger.error(f"[camino_A] ERROR: No se encontró archivo {unico_coords_path}")
+            print_json_result(results)
             return
         
         try:
             unico_conf = json.loads(unico_coords_path.read_text(encoding='utf-8'))
         except Exception as e:
-            print(f"[camino_A] ERROR al leer {unico_coords_path}: {e}")
-            print(json.dumps(results))
+            logger.error(f"[camino_A] ERROR al leer {unico_coords_path}: {e}")
+            print_json_result(results)
             return
         
         # Ejecutar flujo alternativo
@@ -1344,8 +1407,8 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
     
     # Si la suma supera $60,000, señalizar que se debe ejecutar Camino C corto
     if suma_total > 60000:
-        print(f"[camino_A_PROVISIONAL] ¡DEUDAS SUPERAN $60,000!")
-        print(f"[camino_A_PROVISIONAL] Se debe ejecutar Camino C corto para captura alternativa")
+        logger.info(f"[camino_A_PROVISIONAL] ¡DEUDAS SUPERAN $60,000!")
+        logger.info(f"[camino_A_PROVISIONAL] Se debe ejecutar Camino C corto para captura alternativa")
         
         # Crear resultado que indica ejecutar Camino C corto
         results_modificado = {
@@ -1356,19 +1419,19 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
             "fa_saldos": []  # Vacío, no se envían deudas
         }
         
-        print(f"[CaminoJulian] ===== RESULTADOS FINALES (MODIFICADOS) =====", flush=True)
-        print(json.dumps(results_modificado, indent=2), flush=True)
-        print(f"[CaminoJulian] Finalizado. Se requiere ejecutar Camino C corto")
+        # Enviar update parcial y resultado final con marcadores
+        send_partial(dni, "ejecutar_camino_c_corto", f"Deudas totales: ${suma_total:,.2f}", extra_data={"suma_deudas_real": suma_total})
+        print_json_result(results_modificado)
+        logger.info(f"[CaminoJulian] Finalizado. Se requiere ejecutar Camino C corto")
         return
     
     # Si no supera $60,000, proceder normalmente
     print(f"[camino_A_PROVISIONAL] Deudas no superan $60,000. Procediendo normalmente.")
     
     # Paso 13: Emitir JSON final
-    print(f"[CaminoJulian] ===== RESULTADOS FINALES =====", flush=True)
-    print(json.dumps(results, indent=2), flush=True)
-    
-    print(f"[CaminoJulian] Finalizado. Procesados {len(fa_data_list)} registros")
+    send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"num_registros": len(results.get("fa_saldos", []))})
+    print_json_result(results)
+    logger.info(f"[CaminoJulian] Finalizado. Procesados {len(fa_data_list)} registros")
 
 def main():
     import argparse

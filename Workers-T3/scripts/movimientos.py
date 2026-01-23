@@ -11,62 +11,57 @@ import threading
 import queue
 from pathlib import Path
 
+# Importar utilidades comunes
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from common_utils import (
+        send_partial_update as _send_update_base,
+        sanitize_error_for_display,
+        get_timestamp_ms
+    )
+    HAS_COMMON_UTILS = True
+except ImportError:
+    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
+    HAS_COMMON_UTILS = False
+
 def send_partial_update(dni: str, etapa: str, info: str, extra_data: dict = None):
     """Envía un update parcial al worker para reenvío inmediato via WebSocket."""
-    update_data = {
-        "dni": dni,
-        "etapa": etapa,
-        "info": info,
-        "timestamp": int(time.time() * 1000)
-    }
-    
-    if extra_data:
-        update_data.update(extra_data)
-    
-    print("===JSON_PARTIAL_START===", flush=True)
-    print(json.dumps(update_data), flush=True)
-    print("===JSON_PARTIAL_END===", flush=True)
+    if HAS_COMMON_UTILS:
+        _send_update_base(
+            identifier=dni,
+            etapa=etapa,
+            info=info,
+            extra_data=extra_data,
+            identifier_key="dni"
+        )
+    else:
+        # Fallback manual
+        update_data = {
+            "dni": dni,
+            "etapa": etapa,
+            "info": info,
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        if extra_data:
+            update_data.update(extra_data)
+        
+        print("===JSON_PARTIAL_START===", flush=True)
+        print(json.dumps(update_data), flush=True)
+        print("===JSON_PARTIAL_END===", flush=True)
 
+# sanitize_error_message ahora en common_utils.sanitize_error_for_display
+# Se mantiene wrapper para compatibilidad
 def sanitize_error_message(error_lines: list, return_code: int = None) -> str:
-    """Convierte errores técnicos en mensajes amigables para el usuario."""
-    if not error_lines and return_code == 0:
-        return ""
-    
-    # Si hay errores críticos, determinar el tipo
-    critical_keywords = {
-        'timeout': ['timeout', 'expired'],
-        'encoding': ['unicode', 'decode', 'encoding', 'charmap'],
-        'file_not_found': ['no such file', 'file not found', 'cannot find'],
-        'permission': ['permission denied', 'access denied'],
-        'network': ['connection', 'network', 'socket'],
-        'memory': ['memory', 'out of memory'],
-        'argument': ['invalid argument', 'errno 22']
-    }
-    
-    error_text = ' '.join(error_lines).lower()
-    
-    for error_type, keywords in critical_keywords.items():
-        if any(keyword in error_text for keyword in keywords):
-            if error_type == 'timeout':
-                return "El proceso tardó demasiado tiempo en completarse"
-            elif error_type == 'encoding':
-                return "Error de codificación de caracteres"
-            elif error_type == 'file_not_found':
-                return "No se encontraron archivos necesarios"
-            elif error_type == 'permission':
-                return "Sin permisos para acceder a archivos"
-            elif error_type == 'network':
-                return "Error de conectividad"
-            elif error_type == 'memory':
-                return "Memoria insuficiente"
-            elif error_type == 'argument':
-                return "Error en parámetros del sistema"
-    
-    # Si no se puede categorizar, mensaje genérico
-    if return_code and return_code != 0:
-        return f"Error inesperado (código {return_code})"
-    
-    return "Error inesperado"
+    """Wrapper de sanitize_error_for_display para compatibilidad."""
+    error_text = ' '.join(error_lines) if error_lines else ""
+    if HAS_COMMON_UTILS:
+        return sanitize_error_for_display(error_text, return_code)
+    else:
+        # Fallback simple
+        if return_code and return_code != 0:
+            return f"Error inesperado (código {return_code})"
+        return "Error inesperado"
 
 def fake_image(text: str) -> str:
     """Genera un string base64 simulado a partir de texto."""
@@ -375,8 +370,8 @@ def main():
             
             # Esperar a que termine
             returncode = process.wait(timeout=600)
-            stderr_thread.join(timeout=5)
-            log_monitor_thread.join(timeout=5)  # Dar más tiempo al thread para procesar las últimas líneas
+            stderr_thread.join(timeout=10)  # Aumentar timeout para lectura final
+            log_monitor_thread.join(timeout=10)  # Aumentar timeout para procesamiento final
             
         except subprocess.TimeoutExpired:
             process.kill()

@@ -16,6 +16,37 @@ import re
 import websocket
 import threading
 
+# Importar utilidades comunes
+try:
+    from common_utils import (
+        sanitize_error_for_display,
+        parse_json_from_markers,
+        parse_json_partial_updates,
+        validate_dni,
+        validate_telefono,
+        normalize_timestamp,
+        get_timestamp_ms
+    )
+    HAS_COMMON_UTILS = True
+except ImportError:
+    print("WARNING: No se pudo importar common_utils, usando funciones fallback", file=sys.stderr)
+    HAS_COMMON_UTILS = False
+    # Fallback a funciones locales si no existe el módulo
+    def sanitize_error_for_display(error_text, return_code=None):
+        return error_text[:100] if error_text else "Error inesperado"
+    def parse_json_from_markers(output, strict=True):
+        return None
+    def parse_json_partial_updates(line):
+        return None
+    def validate_dni(dni):
+        return bool(re.match(r'^\d{7,8}$', dni)) or bool(re.match(r'^\d{11}$', dni))
+    def validate_telefono(telefono):
+        return bool(re.match(r'^\d{10}$', telefono))
+    def normalize_timestamp(ts):
+        return int(ts * 1000) if ts and ts < 10000000000 else int(ts or time.time() * 1000)
+    def get_timestamp_ms():
+        return int(time.time() * 1000)
+
 load_dotenv()
 
 # Obtener el directorio base del script para rutas absolutas
@@ -29,6 +60,7 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 parser = argparse.ArgumentParser(description="Cliente Worker Unificado para T3")
 parser.add_argument("--pc_id", default=os.getenv("PC_ID"), help="ID de la PC (ej: pc1)")
 parser.add_argument("--tipo", default=os.getenv("WORKER_TYPE"), help="Tipo de automatización (deudas/movimientos/pin)")
+parser.add_argument("--admin", action="store_true", default=os.getenv("WORKER_ADMIN", "0").lower() in ("1","true","yes","on"), help="Flag para indicar que este worker puede ejecutar tareas administrativas (solo válido para tipo 'deudas')")
 parser.add_argument("--backend", default=os.getenv("BACKEND_URL", "http://192.168.9.160:8000"), help="URL del backend")
 parser.add_argument("--delay", type=int, default=int(os.getenv("PROCESS_DELAY", "30")), help="Tiempo de procesamiento simulado (segundos)")
 parser.add_argument("--poll_interval", type=int, default=int(os.getenv("POLL_INTERVAL", "3")), help="Intervalo entre polls (segundos)")
@@ -75,6 +107,7 @@ logger = logging.getLogger(f"worker_{args.pc_id}")
 # -----------------------------
 PC_ID = args.pc_id
 TIPO = args.tipo
+ADMIN = args.admin
 BACKEND = args.backend
 PROCESS_DELAY = args.delay
 POLL_INTERVAL = args.poll_interval
@@ -84,10 +117,13 @@ VALID_TASK_TYPES = ["deudas", "movimientos", "pin"]
 
 # WebSocket globals
 ws_connected = False
+ws_connected_lock = threading.Lock()  # Lock para ws_connected
 ws_connection = None
+ws_connection_lock = threading.Lock()  # Lock para ws_connection
 task_queue = []
 task_queue_lock = threading.Lock()
 
+# Stats con lock para thread safety
 stats = {
     "tasks_completed": 0,
     "tasks_failed": 0,
@@ -96,6 +132,7 @@ stats = {
     "scraping_errors": 0,
     "started_at": time.time()
 }
+stats_lock = threading.Lock()
 
 # -----------------------------
 # Funciones auxiliares
@@ -145,10 +182,11 @@ def sanitize_error_for_frontend(error_text: str) -> str:
     return "Error inesperado"
 
 def log_stats():
-    uptime = time.time() - stats["started_at"]
-    logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
-                f"Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | "
-                f"Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
+    with stats_lock:
+        uptime = time.time() - stats["started_at"]
+        logger.info(f"[STATS] Completadas: {stats['tasks_completed']} | Fallidas: {stats['tasks_failed']} | "
+                    f"Errores conexión: {stats['connection_errors']} | Errores VPN: {stats['vpn_errors']} | "
+                    f"Errores scraping: {stats['scraping_errors']} | Uptime: {uptime:.0f}s")
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -164,29 +202,27 @@ def make_request(method: str, endpoint: str, json_data: Optional[dict] = None, t
         return response.json()
     except requests.exceptions.HTTPError as e:
         logger.error(f"[HTTP] Error HTTP en {method} {endpoint}: {e} | Response: {e.response.text if e.response else 'No response'}")
-        stats["connection_errors"] += 1
+        with stats_lock:
+            stats["connection_errors"] += 1
         raise
     except Exception as e:
         logger.error(f"[HTTP] Error en {method} {endpoint}: {e}")
-        stats["connection_errors"] += 1
+        with stats_lock:
+            stats["connection_errors"] += 1
         raise
 
-def validate_dni(dni: str) -> bool:
-    """Acepta DNI (7-8 dígitos) o CUIT (11 dígitos)."""
-    return bool(re.match(r'^\d{7,8}$', dni)) or bool(re.match(r'^\d{11}$', dni))
-
-def validate_telefono(telefono: str) -> bool:
-    return bool(re.match(r'^\d{10}$', telefono))
+# Funciones validate_dni y validate_telefono ahora en common_utils.py
 
 # -----------------------------
 # Funciones principales
 # -----------------------------
 def register_pc() -> bool:
-    logger.info(f"[REGISTRO] Registrando PC '{PC_ID}' tipo '{TIPO}' en {BACKEND}")
+    logger.info(f"[REGISTRO] Registrando PC '{PC_ID}' tipo '{TIPO}' admin={ADMIN} en {BACKEND}")
     if TIPO not in VALID_TASK_TYPES:
         logger.error(f"[ERROR] Tipo inválido: {TIPO}")
         return False
-    result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
+    # Incluir flag admin en el payload para que el backend sepa si este worker puede ejecutar tareas administrativas
+    result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}", json_data={"admin": ADMIN})
     if result and result.get("status") == "ok":
         logger.info(f"[OK] PC registrada correctamente | pc_id={result.get('pc_id')}, tipo={result.get('tipo')}")
         return True
@@ -198,7 +234,7 @@ def send_heartbeat() -> bool:
     try:
         # El backend actualiza el heartbeat automáticamente en get_task
         # pero también podemos usar register_pc para mantener online
-        result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}")
+        result = make_request("POST", f"/workers/register/{TIPO}/{PC_ID}", json_data={"admin": ADMIN})
         if result and result.get("status") == "ok":
             logger.debug(f"[HEARTBEAT] Enviado correctamente")
             return True
@@ -211,7 +247,8 @@ def send_heartbeat() -> bool:
 
 def get_task() -> Optional[dict]:
     logger.info("[POLL] Intentando obtener tarea...")
-    payload = {"pc_id": PC_ID, "tipo": TIPO}
+    # Incluir flag admin para que el backend pueda filtrar tareas administrativas si aplica
+    payload = {"pc_id": PC_ID, "tipo": TIPO, "admin": ADMIN}
     result = make_request("POST", "/workers/get_task", payload)
     if not result:
         return None
@@ -228,6 +265,15 @@ def get_task() -> Optional[dict]:
         task_tipo = task.get("tipo", "")
         
         logger.info(f"[TAREA-TIPO] Worker esperaba: '{TIPO}' | Tarea tiene tipo: '{task_tipo}' | Es PIN: {is_pin_task}")
+
+        # Si la tarea está marcada como admin=True, solo los workers 'deudas' con ADMIN=True deben procesarla
+        task_admin = bool(task.get('admin', False))
+        if task_admin:
+            logger.info(f"[TAREA-ADMIN] Tarea marcada como administrativa (admin=True)")
+            if not (TIPO == 'deudas' and ADMIN):
+                logger.warning(f"[RECHAZO] Tarea administrativa recibida pero este worker no está configurado como admin; rechazando")
+                logger.warning(f"[RECHAZO] Task ID: {task.get('task_id')}")
+                return None
         
         # VALIDACIÓN: Verificar que la tarea sea del tipo correcto para este worker
         if TIPO == "pin":
@@ -315,7 +361,8 @@ def process_task(task: dict) -> bool:
             logger.error(f"[ERROR] Directorio base: {base_dir}")
             logger.error(f"[ERROR] Directorio actual: {os.getcwd()}")
             logger.error(f"[ERROR] Contenido del directorio scripts: {os.listdir(os.path.join(base_dir, 'scripts'))}")
-            stats["scraping_errors"] += 1
+            with stats_lock:
+                stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": f"Script no encontrado: {os.path.basename(script_path)}"}, status="error")
             return False
         
@@ -384,8 +431,9 @@ def process_task(task: dict) -> bool:
             logger.info(f"[SUBPROCESS] Proceso creado exitosamente. PID: {process.pid}")
         except Exception as subprocess_error:
             logger.error(f"[SUBPROCESS-ERROR] Error creando subprocess: {subprocess_error}", exc_info=True)
-            stats["scraping_errors"] += 1
-            sanitized_error = sanitize_error_for_frontend(str(subprocess_error))
+            with stats_lock:
+                stats["scraping_errors"] += 1
+            sanitized_error = sanitize_error_for_display(str(subprocess_error))
             send_partial_update(task_id, {"info": sanitized_error}, status="error")
             return False
 
@@ -449,7 +497,8 @@ def process_task(task: dict) -> bool:
                 if current_time - start_time > timeout:
                     logger.error(f"[TIMEOUT] Timeout global de {timeout}s excedido")
                     process.kill()
-                    stats["scraping_errors"] += 1
+                    with stats_lock:
+                        stats["scraping_errors"] += 1
                     send_partial_update(task_id, {"info": "El proceso tardó demasiado tiempo"}, status="error")
                     return False
                 
@@ -457,7 +506,8 @@ def process_task(task: dict) -> bool:
                 if current_time - last_line_time > no_output_timeout:
                     logger.error(f"[TIMEOUT] Sin output por {no_output_timeout}s, considerando proceso bloqueado")
                     process.kill()
-                    stats["scraping_errors"] += 1
+                    with stats_lock:
+                        stats["scraping_errors"] += 1
                     send_partial_update(task_id, {"info": "El proceso no responde"}, status="error")
                     return False
                 
@@ -578,7 +628,8 @@ def process_task(task: dict) -> bool:
             logger.error(f"[TIMEOUT] Script excedió tiempo límite de {timeout}s")
             logger.error(f"[TIMEOUT] Task ID: {task_id} | Input: {input_data}")
             logger.error(f"[TIMEOUT] Última línea recibida hace {time.time() - last_line_time:.1f}s")
-            stats["scraping_errors"] += 1
+            with stats_lock:
+                stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "El proceso tardó demasiado tiempo"}, status="error")
             return False
         except Exception as e:
@@ -591,8 +642,9 @@ def process_task(task: dict) -> bool:
                     process.kill()
                 except:
                     pass
-            stats["scraping_errors"] += 1
-            sanitized_error = sanitize_error_for_frontend(str(e))
+            with stats_lock:
+                stats["scraping_errors"] += 1
+            sanitized_error = sanitize_error_for_display(str(e))
             send_partial_update(task_id, {"info": sanitized_error}, status="error")
             return False
 
@@ -611,9 +663,10 @@ def process_task(task: dict) -> bool:
         if process.returncode is None:
             error_msg = "Proceso no terminó correctamente (returncode None)"
             logger.error(f"[ERROR] {error_msg}")
-            logger.error(f"[STDOUT]: {safe_str(output, 200)}...")
-            logger.error(f"[STDERR]: {safe_str(stderr_output, 200)}...")
-            stats["scraping_errors"] += 1
+            logger.error(f"[STDOUT]: {output[:200] if output else 'vacío'}...")
+            logger.error(f"[STDERR]: {stderr_output[:200] if stderr_output else 'vacío'}...")
+            with stats_lock:
+                stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": error_msg}, status="error")
             return False
         
@@ -622,14 +675,16 @@ def process_task(task: dict) -> bool:
             if stderr_output:
                 error_msg += f": {stderr_output[:100]}"
             logger.error(f"[ERROR] {error_msg}")
-            logger.error(f"[STDOUT]: {safe_str(output, 200)}...")
-            stats["scraping_errors"] += 1
+            logger.error(f"[STDOUT]: {output[:200] if output else 'vacío'}...")
+            with stats_lock:
+                stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": error_msg}, status="error")
             return False
         
         if not output:
             logger.error(f"[ERROR] Script no produjo output")
-            stats["scraping_errors"] += 1
+            with stats_lock:
+                stats["scraping_errors"] += 1
             send_partial_update(task_id, {"info": "Script no produjo resultados"}, status="error")
             return False
         
@@ -1149,13 +1204,15 @@ def on_ws_error(ws, error):
 def on_ws_close(ws, close_status_code, close_msg):
     """Callback cuando se cierra el WebSocket"""
     global ws_connected
-    ws_connected = False
+    with ws_connected_lock:
+        ws_connected = False
     logger.warning(f"[WS] Conexión cerrada (code: {close_status_code}, msg: {close_msg})")
 
 def on_ws_open(ws):
     """Callback cuando se abre el WebSocket"""
     global ws_connected
-    ws_connected = True
+    with ws_connected_lock:
+        ws_connected = True
     logger.info(f"[WS] Conexión establecida con el backend")
 
 def connect_websocket():
@@ -1202,9 +1259,13 @@ def get_task_from_queue():
 # Loop principal
 # -----------------------------
 def main_loop():
+    global use_websocket  # Definir variable global para modo WebSocket
+    use_websocket = True  # Intentar usar WebSocket por defecto
+    
     worker_type_display = "PIN" if TIPO == "pin" else TIPO.upper()
-    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Modo: WebSocket")
-    logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}")
+    logger.info(f"[INICIO] Worker {PC_ID} | Tipo: {worker_type_display} | Admin: {ADMIN} | Modo: WebSocket")
+    admin_note = " y atenderá tareas administrativas (admin=true)" if ADMIN else ""
+    logger.info(f"[CONFIGURACIÓN] Este worker SOLO procesará tareas de tipo {worker_type_display}{admin_note}")
     
     # El directorio de logs ya fue creado al inicio del script
     
@@ -1286,10 +1347,12 @@ def main_loop():
             # No llamar a task_done - el backend lo hace automáticamente
             # cuando recibe el update con status="completed"
             if success:
-                stats["tasks_completed"] += 1
+                with stats_lock:
+                    stats["tasks_completed"] += 1
                 logger.info(f"[COMPLETADO] Tarea {task['task_id']} procesada exitosamente")
             else:
-                stats["tasks_failed"] += 1
+                with stats_lock:
+                    stats["tasks_failed"] += 1
                 logger.error(f"[FALLIDA] Tarea {task['task_id']} falló")
         
         except KeyboardInterrupt:
@@ -1300,7 +1363,8 @@ def main_loop():
             sys.exit(0)
         except Exception as e:
             logger.error(f"[ERROR] Inesperado en loop principal: {e}")
-            stats["connection_errors"] += 1
+            with stats_lock:
+                stats["connection_errors"] += 1
             time.sleep(1)
 
 

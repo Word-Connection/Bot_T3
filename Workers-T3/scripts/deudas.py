@@ -5,28 +5,56 @@ import os
 import glob
 import subprocess
 import threading
+import re
 from PIL import Image
 import io
 import time
 
+# Importar utilidades comunes
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from common_utils import (
+        send_partial_update as _send_update_base,
+        parse_json_from_markers,
+        get_timestamp_ms,
+        normalize_timestamp
+    )
+    HAS_COMMON_UTILS = True
+except ImportError:
+    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
+    HAS_COMMON_UTILS = False
+
 
 def send_partial_update(dni: str, score: str, etapa: str, info: str, admin_mode: bool = False, extra_data: dict = None):
     """Envía un update parcial al worker para reenvío inmediato via WebSocket."""
-    update_data = {
-        "dni": dni,
-        "score": score,
-        "etapa": etapa,
-        "info": info,
-        "admin_mode": admin_mode,
-        "timestamp": int(time.time() * 1000)
-    }
-    
-    if extra_data:
-        update_data.update(extra_data)
-    
-    print("===JSON_PARTIAL_START===", flush=True)
-    print(json.dumps(update_data), flush=True)
-    print("===JSON_PARTIAL_END===", flush=True)
+    if HAS_COMMON_UTILS:
+        # Usar función centralizada
+        _send_update_base(
+            identifier=dni,
+            etapa=etapa,
+            info=info,
+            score=score,
+            admin_mode=admin_mode,
+            extra_data=extra_data,
+            identifier_key="dni"
+        )
+    else:
+        # Fallback manual
+        update_data = {
+            "dni": dni,
+            "score": score,
+            "etapa": etapa,
+            "info": info,
+            "admin_mode": admin_mode,
+            "timestamp": int(time.time() * 1000)
+        }
+        
+        if extra_data:
+            update_data.update(extra_data)
+        
+        print("===JSON_PARTIAL_START===", flush=True)
+        print(json.dumps(update_data), flush=True)
+        print("===JSON_PARTIAL_END===", flush=True)
 
 
 def get_image_base64(image_path: str) -> str:
@@ -90,7 +118,7 @@ def main():
             admin_mode = os.getenv('ADMIN_MODE', '0').lower() in ('1', 'true', 'yes', 'on')
         
         if admin_mode:
-            print(f"[ADMIN] Modo administrativo activo - Camino A se ejecutará independientemente del score", file=sys.stderr)
+            print(f"[ADMIN] Modo administrativo activo - Se ejecutará Camino Score ADMIN (score + búsqueda de deudas)", file=sys.stderr)
 
         # Directorio de capturas
         base_dir = os.path.dirname(__file__)
@@ -104,9 +132,16 @@ def main():
 
         stages = []
 
-        # Ejecutar Camino C
-        script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_multi.py'))
-        coords_path = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
+        # Decidir qué camino ejecutar según admin_mode
+        if admin_mode:
+            # MODO ADMIN: Ejecutar camino score ADMIN (score + búsqueda de deudas)
+            script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_score_ADMIN.py'))
+            coords_path = os.path.abspath(os.path.join(base_dir, '../../camino_score_ADMIN_coords.json'))
+            print(f"[ADMIN] Ejecutando Camino Score ADMIN (score + deudas)", file=sys.stderr)
+        else:
+            # MODO NORMAL: Ejecutar Camino C (score + posible búsqueda de deudas si score 80-89)
+            script_path = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_multi.py'))
+            coords_path = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
 
         if not os.path.exists(script_path):
             result = {"error": f"Script no encontrado: {script_path}"}
@@ -121,6 +156,8 @@ def main():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1
         )
         
@@ -133,6 +170,43 @@ def main():
                 stdout_lines.append(line)
                 print(line.rstrip(), file=sys.stderr)
                 sys.stderr.flush()
+                
+                # Detectar mensaje de score capturado en modo admin
+                if admin_mode and '[CaminoScoreADMIN] SCORE_CAPTURADO:' in line:
+                    # Extraer el score del mensaje
+                    score_text = line.split('SCORE_CAPTURADO:')[-1].strip()
+                    print(f"[ADMIN] Score capturado detectado: {score_text}", file=sys.stderr)
+                    
+                    # Buscar la captura más reciente
+                    pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
+                    files = glob.glob(pattern)
+                    
+                    img_base64 = ""
+                    latest_file = None
+                    if files:
+                        latest_file = max(files, key=os.path.getctime)
+                        img_base64 = get_image_base64(latest_file)
+                        print(f"[ADMIN] Captura encontrada: {latest_file}", file=sys.stderr)
+                    
+                    # Enviar score con imagen
+                    extra_data = {}
+                    if img_base64:
+                        extra_data["image"] = img_base64
+                        extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+                    
+                    send_partial_update(dni, score_text, "score_obtenido", f"Score: {score_text} (modo admin)", admin_mode, extra_data)
+                    print(f"[ADMIN] Update de score enviado al frontend", file=sys.stderr)
+                
+                # Detectar mensaje de búsqueda de deudas
+                elif admin_mode and '[CaminoScoreADMIN] Buscando deudas...' in line:
+                    send_partial_update(dni, "", "buscando_deudas", "Buscando deudas...", admin_mode)
+                    print(f"[ADMIN] Mensaje de búsqueda de deudas enviado", file=sys.stderr)
+                
+                # Detectar mensaje de tiempo estimado en modo admin
+                elif admin_mode and '[CaminoScoreADMIN]' in line and 'cuentas' in line and 'tiempo estimado' in line:
+                    # Extraer el mensaje completo
+                    msg = line.split('[CaminoScoreADMIN]')[-1].strip()
+                    send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
             
             # Esperar a que termine y capturar stderr
             process.wait(timeout=300)
@@ -179,20 +253,24 @@ def main():
         # Parsear el JSON del Camino C (puede contener fraude, cliente no creado, score, etc.)
         camino_c_json = None
         
-        # Buscar el JSON entre los marcadores
-        json_start_marker = "===JSON_RESULT_START==="
-        json_end_marker = "===JSON_RESULT_END==="
-        
-        start_pos = stdout_c.find(json_start_marker)
-        if start_pos != -1:
-            json_start = stdout_c.find('\n', start_pos) + 1
-            end_pos = stdout_c.find(json_end_marker, json_start)
-            if end_pos != -1:
-                json_text = stdout_c[json_start:end_pos].strip()
-                try:
-                    camino_c_json = json.loads(json_text)
-                except Exception as e:
-                    print(f"[CaminoC] Error parseando JSON del Camino C: {e}", file=sys.stderr)
+        # Usar función centralizada de parsing
+        if HAS_COMMON_UTILS:
+            camino_c_json = parse_json_from_markers(stdout_c, strict=True)
+        else:
+            # Fallback: Búsqueda manual
+            json_start_marker = "===JSON_RESULT_START==="
+            json_end_marker = "===JSON_RESULT_END==="
+            
+            start_pos = stdout_c.find(json_start_marker)
+            if start_pos != -1:
+                json_start = stdout_c.find('\n', start_pos) + 1
+                end_pos = stdout_c.find(json_end_marker, json_start)
+                if end_pos != -1:
+                    json_text = stdout_c[json_start:end_pos].strip()
+                    try:
+                        camino_c_json = json.loads(json_text)
+                    except Exception as e:
+                        print(f"[CaminoC] Error parseando JSON del Camino C: {e}", file=sys.stderr)
         
         if not camino_c_json:
             # Fallback: si no hay JSON con marcadores, es un error crítico
@@ -226,8 +304,10 @@ def main():
         except Exception as e:
             score_num = None
 
-        # LÓGICA DE DECISIÓN: Ejecutar Camino A si score 80-89 O modo admin
-        should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) or admin_mode
+        # LÓGICA DE DECISIÓN: 
+        # - Modo admin: Ya tiene deudas del camino score ADMIN (fa_saldos), NO ejecutar Camino A
+        # - Modo normal con score 80-89: Ejecutar Camino A para buscar deudas
+        should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) and not admin_mode
         
         # Buscar captura más reciente
         pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
@@ -239,12 +319,62 @@ def main():
             latest_file = max(files, key=os.path.getctime)
             img_base64 = get_image_base64(latest_file)
 
-        # ===== ENVIAR UPDATE: SCORE OBTENIDO (solo para casos normales, NO para score 80-89) =====
+        # ===== ENVIAR UPDATE: SCORE OBTENIDO =====
         print(f"Score: {score}", flush=True)
         
-        # Para score 80-89: NO enviar update de score, ir directo a validación de deudas
-        # Para otros scores: enviar score con imagen INMEDIATAMENTE
-        if not should_execute_camino_a:
+        # MODO ADMIN: Procesar deudas retornadas por camino score ADMIN
+        if admin_mode:
+            # El camino score ADMIN retorna fa_saldos con las deudas
+            fa_saldos_admin = camino_c_json.get("fa_saldos", [])
+            
+            print(f"[ADMIN] Deudas obtenidas del camino score ADMIN: {len(fa_saldos_admin)}")
+            
+            # Enviar score con imagen
+            extra_data = {}
+            if img_base64:
+                extra_data["image"] = img_base64
+                extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+            
+            send_partial_update(dni, score, "score_obtenido", f"Score: {score} (modo admin)", admin_mode, extra_data)
+            
+            # Preparar resultado final para modo admin (sin validación de $60k)
+            print(f"[ADMIN] Total deudas recolectadas: {len(fa_saldos_admin)}")
+            
+            final_result = {
+                "dni": dni,
+                "score": score,
+                "admin_mode": True,
+                "etapa": "completado_admin",
+                "info": f"Consulta administrativa completada - {len(fa_saldos_admin)} deudas recolectadas",
+                "success": True,
+                "timestamp": int(time.time() * 1000),
+                "fa_saldos": fa_saldos_admin
+            }
+            
+            # La imagen ya se envió en el update parcial del score, no incluirla en el resultado final
+            
+            # Enviar update final con todas las deudas
+            send_partial_update(
+                dni, 
+                score, 
+                "deudas_recolectadas", 
+                f"Deudas recolectadas: {len(fa_saldos_admin)} totales",
+                admin_mode,
+                {
+                    "fa_saldos": fa_saldos_admin
+                }
+            )
+            
+            # Devolver resultado y salir
+            print("===JSON_RESULT_START===", flush=True)
+            print(json.dumps(final_result), flush=True)
+            print("===JSON_RESULT_END===", flush=True)
+            sys.exit(0)
+        
+        # MODO NORMAL:
+        #   - Score 80-89: NO enviar update de score, ir directo a validación de deudas
+        #   - Otros scores: enviar score con imagen INMEDIATAMENTE
+        elif not should_execute_camino_a:
             extra_data = {}
             if img_base64:
                 extra_data["image"] = img_base64
@@ -304,6 +434,13 @@ def main():
                             for line in process.stdout:
                                 stdout_lines.append(line)
                                 print(line.rstrip(), file=sys.stderr)  # Forward to stderr for real-time visibility
+                                
+                                # Detectar mensaje de tiempo estimado en Camino A
+                                if '[CaminoJulian]' in line and 'cuentas' in line and 'tiempo estimado' in line:
+                                    # Extraer el mensaje completo
+                                    msg = line.split('[CaminoJulian]')[-1].strip()
+                                    send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
+                                    print(f"[CaminoA] Mensaje de tiempo estimado enviado: {msg}", file=sys.stderr)
                         except Exception as e:
                             print(f"Error leyendo stdout: {e}", file=sys.stderr)
                         
@@ -321,15 +458,34 @@ def main():
                     # ===== VERIFICAR SI NECESITA FALLBACK A DNI =====
                     camino_a_data = None
                     if returncode == 0:
-                        # Parsear resultado del primer intento
+                        # Parsear resultado del primer intento (preferir marcadores o matching exacto de JSON)
                         try:
                             a_out = stdout_full or ""
-                            json_start = a_out.find('{')
-                            if json_start != -1:
-                                json_end = a_out.rfind('}')
-                                if json_end != -1 and json_end > json_start:
-                                    json_str = a_out[json_start:json_end+1]
-                                    camino_a_data = json.loads(json_str)
+                            # Preferir marcador
+                            if "===JSON_RESULT_START===" in a_out:
+                                start_pos = a_out.find("===JSON_RESULT_START===")
+                                json_start = a_out.find('\n', start_pos) + 1
+                                end_pos = a_out.find("===JSON_RESULT_END===", json_start)
+                                if end_pos != -1:
+                                    json_text = a_out[json_start:end_pos].strip()
+                                    camino_a_data = json.loads(json_text)
+                            # Fallback: intentar parsear primer JSON por matching de llaves
+                            if not camino_a_data:
+                                pos = a_out.find('{')
+                                if pos != -1:
+                                    depth = 0
+                                    json_str = None
+                                    for idx in range(pos, len(a_out)):
+                                        ch = a_out[idx]
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                json_str = a_out[pos:idx+1]
+                                                break
+                                    if json_str:
+                                        camino_a_data = json.loads(json_str)
                         except Exception:
                             pass
                         
@@ -403,23 +559,46 @@ def main():
                         
                         # NO enviar updates intermedios - ir directo al resultado
                         
-                        # Intentar parsear JSON de Camino A desde stdout
+                        # Intentar parsear JSON de Camino A desde stdout (preferir marcadores si existen)
                         camino_a_data = None
                         try:
-                            # El JSON está en stdout_full
-                            # Buscar el objeto JSON (empieza con '{' y termina con '}')
                             a_out = stdout_full or ""
-                            
-                            # Encontrar el primer '{' que inicia el JSON
-                            json_start = a_out.find('{')
-                            if json_start != -1:
-                                # Encontrar el último '}' que cierra el JSON
-                                json_end = a_out.rfind('}')
-                                if json_end != -1 and json_end > json_start:
-                                    json_str = a_out[json_start:json_end+1]
-                                    camino_a_data = json.loads(json_str)
+                            # 1) Si el script imprimió marcadores ===JSON_RESULT_START=== / ===JSON_RESULT_END===, usarlos
+                            if "===JSON_RESULT_START===" in a_out:
+                                start_pos = a_out.find("===JSON_RESULT_START===")
+                                json_start = a_out.find('\n', start_pos) + 1
+                                end_pos = a_out.find("===JSON_RESULT_END===", json_start)
+                                if end_pos != -1:
+                                    json_text = a_out[json_start:end_pos].strip()
+                                    camino_a_data = json.loads(json_text)
+                            # 2) Si tenemos common util, intentar parsear con su helper (más tolerante)
+                            if not camino_a_data and 'parse_json_from_markers' in globals():
+                                try:
+                                    parsed = parse_json_from_markers(a_out, strict=True)
+                                    if parsed:
+                                        camino_a_data = parsed
+                                except Exception:
+                                    pass
+
+                            # 3) Fallback: intentar extraer el primer objeto JSON por matching de llaves
+                            if not camino_a_data:
+                                pos = a_out.find('{')
+                                if pos != -1:
+                                    depth = 0
+                                    json_str = None
+                                    for idx in range(pos, len(a_out)):
+                                        ch = a_out[idx]
+                                        if ch == '{':
+                                            depth += 1
+                                        elif ch == '}':
+                                            depth -= 1
+                                            if depth == 0:
+                                                json_str = a_out[pos:idx+1]
+                                                break
+                                    if json_str:
+                                        camino_a_data = json.loads(json_str)
                         except Exception as e:
-                            pass  # Silenciar error de parsing
+                            print(f"[CaminoA] Error parseando JSON: {e}", file=sys.stderr)
                             import traceback
                             traceback.print_exc(file=sys.stderr)
                             camino_a_data = None
@@ -616,7 +795,12 @@ def main():
         extra_data_final = {"has_deudas": has_deudas, "success": True}
         if imagen_final:
             extra_data_final["image"] = imagen_final
-            extra_data_final["timestamp"] = int(imagen_timestamp * 1000) if imagen_timestamp and imagen_timestamp < 10000000000 else imagen_timestamp or int(time.time() * 1000)
+            # Usar función de normalización de timestamp
+            if HAS_COMMON_UTILS:
+                extra_data_final["timestamp"] = normalize_timestamp(imagen_timestamp)
+            else:
+                # Fallback manual
+                extra_data_final["timestamp"] = int(imagen_timestamp * 1000) if imagen_timestamp and imagen_timestamp < 10000000000 else imagen_timestamp or int(time.time() * 1000)
         
         send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, extra_data_final)
 
