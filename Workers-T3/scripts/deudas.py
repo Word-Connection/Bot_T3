@@ -304,10 +304,11 @@ def main():
         except Exception as e:
             score_num = None
 
-        # LÓGICA DE DECISIÓN: 
+        # LÓGICA DE DECISIÓN:
         # - Modo admin: Ya tiene deudas del camino score ADMIN (fa_saldos), NO ejecutar Camino A
-        # - Modo normal con score 80-89: Ejecutar Camino A para buscar deudas
-        should_execute_camino_a = (score_num is not None and 80 <= score_num <= 89) and not admin_mode
+        # - Modo normal con score 80-89: Ejecutar Camino DEUDAS PROVISORIO (sistema anda mal)
+        should_execute_deudas_provisorio = (score_num is not None and 80 <= score_num <= 89) and not admin_mode
+        should_execute_camino_a = False  # Deshabilitado temporalmente - usar deudas provisorio
         
         # Buscar captura más reciente
         pattern = os.path.join(captures_dir, f'score_{dni}_*.png')
@@ -372,17 +373,202 @@ def main():
             sys.exit(0)
         
         # MODO NORMAL:
-        #   - Score 80-89: NO enviar update de score, ir directo a validación de deudas
+        #   - Score 80: NO enviar update de score, ir directo a validación con DEUDAS PROVISORIO
+        #   - Score 81-89: NO enviar update de score, ir directo a validación de deudas con Camino A
         #   - Otros scores: enviar score con imagen INMEDIATAMENTE
-        elif not should_execute_camino_a:
+        elif not should_execute_camino_a and not should_execute_deudas_provisorio:
             extra_data = {}
             if img_base64:
                 extra_data["image"] = img_base64
                 extra_data["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
-                
+
             send_partial_update(dni, score, "score_obtenido", f"Score: {score}", admin_mode, extra_data)
 
-        
+        # ===== CAMINO DEUDAS PROVISORIO (Score 80) =====
+        if should_execute_deudas_provisorio:
+            print(f"[DEUDAS] Score 80 detectado - Ejecutando Camino DEUDAS PROVISORIO", file=sys.stderr)
+
+            try:
+                script_deudas_prov = os.path.abspath(os.path.join(base_dir, '../../run_camino_deudas_provisorio.py'))
+                coords_deudas_prov = os.path.abspath(os.path.join(base_dir, '../../camino_score_ADMIN_coords.json'))
+
+                if os.path.exists(script_deudas_prov):
+                    cmd_deudas_prov = [sys.executable, '-u', script_deudas_prov, '--dni', dni, '--coords', coords_deudas_prov]
+
+                    try:
+                        process = subprocess.Popen(
+                            cmd_deudas_prov,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            bufsize=1
+                        )
+
+                        stdout_lines = []
+                        stderr_lines = []
+
+                        def read_stderr_deudas():
+                            for line in process.stderr:
+                                stderr_lines.append(line)
+                                print(line.rstrip(), file=sys.stderr)
+
+                        stderr_thread = threading.Thread(target=read_stderr_deudas)
+                        stderr_thread.daemon = True
+                        stderr_thread.start()
+
+                        # Leer stdout
+                        for line in process.stdout:
+                            stdout_lines.append(line)
+                            print(line.rstrip(), file=sys.stderr)
+
+                            # Detectar mensaje de tiempo estimado
+                            if '[DeudasProvisorio]' in line and 'cuentas' in line and 'tiempo estimado' in line:
+                                msg = line.split('[DeudasProvisorio]')[-1].strip()
+                                send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
+
+                        returncode = process.wait(timeout=1200)
+                        stderr_thread.join(timeout=5)
+
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        raise
+
+                    stdout_full = ''.join(stdout_lines)
+
+                    if returncode == 0:
+                        # Parsear resultado
+                        deudas_prov_data = None
+                        try:
+                            if "===JSON_RESULT_START===" in stdout_full:
+                                start_pos = stdout_full.find("===JSON_RESULT_START===")
+                                json_start = stdout_full.find('\n', start_pos) + 1
+                                end_pos = stdout_full.find("===JSON_RESULT_END===", json_start)
+                                if end_pos != -1:
+                                    json_text = stdout_full[json_start:end_pos].strip()
+                                    deudas_prov_data = json.loads(json_text)
+                        except Exception as e:
+                            print(f"[DeudasProvisorio] Error parseando JSON: {e}", file=sys.stderr)
+
+                        if deudas_prov_data:
+                            # Verificar si necesita ejecutar Camino C Corto (deudas > $60k)
+                            if deudas_prov_data.get("ejecutar_camino_c_corto"):
+                                print(f"[DEUDAS] Deudas superan $60k - Ejecutando Camino C Corto", file=sys.stderr)
+
+                                script_c_corto = os.path.abspath(os.path.join(base_dir, '../../run_camino_c_corto.py'))
+                                coords_c = os.path.abspath(os.path.join(base_dir, '../../camino_c_coords_multi.json'))
+
+                                cmd_c_corto = [
+                                    sys.executable, '-u',
+                                    script_c_corto,
+                                    '--dni', dni,
+                                    '--coords', coords_c,
+                                    '--shots-dir', captures_dir
+                                ]
+
+                                try:
+                                    proc_c_corto = subprocess.Popen(
+                                        cmd_c_corto,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        text=True,
+                                        bufsize=1
+                                    )
+
+                                    c_corto_out = ""
+                                    for line in proc_c_corto.stdout:
+                                        print(line, end='', flush=True)
+                                        c_corto_out += line
+
+                                    proc_c_corto.wait(timeout=120)
+
+                                    if proc_c_corto.returncode == 0:
+                                        # Parsear resultado del Camino C corto
+                                        try:
+                                            start_pos = c_corto_out.find("===JSON_RESULT_START===")
+                                            if start_pos != -1:
+                                                json_start = c_corto_out.find('\n', start_pos) + 1
+                                                end_pos = c_corto_out.find("===JSON_RESULT_END===", json_start)
+                                                if end_pos != -1:
+                                                    json_text = c_corto_out[json_start:end_pos].strip()
+                                                    c_corto_data = json.loads(json_text)
+
+                                                    # Convertir captura a base64
+                                                    image_b64 = ""
+                                                    if c_corto_data.get("screenshot") and os.path.exists(c_corto_data["screenshot"]):
+                                                        image_b64 = get_image_base64(c_corto_data["screenshot"])
+
+                                                    # Resultado final con score 98
+                                                    final_result = {
+                                                        "dni": dni,
+                                                        "score": "98",
+                                                        "etapa": "completado_deudas_provisorio",
+                                                        "info": "Deudas superan $60k - Score 98",
+                                                        "success": True,
+                                                        "timestamp": int(time.time() * 1000),
+                                                        "fa_saldos": []
+                                                    }
+
+                                                    extra_data_final = {"has_deudas": False, "success": True}
+                                                    if image_b64:
+                                                        extra_data_final["image"] = image_b64
+                                                        extra_data_final["timestamp"] = int(time.time() * 1000)
+
+                                                    send_partial_update(dni, "98", "datos_listos", "Deudas superan $60k - Score 98", admin_mode, extra_data_final)
+
+                                                    print("===JSON_RESULT_START===", flush=True)
+                                                    print(json.dumps(final_result), flush=True)
+                                                    print("===JSON_RESULT_END===", flush=True)
+                                                    sys.exit(0)
+                                        except Exception as e:
+                                            print(f"[CaminoC_CORTO] ERROR parseando resultado: {e}", file=sys.stderr)
+
+                                except subprocess.TimeoutExpired:
+                                    print(f"[CaminoC_CORTO] ERROR: Timeout", file=sys.stderr)
+                                    proc_c_corto.kill()
+                                except Exception as e:
+                                    print(f"[CaminoC_CORTO] ERROR: {e}", file=sys.stderr)
+
+                            else:
+                                # Deudas NO superan $60k - retornar resultado normal
+                                print(f"[DeudasProvisorio] Deudas NO superan $60k - Retornando resultado normal", file=sys.stderr)
+
+                                fa_saldos = deudas_prov_data.get("fa_saldos", [])
+                                suma_deudas = deudas_prov_data.get("suma_deudas", 0)
+
+                                final_result = {
+                                    "dni": dni,
+                                    "score": score,  # Usar score real (80-89)
+                                    "etapa": "completado_deudas_provisorio",
+                                    "info": f"Consulta finalizada - {len(fa_saldos)} deudas",
+                                    "success": True,
+                                    "timestamp": int(time.time() * 1000),
+                                    "fa_saldos": fa_saldos,
+                                    "suma_deudas": suma_deudas
+                                }
+
+                                extra_data_final = {"has_deudas": len(fa_saldos) > 0, "success": True}
+                                if img_base64:
+                                    extra_data_final["image"] = img_base64
+                                    extra_data_final["timestamp"] = int(os.path.getctime(latest_file)) if latest_file else int(time.time() * 1000)
+
+                                send_partial_update(dni, score, "datos_listos", f"Consulta finalizada - {len(fa_saldos)} deudas", admin_mode, extra_data_final)
+
+                                print("===JSON_RESULT_START===", flush=True)
+                                print(json.dumps(final_result), flush=True)
+                                print("===JSON_RESULT_END===", flush=True)
+                                sys.exit(0)
+                        else:
+                            print(f"[DeudasProvisorio] ERROR: No se pudo parsear resultado", file=sys.stderr)
+                    else:
+                        print(f"[DeudasProvisorio] ERROR: Camino falló con código {returncode}", file=sys.stderr)
+                else:
+                    print(f"[DeudasProvisorio] ERROR: Script no encontrado: {script_deudas_prov}", file=sys.stderr)
+
+            except subprocess.TimeoutExpired:
+                print(f"[DeudasProvisorio] ERROR: Timeout ejecutando Camino Deudas Provisorio", file=sys.stderr)
+            except Exception as e:
+                print(f"[DeudasProvisorio] ERROR: Excepción: {e}", file=sys.stderr)
+
         if should_execute_camino_a:
             # Score 80-89 o modo admin: NO enviar nada, ir directo a validar deudas
             

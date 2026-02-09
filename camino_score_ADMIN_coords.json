@@ -161,6 +161,41 @@
     "x": 38,
     "y": 356
   },
+  "fa_cobranza_ver_todos": {
+    "x": 1806,
+    "y": 357,
+    "comment": "Boton Ver Todos en FA Cobranza"
+  },
+  "fa_cobranza_tabla_rightclick": {
+    "x": 57,
+    "y": 175,
+    "comment": "Right-click en tabla para menu contextual"
+  },
+  "fa_cobranza_seleccionar_todos": {
+    "x": 112,
+    "y": 231,
+    "comment": "Opcion Seleccionar todos del menu"
+  },
+  "fa_cobranza_copiar": {
+    "x": 89,
+    "y": 204,
+    "comment": "Opcion Copiar del menu contextual"
+  },
+  "fa_cobranza_cerrar_ver_todos": {
+    "x": 1894,
+    "y": 136,
+    "comment": "Cerrar ventana Ver Todos de FA Cobranza"
+  },
+  "fa_cobranza_primera_fila": {
+    "x": 536,
+    "y": 436,
+    "comment": "Primera fila de resultados FA Cobranza (donde dice Actual)"
+  },
+  "fa_cobranza_segunda_fila": {
+    "x": 653,
+    "y": 433,
+    "comment": "Segunda fila de resultados FA Cobranza (donde dice Actual)"
+  },
   "fa_actual_area_rightclick": {
     "x": 540,
     "y": 437
