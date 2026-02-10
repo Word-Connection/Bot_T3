@@ -1185,80 +1185,131 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
         return
     
     print(f"[camino_A] Se procesarán {len(fa_data_list)} registros")
-    
+
     # Paso 13: Procesar cada ID de FA
     id_area_x, id_area_y = _xy(conf, 'id_area')
     offset_y = 19  # Offset vertical por registro
-    
+
+    # ===== SUMA INCREMENTAL DE DEUDAS =====
+    suma_acumulada = 0.0
+    deudas_superan_60k = False
+
     for idx, fa_data in enumerate(fa_data_list):
         fa_id = fa_data["id_fa"]
         tiene_cuit = fa_data["cuit"]
-        
+
         if tiene_cuit:
             print(f"[camino_A] ===== Procesando registro {idx + 1}/{len(fa_data_list)}: ID FA {fa_id} (TIENE CUIT) =====")
         else:
             print(f"[camino_A] ===== Procesando registro {idx + 1}/{len(fa_data_list)}: ID FA {fa_id} =====")
-        
+
         # Limpiar portapapeles antes de cada registro
         _clear_clipboard()
-        
+
         # 12a: Click en id_area con offset
         current_y = id_area_y + (idx * offset_y)
         _click(id_area_x, current_y, f'id_area registro {idx + 1}', base_delay)
-        
+
         # 12b: Sleep 1.5s
         print(f"[camino_A] Esperando 1.5s...")
         time.sleep(1.5)
-        
+
         # 12c: Doble click izquierdo en saldo
         saldo_x, saldo_y = _xy(conf, 'saldo')
         _double_click(saldo_x, saldo_y, 'saldo', base_delay)
-        
+
         # Espera 0.5s después del doble click
         time.sleep(0.5)
-        
+
         # 12d: Right-click en la misma coordenada de saldo
         _right_click(saldo_x, saldo_y, 'saldo (right-click)', base_delay)
-        
+
         # Espera 0.5s
         time.sleep(0.5)
-        
+
         # 12e: Click izquierdo en saldo_all_copy
         saldo_all_copy_x, saldo_all_copy_y = _xy(conf, 'saldo_all_copy')
         _click(saldo_all_copy_x, saldo_all_copy_y, 'saldo_all_copy', base_delay)
-        
+
         # 12f: Right-click nuevamente en saldo
         _right_click(saldo_x, saldo_y, 'saldo (right-click 2)', base_delay)
-        
+
         # Espera 0.5s
         time.sleep(0.5)
-        
+
         # 12g: Click izquierdo en saldo_copy
         saldo_copy_x, saldo_copy_y = _xy(conf, 'saldo_copy')
         _click(saldo_copy_x, saldo_copy_y, 'saldo_copy', 0.5)
-        
+
         # 12h: Leer saldo del clipboard
         saldo_text = _get_clipboard_text()
         print(f"[camino_A] Saldo copiado para ID FA {fa_id}: '{saldo_text}'")
-        
+
+        # ===== PARSEAR Y SUMAR DEUDA INMEDIATAMENTE =====
+        try:
+            # Remover puntos de miles y reemplazar coma por punto
+            saldo_clean = saldo_text.strip().replace(".", "").replace(",", ".")
+            saldo_valor = float(saldo_clean)
+
+            # Si es positivo (deuda), sumar
+            if saldo_valor > 0:
+                suma_acumulada += saldo_valor
+                print(f"[camino_A] Deuda detectada: ${saldo_valor:,.2f} | Suma acumulada: ${suma_acumulada:,.2f}")
+
+                # ⭐ VERIFICAR SI SUPERA $60,000 INMEDIATAMENTE
+                if suma_acumulada > 60000 and not deudas_superan_60k:
+                    deudas_superan_60k = True
+                    print(f"[camino_A_PROVISIONAL] ========================================")
+                    print(f"[camino_A_PROVISIONAL] ¡SUMA SUPERA $60,000!")
+                    print(f"[camino_A_PROVISIONAL] Suma actual: ${suma_acumulada:,.2f}")
+                    print(f"[camino_A_PROVISIONAL] Deteniendo extracción y lanzando score 98")
+                    print(f"[camino_A_PROVISIONAL] ========================================")
+
+                    # Cerrar pestaña actual
+                    close_x, close_y = _xy(conf, 'close_tab_btn')
+                    _click(close_x, close_y, 'close_tab_btn', base_delay)
+
+                    # Cerrar ventanas adicionales y volver a home
+                    for i in range(3):
+                        _click(close_x, close_y, f'close_tab_btn (adicional {i+1})', base_delay)
+
+                    home_x, home_y = _xy(conf, 'home_area')
+                    _click(home_x, home_y, 'home_area', base_delay)
+
+                    # Retornar resultado con flag para ejecutar Camino C corto
+                    results_60k = {
+                        "dni": results["dni"],
+                        "success": True,
+                        "ejecutar_camino_c_corto": True,
+                        "suma_deudas_real": suma_acumulada,
+                        "fa_saldos": []
+                    }
+
+                    send_partial(dni, "ejecutar_camino_c_corto", f"Deudas totales: ${suma_acumulada:,.2f}", extra_data={"suma_deudas_real": suma_acumulada})
+                    print_json_result(results_60k)
+                    logger.info(f"[CaminoJulian] Finalizado. Se requiere ejecutar Camino C corto")
+                    return
+        except ValueError:
+            print(f"[camino_A] WARN: No se pudo parsear saldo '{saldo_text}' del ID FA {fa_id}")
+
         # Guardar resultado con CUIT y ID Cliente si aplican
         fa_result = {
             "id_fa": fa_id,
             "saldo": saldo_text.strip()
         }
-        
+
         # Agregar CUIT si existe
         if tiene_cuit:
             fa_result["cuit"] = tiene_cuit
             print(f"[camino_A] Registro con CUIT agregado")
-        
+
         # Agregar ID Cliente si existe (para filtro posterior)
         id_cliente = fa_data.get("id_cliente", "")
         if id_cliente:
             fa_result["id_cliente_interno"] = id_cliente  # Solo para filtro, no se envía al frontend
-        
+
         results["fa_saldos"].append(fa_result)
-        
+
         # 12g: Click en close_tab_btn
         close_x, close_y = _xy(conf, 'close_tab_btn')
         _click(close_x, close_y, 'close_tab_btn', base_delay)
@@ -1370,63 +1421,13 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
     
     # Reemplazar con la lista sin duplicados
     results["fa_saldos"] = fa_saldos_unicos
-    
-    # ===== LÓGICA PROVISIONAL: VALIDAR DEUDAS > $60,000 =====
+
+    # ===== NOTA: La validación de $60k se hace de forma INCREMENTAL durante la extracción =====
+    # Si llegamos aquí, significa que las deudas NO superaron $60,000
     print(f"[camino_A_PROVISIONAL] ========================================")
-    print(f"[camino_A_PROVISIONAL] VALIDANDO SUMA TOTAL DE DEUDAS")
-    
-    suma_total = 0.0
-    deudas_parseadas = []
-    
-    for fa_saldo in results["fa_saldos"]:
-        saldo_text = fa_saldo.get("saldo", "").strip()
-        if not saldo_text:
-            continue
-        
-        # Parsear saldo (formato: "-1.496" o "31.899,98")
-        try:
-            # Remover puntos de miles y reemplazar coma por punto
-            saldo_clean = saldo_text.replace(".", "").replace(",", ".")
-            saldo_valor = float(saldo_clean)
-            
-            # Si es positivo (deuda), sumar directamente
-            if saldo_valor > 0:
-                deuda = saldo_valor
-                suma_total += deuda
-                deudas_parseadas.append({
-                    "id_fa": fa_saldo["id_fa"],
-                    "deuda": deuda
-                })
-                print(f"[camino_A_PROVISIONAL] ID FA {fa_saldo['id_fa']}: Deuda ${deuda:,.2f}")
-        except ValueError:
-            print(f"[camino_A_PROVISIONAL] WARN: No se pudo parsear saldo '{saldo_text}' del ID FA {fa_saldo['id_fa']}")
-            continue
-    
-    print(f"[camino_A_PROVISIONAL] SUMA TOTAL DE DEUDAS: ${suma_total:,.2f}")
+    print(f"[camino_A_PROVISIONAL] Extracción completada sin superar $60,000")
+    print(f"[camino_A_PROVISIONAL] Total deudas procesadas: {len(results['fa_saldos'])}")
     print(f"[camino_A_PROVISIONAL] ========================================")
-    
-    # Si la suma supera $60,000, señalizar que se debe ejecutar Camino C corto
-    if suma_total > 60000:
-        logger.info(f"[camino_A_PROVISIONAL] ¡DEUDAS SUPERAN $60,000!")
-        logger.info(f"[camino_A_PROVISIONAL] Se debe ejecutar Camino C corto para captura alternativa")
-        
-        # Crear resultado que indica ejecutar Camino C corto
-        results_modificado = {
-            "dni": results["dni"],
-            "success": True,
-            "ejecutar_camino_c_corto": True,  # Flag para que deudas.py ejecute el Camino C corto
-            "suma_deudas_real": suma_total,
-            "fa_saldos": []  # Vacío, no se envían deudas
-        }
-        
-        # Enviar update parcial y resultado final con marcadores
-        send_partial(dni, "ejecutar_camino_c_corto", f"Deudas totales: ${suma_total:,.2f}", extra_data={"suma_deudas_real": suma_total})
-        print_json_result(results_modificado)
-        logger.info(f"[CaminoJulian] Finalizado. Se requiere ejecutar Camino C corto")
-        return
-    
-    # Si no supera $60,000, proceder normalmente
-    print(f"[camino_A_PROVISIONAL] Deudas no superan $60,000. Procediendo normalmente.")
     
     # Paso 13: Emitir JSON final
     send_partial(dni, "datos_listos", "Consulta finalizada", extra_data={"num_registros": len(results.get("fa_saldos", []))})
