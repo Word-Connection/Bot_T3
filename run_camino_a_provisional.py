@@ -1256,11 +1256,11 @@ def run(dni: str, coords_path: Path, log_file: Optional[Path] = None, ids_client
                 suma_acumulada += saldo_valor
                 print(f"[camino_A] Deuda detectada: ${saldo_valor:,.2f} | Suma acumulada: ${suma_acumulada:,.2f}")
 
-                # ⭐ VERIFICAR SI SUPERA $60,000 INMEDIATAMENTE
-                if suma_acumulada > 60000 and not deudas_superan_60k:
+                # ⭐ VERIFICAR SI SUPERA $1,000,000 INMEDIATAMENTE
+                if suma_acumulada > 1000000 and not deudas_superan_60k:
                     deudas_superan_60k = True
                     print(f"[camino_A_PROVISIONAL] ========================================")
-                    print(f"[camino_A_PROVISIONAL] ¡SUMA SUPERA $60,000!")
+                    print(f"[camino_A_PROVISIONAL] ¡SUMA SUPERA $1,000,000!")
                     print(f"[camino_A_PROVISIONAL] Suma actual: ${suma_acumulada:,.2f}")
                     print(f"[camino_A_PROVISIONAL] Deteniendo extracción y lanzando score 98")
                     print(f"[camino_A_PROVISIONAL] ========================================")
