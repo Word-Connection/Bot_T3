@@ -93,6 +93,8 @@ def execute_camino_d(telefono, project_root):
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,  # 2 minutos timeout para PIN
             cwd=str(project_root)
         )

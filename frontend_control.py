@@ -28,7 +28,7 @@ T3_COORDS_FILE = os.path.join(ROOT, "t3_login_coords.json")
 DEFAULT_ENV = {
     "PC_ID": os.environ.get("COMPUTERNAME", "VM_01"),
     "WORKER_TYPE": "deudas",
-    "BACKEND_URL": "http://192.168.9.160:8000",
+    "BACKEND_URL": "http://192.168.9.11:8000",
     "API_KEY": "lucas123",
     "WORKER_ADMIN": "false",
     "LOG_LEVEL": "INFO",
