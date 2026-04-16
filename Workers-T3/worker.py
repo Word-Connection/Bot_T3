@@ -49,7 +49,7 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 parser = argparse.ArgumentParser(description="Worker T3 — Orquestador de automatización")
 parser.add_argument("--pc_id",        default=os.getenv("PC_ID"),                     help="ID único de esta VM (ej: VM_01)")
 parser.add_argument("--tipo",         default=os.getenv("WORKER_TYPE"),               help="Tipo: deudas | movimientos | pin")
-parser.add_argument("--backend",      default=os.getenv("BACKEND_URL", "http://192.168.9.11:8000"), help="URL del backend")
+parser.add_argument("--backend",      default=os.getenv("BACKEND_URL", "http://192.168.9.11:8009"), help="URL del backend")
 parser.add_argument("--api_key",      default=os.getenv("API_KEY"),                   help="API Key para autenticación")
 parser.add_argument("--admin",        action="store_true",
                     default=os.getenv("WORKER_ADMIN", "0").lower() in ("1", "true", "yes", "on"),
