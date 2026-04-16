@@ -14,19 +14,12 @@ from pathlib import Path
 
 # Importar utilidades comunes
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-try:
-    from common_utils import (
-        send_partial_update as _send_update_base,
-        validate_telefono,
-        get_timestamp_ms,
-        normalize_timestamp
-    )
-    HAS_COMMON_UTILS = True
-except ImportError:
-    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
-    HAS_COMMON_UTILS = False
-    def validate_telefono(tel):
-        return tel.isdigit() and len(tel) == 10
+from common_utils import (
+    send_partial_update as _send_update_base,
+    validate_telefono,
+    get_timestamp_ms,
+    normalize_timestamp
+)
 
 # Configuración de logging
 logging.basicConfig(
@@ -37,28 +30,13 @@ logging.basicConfig(
 
 def send_partial_update(telefono: str, etapa: str, info: str, extra_data: dict | None = None):
     """Envía update parcial usando función centralizada."""
-    if HAS_COMMON_UTILS:
-        _send_update_base(
-            identifier=telefono,
-            etapa=etapa,
-            info=info,
-            extra_data=extra_data,
-            identifier_key="telefono"
-        )
-    else:
-        # Fallback manual
-        payload = {
-            "telefono": telefono,
-            "etapa": etapa,
-            "info": info,
-            "timestamp": int(time.time() * 1000)
-        }
-        if extra_data:
-            payload.update(extra_data)
-
-        print("===JSON_PARTIAL_START===", flush=True)
-        print(json.dumps(payload), flush=True)
-        print("===JSON_PARTIAL_END===", flush=True)
+    _send_update_base(
+        identifier=telefono,
+        etapa=etapa,
+        info=info,
+        extra_data=extra_data,
+        identifier_key="telefono"
+    )
 
 def get_project_root():
     """Obtiene la ruta raíz del proyecto"""
@@ -115,6 +93,8 @@ def execute_camino_d(telefono, project_root):
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,  # 2 minutos timeout para PIN
             cwd=str(project_root)
         )
@@ -225,7 +205,7 @@ def main():
             )
         
         # Construir resultado final
-        timestamp_final = get_timestamp_ms() if HAS_COMMON_UTILS else int(time.time() * 1000)
+        timestamp_final = get_timestamp_ms()
         resultado_final = {
             "telefono": telefono,
             "estado": resultado_analisis["estado"],
@@ -269,7 +249,7 @@ def main():
         # Resultado de error
         send_partial_update(telefono, "error", str(e))
 
-        timestamp_error = get_timestamp_ms() if HAS_COMMON_UTILS else int(time.time() * 1000)
+        timestamp_error = get_timestamp_ms()
         resultado_error = {
             "telefono": telefono,
             "estado": "error",
