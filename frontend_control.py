@@ -34,7 +34,7 @@ DEFAULT_ENV = {
     "LOG_LEVEL": "INFO",
     "TIMEZONE": "America/Argentina/Buenos_Aires",
     # T3
-    "T3_JNLP_PATH":    r"C:\AMDOCS-PMX\Crm.jnlp",
+    "T3_JNLP_PATH":    r"C:\Users\vboxuser\Downloads\Crm.jnlp",
     "T3_JAVAWS":       r"C:\Program Files\Java\jre1.8.0_341\bin\javaws.exe",
     "T3_WAIT_SECONDS": "60",
     # Git
@@ -326,9 +326,23 @@ class BotController:
         jnlp   = cfg.get("T3_JNLP_PATH", "").strip()
         javaws = cfg.get("T3_JAVAWS", "").strip()
 
-        if not jnlp:
-            self.log("T3_JNLP_PATH no configurado. Configuralo en el panel → tab T3.")
-            return
+        # Si el JNLP configurado no existe, buscar el más reciente en Downloads
+        if not jnlp or not os.path.exists(jnlp):
+            if jnlp and not os.path.exists(jnlp):
+                self.log(f"JNLP no encontrado en {jnlp}, buscando en Downloads...")
+            downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+            jnlp_files = []
+            if os.path.isdir(downloads):
+                for f in os.listdir(downloads):
+                    if f.lower().endswith(".jnlp"):
+                        full = os.path.join(downloads, f)
+                        jnlp_files.append((os.path.getmtime(full), full))
+            if jnlp_files:
+                jnlp = sorted(jnlp_files, reverse=True)[0][1]
+                self.log(f"JNLP encontrado: {jnlp}")
+            else:
+                self.log("ERROR: No se encontró ningún archivo .jnlp. Descargalo desde el portal y volvé a intentar.")
+                return
 
         # Auto-detectar javaws.exe si no está configurado o la ruta no existe
         if not javaws or not os.path.exists(javaws):
