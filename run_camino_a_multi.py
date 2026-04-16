@@ -806,6 +806,8 @@ def _buscar_por_id_cliente(conf: Dict[str, Any], id_cliente: str, base_delay: fl
             "saldo": saldo_str,
             "id_cliente_interno": id_cliente_interno  # Campo temporal para filtrado
         })
+        # Emitir deuda en tiempo real para streaming al frontend
+        print(f"[DEUDA_ITEM] {json.dumps({'id_fa': id_fa, 'saldo': saldo_str})}", flush=True)
         
         # Cerrar pestaña
         _click(close_x, close_y, 'close_tab_btn', 0.5)

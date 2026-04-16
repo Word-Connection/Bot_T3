@@ -12,53 +12,31 @@ import time
 
 # Importar utilidades comunes
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-try:
-    from common_utils import (
-        send_partial_update as _send_update_base,
-        parse_json_from_markers,
-        get_timestamp_ms,
-        normalize_timestamp
-    )
-    HAS_COMMON_UTILS = True
-except ImportError:
-    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
-    HAS_COMMON_UTILS = False
+from common_utils import (
+    send_partial_update as _send_update_base,
+    parse_json_from_markers,
+    get_timestamp_ms,
+    normalize_timestamp
+)
 
 
 def send_partial_update(dni: str, score: str, etapa: str, info: str, admin_mode: bool = False, extra_data: dict = None):
     """Envía un update parcial al worker para reenvío inmediato via WebSocket."""
-    if HAS_COMMON_UTILS:
-        # Usar función centralizada
-        _send_update_base(
-            identifier=dni,
-            etapa=etapa,
-            info=info,
-            score=score,
-            admin_mode=admin_mode,
-            extra_data=extra_data,
-            identifier_key="dni"
-        )
-    else:
-        # Fallback manual
-        update_data = {
-            "dni": dni,
-            "score": score,
-            "etapa": etapa,
-            "info": info,
-            "admin_mode": admin_mode,
-            "timestamp": int(time.time() * 1000)
-        }
-        
-        if extra_data:
-            update_data.update(extra_data)
-        
-        print("===JSON_PARTIAL_START===", flush=True)
-        print(json.dumps(update_data), flush=True)
-        print("===JSON_PARTIAL_END===", flush=True)
+    _send_update_base(
+        identifier=dni,
+        etapa=etapa,
+        info=info,
+        score=score,
+        admin_mode=admin_mode,
+        extra_data=extra_data,
+        identifier_key="dni"
+    )
 
+
+MAX_IMAGE_BYTES = 2_000_000  # 2 MB máximo por imagen
 
 def get_image_base64(image_path: str) -> str:
-    """Convierte imagen a JPEG base64 optimizado."""
+    """Convierte imagen a JPEG base64. Calidad fija 85; sólo descarta si supera MAX_IMAGE_BYTES."""
     try:
         with Image.open(image_path) as img:
             if img.mode in ('RGBA', 'LA', 'P'):
@@ -66,6 +44,15 @@ def get_image_base64(image_path: str) -> str:
 
             buffer = io.BytesIO()
             img.save(buffer, format='JPEG', quality=85)
+
+            if buffer.tell() > MAX_IMAGE_BYTES:
+                print(
+                    f"WARNING: Imagen {image_path} supera {MAX_IMAGE_BYTES // 1_000_000}MB "
+                    f"({buffer.tell() // 1024}KB) — descartando",
+                    file=sys.stderr,
+                )
+                return ""
+
             return base64.b64encode(buffer.getvalue()).decode()
     except Exception as e:
         print(f"ERROR: Fallo convirtiendo imagen {image_path}: {e}", file=sys.stderr)
@@ -207,7 +194,21 @@ def main():
                     # Extraer el mensaje completo
                     msg = line.split('[CaminoScoreADMIN]')[-1].strip()
                     send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
-            
+
+                # Streaming real-time: deuda encontrada por el camino
+                elif '[DEUDA_ITEM] ' in line:
+                    try:
+                        item_str = line.split('[DEUDA_ITEM] ', 1)[1].strip()
+                        deuda_item = json.loads(item_str)
+                        send_partial_update(
+                            dni, "", "deuda_encontrada",
+                            f"Deuda: {deuda_item.get('id_fa','?')} — {deuda_item.get('saldo','?')}",
+                            admin_mode,
+                            {"deuda_item": deuda_item}
+                        )
+                    except Exception as _e:
+                        print(f"[DEUDA_STREAM] Error parseando deuda: {_e}", file=sys.stderr)
+
             # Esperar a que termine y capturar stderr
             process.wait(timeout=300)
             stderr_output = process.stderr.read()
@@ -254,13 +255,12 @@ def main():
         camino_c_json = None
         
         # Usar función centralizada de parsing
-        if HAS_COMMON_UTILS:
-            camino_c_json = parse_json_from_markers(stdout_c, strict=True)
-        else:
+        camino_c_json = parse_json_from_markers(stdout_c, strict=True)
+        if camino_c_json is None:
             # Fallback: Búsqueda manual
             json_start_marker = "===JSON_RESULT_START==="
             json_end_marker = "===JSON_RESULT_END==="
-            
+
             start_pos = stdout_c.find(json_start_marker)
             if start_pos != -1:
                 json_start = stdout_c.find('\n', start_pos) + 1
@@ -434,13 +434,26 @@ def main():
                             for line in process.stdout:
                                 stdout_lines.append(line)
                                 print(line.rstrip(), file=sys.stderr)  # Forward to stderr for real-time visibility
-                                
+
                                 # Detectar mensaje de tiempo estimado en Camino A
                                 if '[CaminoJulian]' in line and 'cuentas' in line and 'tiempo estimado' in line:
-                                    # Extraer el mensaje completo
                                     msg = line.split('[CaminoJulian]')[-1].strip()
                                     send_partial_update(dni, "", "validando_deudas", msg, admin_mode)
                                     print(f"[CaminoA] Mensaje de tiempo estimado enviado: {msg}", file=sys.stderr)
+
+                                # Streaming real-time: deuda encontrada por Camino A
+                                elif '[DEUDA_ITEM] ' in line:
+                                    try:
+                                        item_str = line.split('[DEUDA_ITEM] ', 1)[1].strip()
+                                        deuda_item = json.loads(item_str)
+                                        send_partial_update(
+                                            dni, "", "deuda_encontrada",
+                                            f"Deuda: {deuda_item.get('id_fa','?')} — {deuda_item.get('saldo','?')}",
+                                            admin_mode,
+                                            {"deuda_item": deuda_item}
+                                        )
+                                    except Exception as _e:
+                                        print(f"[DEUDA_STREAM] Error parseando deuda: {_e}", file=sys.stderr)
                         except Exception as e:
                             print(f"Error leyendo stdout: {e}", file=sys.stderr)
                         
@@ -795,12 +808,7 @@ def main():
         extra_data_final = {"has_deudas": has_deudas, "success": True}
         if imagen_final:
             extra_data_final["image"] = imagen_final
-            # Usar función de normalización de timestamp
-            if HAS_COMMON_UTILS:
-                extra_data_final["timestamp"] = normalize_timestamp(imagen_timestamp)
-            else:
-                # Fallback manual
-                extra_data_final["timestamp"] = int(imagen_timestamp * 1000) if imagen_timestamp and imagen_timestamp < 10000000000 else imagen_timestamp or int(time.time() * 1000)
+            extra_data_final["timestamp"] = normalize_timestamp(imagen_timestamp)
         
         send_partial_update(dni, result.get("score", ""), "datos_listos", final_info, admin_mode, extra_data_final)
 

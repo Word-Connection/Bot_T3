@@ -13,55 +13,28 @@ from pathlib import Path
 
 # Importar utilidades comunes
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-try:
-    from common_utils import (
-        send_partial_update as _send_update_base,
-        sanitize_error_for_display,
-        get_timestamp_ms
-    )
-    HAS_COMMON_UTILS = True
-except ImportError:
-    print("WARNING: No se pudo importar common_utils", file=sys.stderr)
-    HAS_COMMON_UTILS = False
+from common_utils import (
+    send_partial_update as _send_update_base,
+    sanitize_error_for_display,
+    get_timestamp_ms
+)
+
 
 def send_partial_update(dni: str, etapa: str, info: str, extra_data: dict = None):
     """Envía un update parcial al worker para reenvío inmediato via WebSocket."""
-    if HAS_COMMON_UTILS:
-        _send_update_base(
-            identifier=dni,
-            etapa=etapa,
-            info=info,
-            extra_data=extra_data,
-            identifier_key="dni"
-        )
-    else:
-        # Fallback manual
-        update_data = {
-            "dni": dni,
-            "etapa": etapa,
-            "info": info,
-            "timestamp": int(time.time() * 1000)
-        }
-        
-        if extra_data:
-            update_data.update(extra_data)
-        
-        print("===JSON_PARTIAL_START===", flush=True)
-        print(json.dumps(update_data), flush=True)
-        print("===JSON_PARTIAL_END===", flush=True)
+    _send_update_base(
+        identifier=dni,
+        etapa=etapa,
+        info=info,
+        extra_data=extra_data,
+        identifier_key="dni"
+    )
 
-# sanitize_error_message ahora en common_utils.sanitize_error_for_display
-# Se mantiene wrapper para compatibilidad
+
 def sanitize_error_message(error_lines: list, return_code: int = None) -> str:
-    """Wrapper de sanitize_error_for_display para compatibilidad."""
+    """Convierte errores de lista de líneas en mensaje amigable."""
     error_text = ' '.join(error_lines) if error_lines else ""
-    if HAS_COMMON_UTILS:
-        return sanitize_error_for_display(error_text, return_code)
-    else:
-        # Fallback simple
-        if return_code and return_code != 0:
-            return f"Error inesperado (código {return_code})"
-        return "Error inesperado"
+    return sanitize_error_for_display(error_text, return_code)
 
 def fake_image(text: str) -> str:
     """Genera un string base64 simulado a partir de texto."""

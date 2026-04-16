@@ -1423,6 +1423,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
         if deudas_primera:
             print(f"[CaminoScoreADMIN] Primera cuenta: {len(deudas_primera)} deudas encontradas")
             fa_saldos_todos.extend(deudas_primera)
+            # Emitir cada deuda en tiempo real para streaming al frontend
+            for _d in deudas_primera:
+                print(f"[DEUDA_ITEM] {json.dumps({'id_fa': _d.get('id_fa',''), 'saldo': _d.get('saldo','')})}", flush=True)
         else:
             print(f"[CaminoScoreADMIN] Primera cuenta: Sin deudas")
     except Exception as e:
@@ -1511,6 +1514,9 @@ def run(dni: str, coords_path: Path, step_delays: Optional[List[float]] = None, 
                     if nuevas_deudas:
                         fa_saldos_todos.extend(nuevas_deudas)
                         print(f"[CaminoScoreADMIN] Agregadas {len(nuevas_deudas)} deudas nuevas (sin duplicados)")
+                        # Emitir cada deuda nueva en tiempo real para streaming al frontend
+                        for _d in nuevas_deudas:
+                            print(f"[DEUDA_ITEM] {json.dumps({'id_fa': _d.get('id_fa',''), 'saldo': _d.get('saldo','')})}", flush=True)
                     else:
                         print(f"[CaminoScoreADMIN] Todas las deudas ya existían (duplicadas)")
                 else:
