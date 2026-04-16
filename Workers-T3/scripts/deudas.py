@@ -388,7 +388,7 @@ def main():
             
             try:
                 # USAR CAMINO A PROVISIONAL para validación de deudas > $60k
-                script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_provisional.py'))
+                script_a = os.path.abspath(os.path.join(base_dir, '../../run_camino_a_multi.py'))
                 coords_a_file = os.path.abspath(os.path.join(base_dir, '../../camino_a_coords_multi.json'))
                 
                 if os.path.exists(script_a):
