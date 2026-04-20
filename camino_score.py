@@ -91,23 +91,9 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
     time.sleep(2.5)
     creado, texto_copiado = validar_cliente_creado(master, base_delay=base_delay)
 
-    # 3. si esta creado, intentar extraer IDs via Ver Todos
-    ids_cliente: list[str] = []
-    if creado:
-        print("[CaminoScore] Cliente creado, extrayendo IDs de cliente...")
-        time.sleep(1.0)
-        tabla = copiar_tabla(
-            master,
-            ver_todos_key="ver_todos_btn1",
-            close_tab_key="close_tab_btn1",
-        )
-        if tabla:
-            ids_cliente = extract_ids_cliente_from_table(tabla)
-            print(f"[CaminoScore] IDs extraidos: {len(ids_cliente)}")
-        else:
-            print("[CaminoScore] WARN tabla vacia tras Ver Todos")
-
-    # 4. caso especial Telefonico (cuenta unica, entra directo al score)
+    # 3. caso especial Telefonico ANTES de Ver Todos (cuenta unica, entra directo al score)
+    # En el legacy camino_c, si el texto copiado era "Telefonico" se saltaba Ver Todos
+    # y se iba directo al score. El orden DEBE ser: Telefonico -> no_creado -> Ver Todos.
     if creado and es_telefonico(texto_copiado):
         print("[CaminoScore] CASO ESPECIAL: Telefonico (cuenta unica)")
         time.sleep(2.0)
@@ -130,16 +116,13 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
             "timestamp": io_worker.now_ms(),
             "caso_especial": "cuenta_unica_telefonico",
         }
-        if ids_cliente:
-            result["ids_cliente"] = ids_cliente
-            result["total_ids_cliente"] = len(ids_cliente)
         if shot_path:
             result["screenshot"] = str(shot_path)
         io_worker.print_json_result(result)
         print("[CaminoScore] Finalizado - caso especial Telefonico")
         return
 
-    # 5. cliente NO creado: captura y termina
+    # 4. cliente NO creado: captura y termina
     if not creado:
         print("[CaminoScore] CLIENTE NO CREADO")
         shot_path = capturar_score(master, dni, shot_dir)
@@ -158,6 +141,17 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
         volver_a_home(master)
         print("[CaminoScore] Finalizado - cliente no creado")
         return
+
+    # 5. Ver Todos -> extraer ids_cliente (solo clientes normales creados)
+    ids_cliente: list[str] = []
+    print("[CaminoScore] Cliente creado, extrayendo IDs via Ver Todos...")
+    time.sleep(1.0)
+    tabla = copiar_tabla(master, ver_todos_key="ver_todos_btn1", close_tab_key="close_tab_btn1")
+    if tabla:
+        ids_cliente = extract_ids_cliente_from_table(tabla)
+        print(f"[CaminoScore] IDs extraidos: {len(ids_cliente)}")
+    else:
+        print("[CaminoScore] WARN tabla vacia tras Ver Todos")
 
     # 6. seleccion + fraude + validar registro (loop)
     print("[CaminoScore] Cliente creado, seleccionando client_id_field2")
