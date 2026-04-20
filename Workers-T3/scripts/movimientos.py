@@ -83,7 +83,7 @@ def main():
             # NO escribir ninguna fila - CSV vacío activará búsqueda directa
             tmp_csv = tmp.name
         
-        # Continuar con la ejecución del Camino B en modo búsqueda directa
+        # Continuar con la ejecución de camino_movimientos en modo búsqueda directa
         rows_for_dni = []  # Lista vacía pero continúa
         ids = []  # Lista vacía - activará búsqueda directa
     else:
@@ -111,9 +111,8 @@ def main():
                 writer.writerow(clean_row)
             tmp_csv = tmp.name
     
-    # Ejecutar run_camino_b_multi.py
-    script_path = Path(__file__).parent / '../../run_camino_b_multi.py'
-    coords_path = Path(__file__).parent / '../../camino_b_coords_multi.json'
+    # Ejecutar camino_movimientos.py
+    script_path = Path(__file__).parent / '../../camino_movimientos.py'
     log_path = Path(__file__).parent / '../../multi_copias.log'
 
     try:
@@ -121,16 +120,6 @@ def main():
         if not script_path.exists():
             stages.append({
                 "info": f"Error: No se encuentra el script {script_path}"
-            })
-            result = {"dni": dni, "stages": stages}
-            print("===JSON_RESULT_START===", flush=True)
-            print(json.dumps(result), flush=True)
-            print("===JSON_RESULT_END===", flush=True)
-            return
-
-        if not coords_path.exists():
-            stages.append({
-                "info": f"Error: No se encuentra archivo de coordenadas {coords_path}"
             })
             result = {"dni": dni, "stages": stages}
             print("===JSON_RESULT_START===", flush=True)
@@ -153,12 +142,11 @@ def main():
         python_exe = str(venv_python)
         print(f"DEBUG: Usando Python del venv: {python_exe}", file=sys.stderr)
         
-        # Construir comando
+        # Construir comando (sin --coords: el script usa shared/coords.json por default)
         cmd_args = [
             python_exe, '-u', str(script_path),
             '--dni', dni,
             '--csv', tmp_csv,
-            '--coords', str(coords_path),
             '--log-file', str(log_path)
         ]
         
@@ -179,7 +167,7 @@ def main():
         lineas_procesadas = set()
         total_movimientos = 0
         
-        # Ejecutar Camino B (similar a como deudas.py ejecuta Camino C)
+        # Ejecutar camino_movimientos.py (similar a como deudas.py ejecuta camino_score)
         process = subprocess.Popen(
             cmd_args,
             stdout=subprocess.PIPE,
@@ -349,7 +337,7 @@ def main():
         except subprocess.TimeoutExpired:
             process.kill()
             send_partial_update(dni, "error", "Timeout: El proceso tardó demasiado tiempo")
-            result = {"error": "Timeout ejecutando Camino B", "dni": dni, "stages": []}
+            result = {"error": "Timeout ejecutando camino_movimientos", "dni": dni, "stages": []}
             print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
             print("===JSON_RESULT_END===", flush=True)
@@ -359,7 +347,7 @@ def main():
         stderr_full = ''.join(stderr_lines)
         
         if returncode != 0:
-            error_msg = f"Error en Camino B (código {returncode})"
+            error_msg = f"Error en camino_movimientos (código {returncode})"
             send_partial_update(dni, "error", error_msg)
             
             # Imprimir stderr completo para debugging
@@ -372,7 +360,7 @@ def main():
             print("===JSON_RESULT_END===", flush=True)
             return
         
-        print(f"DEBUG: Camino B completado exitosamente", file=sys.stderr)
+        print(f"DEBUG: camino_movimientos completado exitosamente", file=sys.stderr)
         
         # Enviar update final con total de movimientos procesados
         num_lineas = len(lineas_procesadas)

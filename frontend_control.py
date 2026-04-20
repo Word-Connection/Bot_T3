@@ -23,7 +23,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(ROOT, "Workers-T3", ".env")
 WORKER_PY = os.path.join(ROOT, "Workers-T3", "worker.py")
-T3_COORDS_FILE = os.path.join(ROOT, "t3_login_coords.json")
+MODO_CONFIG = os.path.join(ROOT, "modo_config.json")
 
 DEFAULT_ENV = {
     "PC_ID": os.environ.get("COMPUTERNAME", "VM_01"),
@@ -206,6 +206,31 @@ class BotController:
         def open_t3_manual():
             threading.Thread(target=self._open_and_login_t3, daemon=True).start()
             return jsonify({"ok": True, "msg": "Abriendo T3..."})
+
+        # --- Modo config ---
+        @app.route("/api/modo", methods=["GET"])
+        def get_modo():
+            try:
+                with open(MODO_CONFIG, encoding='utf-8') as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {"modo": "normal", "umbral": 60000}
+            return jsonify({"ok": True, "modo": cfg})
+
+        @app.route("/api/modo", methods=["POST"])
+        def save_modo():
+            data = request.get_json(force=True) or {}
+            modo = data.get("modo", "normal")
+            if modo not in ("normal", "validacion"):
+                return jsonify({"ok": False, "msg": "Modo invalido"})
+            try:
+                umbral = float(data.get("umbral", 60000))
+            except (ValueError, TypeError):
+                return jsonify({"ok": False, "msg": "Umbral invalido"})
+            with open(MODO_CONFIG, 'w', encoding='utf-8') as f:
+                json.dump({"modo": modo, "umbral": umbral}, f, indent=2)
+            self.log(f"Modo guardado: {modo} (umbral: {umbral})")
+            return jsonify({"ok": True})
 
         # --- Git pull ---
         @app.route("/api/git_pull", methods=["POST"])

@@ -1,7 +1,0 @@
-{
-  "_instrucciones": "Grabar coordenadas con record_camino.py. Dejar vacío ({}) si querés usar Tab navigation.",
-  "_ejemplo": "Para grabar: python record_camino.py  → hacé click en cada campo → F12 para parar → renombrá el JSON a t3_login_coords.json",
-  "usuario": { "x": 0, "y": 0 },
-  "contrasena": { "x": 0, "y": 0 },
-  "btn_login": { "x": 0, "y": 0 }
-}
