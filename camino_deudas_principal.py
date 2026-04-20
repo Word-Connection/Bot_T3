@@ -237,6 +237,25 @@ def _expandir_registros(master: dict, num_registros: int, base_delay: float) -> 
         mouse.click(bbx, bby, "buscar_registros_btn", 2.5)
 
 
+def _parse_saldo_float(saldo: str) -> float:
+    """Convierte saldo en formato es_AR ('1.234,56') a float. Retorna 0.0 si no parseable o vacío."""
+    if not saldo:
+        return 0.0
+    s = saldo.strip().lstrip("$").strip()
+    try:
+        if "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _format_currency(value: float) -> str:
+    """Formatea float como moneda argentina: '$1.234.567,89'."""
+    s = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"${s}"
+
+
 def _copiar_saldo_registro(master: dict, base_delay: float) -> str:
     """Doble-click saldo -> right-click -> saldo_all_copy -> right-click -> saldo_copy."""
     sx, sy = coords.xy(master, "saldo_principal.saldo")
@@ -288,8 +307,9 @@ def _iterar_registros(
             item["id_cliente_interno"] = id_cliente_int
         fa_saldos.append(item)
 
-        # Stream item al worker
-        print(f"[DEUDA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': saldo})}", flush=True)
+        # Stream item al worker (solo saldos > 0, con signo $)
+        if _parse_saldo_float(saldo) > 0:
+            print(f"[DEUDA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': '$' + saldo})}", flush=True)
 
         if close_x or close_y:
             mouse.click(close_x, close_y, "close_tab_btn", base_delay)
@@ -458,14 +478,14 @@ def run(
     # 7. Iterar
     if not fa_data_list:
         print("[CaminoDeudasPrincipal] sin IDs de FA, fin")
-        result = {
-            "dni": dni,
-            "fa_saldos": [],
-            "success": True,
-            "timestamp": io_worker.now_ms(),
-        }
-        io_worker.print_json_result(result)
+        io_worker.print_json_result({"dni": dni, "success": True, "timestamp": io_worker.now_ms(), "finalizado": "exitoso", "total_deuda": "$0,00"})
         return
+
+    secs_est = num_registros * 5
+    mins_est, segs_est = secs_est // 60, secs_est % 60
+    msg_est = f"Analizando {num_registros} cuenta{'s' if num_registros > 1 else ''}, tiempo estimado ~{mins_est}:{segs_est:02d} minutos"
+    print(f"[CaminoDeudasPrincipal] {msg_est}")
+    io_worker.send_partial(dni, "validando_deudas", msg_est)
 
     fa_saldos = _iterar_registros(master, fa_data_list, base_delay)
 
@@ -521,14 +541,17 @@ def run(
         vistos.add(item["id_fa"])
         unicos.append(item)
 
+    total_deuda = sum(_parse_saldo_float(item["saldo"]) for item in unicos if _parse_saldo_float(item["saldo"]) > 0)
+    total_str = _format_currency(total_deuda)
     result = {
         "dni": dni,
-        "fa_saldos": unicos,
         "success": True,
         "timestamp": io_worker.now_ms(),
+        "finalizado": "exitoso",
+        "total_deuda": total_str,
     }
     io_worker.print_json_result(result)
-    print(f"[CaminoDeudasPrincipal] Finalizado. {len(unicos)} registros")
+    print(f"[CaminoDeudasPrincipal] Finalizado. total_deuda={total_str}, {len(unicos)} registros procesados")
 
 
 def _parse_args() -> argparse.Namespace:
