@@ -233,7 +233,11 @@ def _run_deudas_normal(dni, score_data):
             cmd.append(json.dumps(ids_cliente))
 
         def on_line(line):
-            if '[DEUDA_ITEM] ' in line:
+            if '[CaminoDeudasPrincipal]' in line and 'tiempo estimado' in line:
+                msg = line.split('[CaminoDeudasPrincipal]', 1)[-1].strip()
+                _send_partial(dni, "validando_deudas", msg)
+
+            elif '[DEUDA_ITEM] ' in line:
                 try:
                     item = json.loads(line.split('[DEUDA_ITEM] ', 1)[1].strip())
                     _send_partial(dni, "deuda_encontrada",
@@ -251,7 +255,7 @@ def _run_deudas_normal(dni, score_data):
 
     deudas_data, rc = _ejecutar_principal(score_data.get("dni", dni))
 
-    if rc == 0 and deudas_data and not deudas_data.get("fa_saldos") and dni_fallback:
+    if rc == 0 and deudas_data and deudas_data.get("total_deuda") in (None, "$0,00") and dni_fallback:
         print(f"[deudas] Sin fa_saldos con CUIT, reintentando con DNI fallback: {dni_fallback}",
               file=sys.stderr)
         fallback_data, rc2 = _ejecutar_principal(dni_fallback)

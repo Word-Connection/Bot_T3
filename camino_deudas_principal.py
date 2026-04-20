@@ -485,7 +485,6 @@ def run(
     mins_est, segs_est = secs_est // 60, secs_est % 60
     msg_est = f"Analizando {num_registros} cuenta{'s' if num_registros > 1 else ''}, tiempo estimado ~{mins_est}:{segs_est:02d} minutos"
     print(f"[CaminoDeudasPrincipal] {msg_est}")
-    io_worker.send_partial(dni, "validando_deudas", msg_est)
 
     fa_saldos = _iterar_registros(master, fa_data_list, base_delay)
 
