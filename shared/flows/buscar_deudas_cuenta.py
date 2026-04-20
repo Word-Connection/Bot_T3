@@ -300,5 +300,10 @@ def buscar_deudas_cuenta(
         for i in range(3):
             mouse.click(ctx, cty, f"close_tab_btn ({i + 1}/3)", 0.4)
 
+    # 9. Click house para volver a la pantalla del cliente (D-26)
+    hx, hy = coords.xy(master, "comunes.house_area")
+    if hx or hy:
+        mouse.click(hx, hy, "house_area", 0.5)
+
     print(f"[flow:deudas_cuenta] total={len(deudas)} (tipo={tipo_documento})")
     return deudas

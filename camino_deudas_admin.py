@@ -241,7 +241,7 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
         estado = validar_registro_corrupto(
             master,
             max_copy_attempts=3,
-            anchor_key="validar.client_id_field2",
+            anchor_key="validar.client_name_field",
         )
         if estado != VALID_CORRUPTO:
             validacion_ok = True
