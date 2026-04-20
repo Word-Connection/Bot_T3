@@ -124,14 +124,26 @@ class BotController:
 
         @app.route("/api/config", methods=["POST"])
         def save_config():
-            if self.status == "ejecutando":
-                return jsonify({"ok": False, "msg": "Detene el worker antes de cambiar la config"})
-            data = request.get_json(force=True)
+            data = request.get_json(force=True) or {}
             cfg = read_env()
+            old_type = cfg.get("WORKER_TYPE", "deudas")
             allowed = set(DEFAULT_ENV.keys())
             for k, v in data.items():
                 if k in allowed:
                     cfg[k] = str(v).strip()
+            new_type = cfg.get("WORKER_TYPE", "deudas")
+            type_changed = new_type != old_type
+
+            if self.status in ("ejecutando", "esperando"):
+                if type_changed:
+                    write_env(cfg)
+                    self.log(f"Tipo cambiado a '{new_type}', reiniciando worker...")
+                    threading.Thread(
+                        target=self._restart_with_config, args=(cfg,), daemon=True
+                    ).start()
+                    return jsonify({"ok": True, "msg": f"Reiniciando con tipo: {new_type}..."})
+                return jsonify({"ok": False, "msg": "Detene el worker antes de cambiar la config"})
+
             write_env(cfg)
             self.log("Configuracion guardada")
             return jsonify({"ok": True})
@@ -322,6 +334,13 @@ class BotController:
                 self.status = "detenido"
                 self.start_time = None
                 self.log("Worker finalizado")
+
+    def _restart_with_config(self, cfg: dict) -> None:
+        """Detiene el worker en ejecucion y lo reinicia con la nueva config."""
+        self._stop_worker()
+        time.sleep(1.5)
+        if self.status == "detenido":
+            self._launch_worker(cfg)
 
     def _stop_worker(self):
         if not self.worker_process:

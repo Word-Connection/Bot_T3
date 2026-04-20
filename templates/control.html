@@ -145,8 +145,6 @@
       <h2>Configuracion</h2>
       <div class="tabs">
         <div class="tab active" onclick="switchTab('worker')">Worker</div>
-        <div class="tab" onclick="switchTab('t3')">T3 Login</div>
-        <div class="tab" onclick="switchTab('git')">Git</div>
         <div class="tab" onclick="switchTab('modo')">Modo</div>
       </div>
     </div>
@@ -191,28 +189,6 @@
       <button class="btn btn-primary save-btn" onclick="saveConfig()">Guardar configuracion</button>
     </div>
 
-    <!-- TAB: T3 -->
-    <div class="tab-pane" id="tab-t3">
-      <div class="form-group">
-        <label>Ruta del JNLP</label>
-        <input id="cfg_T3_JNLP_PATH" type="text" placeholder="C:\AMDOCS-PMX\Crm.jnlp">
-      </div>
-      <div class="form-group">
-        <label>Ruta de javaws.exe</label>
-        <input id="cfg_T3_JAVAWS" type="text" placeholder="C:\Program Files\Java\jre...\bin\javaws.exe">
-      </div>
-      <div class="form-group">
-        <label>Segundos de espera para login manual</label>
-        <input id="cfg_T3_WAIT_SECONDS" type="number" min="10" max="300" placeholder="60">
-      </div>
-      <p class="hint">
-        T3 se abre con <code>javaws</code> directo, sin browser.<br>
-        El contador de espera te da tiempo para hacer login antes de que arranque el worker.
-      </p>
-      <button class="btn btn-primary save-btn" onclick="saveConfig()">Guardar</button>
-      <button class="btn btn-ghost save-btn" style="margin-top:6px" onclick="openT3Manual()">Probar apertura T3</button>
-    </div>
-
     <!-- TAB: Modo (solo afecta worker tipo deudas, no admin) -->
     <div class="tab-pane" id="tab-modo">
       <p class="hint">Solo aplica cuando el worker es tipo <code>deudas</code> y no esta en modo admin.</p>
@@ -229,20 +205,6 @@
       </div>
       <p class="hint" id="umbral_hint" style="display:none">Si la suma supera el umbral, el sistema reporta score 98 directamente sin mostrar deudas.</p>
       <button class="btn btn-primary save-btn" onclick="saveModo()">Guardar modo</button>
-    </div>
-
-    <!-- TAB: Git -->
-    <div class="tab-pane" id="tab-git">
-      <div class="form-group">
-        <label>GitHub Token (PAT)</label>
-        <input id="cfg_GIT_TOKEN" type="password" placeholder="ghp_xxxx...">
-      </div>
-      <p class="hint">
-        El token se guarda en <code>Workers-T3/.env</code> y solo se usa para hacer pull.
-        No se expone en logs ni en el codigo.
-      </p>
-      <button class="btn btn-primary save-btn" onclick="saveConfig()">Guardar token</button>
-      <button class="btn btn-ghost save-btn" style="margin-top:6px" onclick="gitPull()">&#8595; Actualizar ahora</button>
     </div>
 
   </aside>
@@ -332,14 +294,10 @@ async function loadConfig() {
   try {
     const r = await fetch('/api/config');
     const { config: c } = await r.json();
-    setVal('cfg_PC_ID',           c.PC_ID);
-    setVal('cfg_BACKEND_URL',     c.BACKEND_URL);
-    setVal('cfg_API_KEY',         c.API_KEY);
-    setVal('cfg_LOG_LEVEL',       c.LOG_LEVEL);
-    setVal('cfg_T3_JNLP_PATH',   c.T3_JNLP_PATH);
-    setVal('cfg_T3_JAVAWS',      c.T3_JAVAWS);
-    setVal('cfg_T3_WAIT_SECONDS',c.T3_WAIT_SECONDS);
-    setVal('cfg_GIT_TOKEN',       c.GIT_TOKEN);
+    setVal('cfg_PC_ID',       c.PC_ID);
+    setVal('cfg_BACKEND_URL', c.BACKEND_URL);
+    setVal('cfg_API_KEY',     c.API_KEY);
+    setVal('cfg_LOG_LEVEL',   c.LOG_LEVEL);
     document.getElementById('cfg_WORKER_TYPE').value = c.WORKER_TYPE || 'deudas';
     document.getElementById('cfg_WORKER_ADMIN_chk').checked = ['true','1','yes'].includes((c.WORKER_ADMIN||'').toLowerCase());
   } catch (e) { console.error('loadConfig', e); }
@@ -352,16 +310,12 @@ function setVal(id, val) {
 
 async function saveConfig() {
   const payload = {
-    PC_ID:           v('cfg_PC_ID'),
-    WORKER_TYPE:     document.getElementById('cfg_WORKER_TYPE').value,
-    BACKEND_URL:     v('cfg_BACKEND_URL'),
-    API_KEY:         v('cfg_API_KEY'),
-    WORKER_ADMIN:    document.getElementById('cfg_WORKER_ADMIN_chk').checked ? 'true' : 'false',
-    LOG_LEVEL:       document.getElementById('cfg_LOG_LEVEL').value,
-    T3_JNLP_PATH:   v('cfg_T3_JNLP_PATH'),
-    T3_JAVAWS:      v('cfg_T3_JAVAWS'),
-    T3_WAIT_SECONDS:v('cfg_T3_WAIT_SECONDS'),
-    GIT_TOKEN:       v('cfg_GIT_TOKEN'),
+    PC_ID:       v('cfg_PC_ID'),
+    WORKER_TYPE: document.getElementById('cfg_WORKER_TYPE').value,
+    BACKEND_URL: v('cfg_BACKEND_URL'),
+    API_KEY:     v('cfg_API_KEY'),
+    WORKER_ADMIN:document.getElementById('cfg_WORKER_ADMIN_chk').checked ? 'true' : 'false',
+    LOG_LEVEL:   document.getElementById('cfg_LOG_LEVEL').value,
   };
   try {
     const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -409,7 +363,7 @@ async function gitPull() {
 
 // ─── Tabs ──────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['worker', 't3', 'git', 'modo'];
+  const order = ['worker', 'modo'];
   document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', order[i] === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
 }
