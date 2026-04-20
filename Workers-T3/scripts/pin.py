@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script para envío de PIN via Camino D
+Script para envío de PIN via camino_pin.py (ex Camino D)
 Recibe número de teléfono como parámetro y ejecuta el scraping para enviar PIN
 """
 
@@ -39,27 +39,23 @@ def send_partial_update(telefono: str, etapa: str, info: str, extra_data: dict |
     )
 
 def get_project_root():
-    """Obtiene la ruta raíz del proyecto"""
+    """Obtiene la ruta raíz del proyecto (Bot_T3/)."""
     current_dir = Path(__file__).resolve()
-    # Buscar hacia arriba hasta encontrar el directorio que contiene run_camino_d_multi.py
+    # Buscar hacia arriba hasta encontrar el directorio que contiene camino_pin.py
     for parent in current_dir.parents:
-        if (parent / "run_camino_d_multi.py").exists():
+        if (parent / "camino_pin.py").exists():
             return parent
-    raise FileNotFoundError("No se pudo encontrar la raíz del proyecto")
+    raise FileNotFoundError("No se pudo encontrar la raíz del proyecto (camino_pin.py)")
 
-def execute_camino_d(telefono, project_root):
+def execute_camino_pin(telefono, project_root):
     """
-    Ejecuta el script de Camino D para envío de PIN
+    Ejecuta el script camino_pin.py (ex Camino D) para envío de PIN.
     """
-    coords_file = project_root / "camino_d_coords_multi.json"
-    run_script = project_root / "run_camino_d_multi.py"
-    
-    if not coords_file.exists():
-        raise FileNotFoundError(f"Archivo de coordenadas no encontrado: {coords_file}")
-    
+    run_script = project_root / "camino_pin.py"
+
     if not run_script.exists():
         raise FileNotFoundError(f"Script de ejecución no encontrado: {run_script}")
-    
+
     # Buscar el entorno virtual
     venv_python = None
     possible_venv_paths = [
@@ -68,24 +64,23 @@ def execute_camino_d(telefono, project_root):
         project_root / ".venv" / "bin" / "python",
         project_root / ".venv" / "Scripts" / "python.exe"  # Windows
     ]
-    
+
     for path in possible_venv_paths:
         if path.exists():
             venv_python = str(path)
             break
-    
+
     if not venv_python:
         # Usar python del sistema como fallback
         venv_python = "python"
-    
+
     command = [
         venv_python,
         str(run_script),
-        "--dni", telefono,  # El script original usa --dni pero enviamos teléfono
-        "--coords", str(coords_file)
+        "--dni", telefono,  # El script usa --dni pero semánticamente es el teléfono
     ]
-    
-    logging.info(f"Ejecutando Camino D para envío de PIN - Teléfono {telefono}")
+
+    logging.info(f"Ejecutando camino_pin.py para envío de PIN - Teléfono {telefono}")
     logging.info(f"Comando: {' '.join(command)}")
     
     try:
@@ -104,7 +99,7 @@ def execute_camino_d(telefono, project_root):
         logging.error("Timeout: El proceso tardó más de 2 minutos")
         raise
     except Exception as e:
-        logging.error(f"Error ejecutando Camino D: {e}")
+        logging.error(f"Error ejecutando camino_pin: {e}")
         raise
 
 def analyze_pin_result(process):
@@ -144,9 +139,9 @@ def analyze_pin_result(process):
                     result_metadata["entered"] = result_data.get("entered")
                     image_b64 = result_data.get("image") or result_data.get("screenshot_base64")
                     result_metadata["image"] = image_b64
-                    logging.info(f"Mensaje del Camino D: {mensaje_default}")
+                    logging.info(f"Mensaje del camino_pin: {mensaje_default}")
         except Exception as e:
-            logging.warning(f"No se pudo parsear JSON del Camino D: {e}")
+            logging.warning(f"No se pudo parsear JSON del camino_pin: {e}")
         
         return {
             "estado": "exitoso",
@@ -184,10 +179,10 @@ def main():
         project_root = get_project_root()
         
         print(f"Iniciando envío de PIN para teléfono {telefono}")
-        send_partial_update(telefono, "preparacion", "Iniciando Camino D para envío de PIN")
-        
-        # Ejecutar Camino D
-        process = execute_camino_d(telefono, project_root)
+        send_partial_update(telefono, "preparacion", "Iniciando camino_pin para envío de PIN")
+
+        # Ejecutar camino_pin
+        process = execute_camino_pin(telefono, project_root)
         
         # Analizar resultado
         resultado_analisis = analyze_pin_result(process)

@@ -129,9 +129,9 @@ TASK_CONFIGS: dict = {
 
 # ── Archivos de coordenadas requeridos por tipo ───────────────────────
 _REQUIRED_COORD_FILES: dict = {
-    "deudas":      ["camino_c_coords_multi.json", "camino_a_coords_multi.json", "camino_score_ADMIN_coords.json"],
-    "movimientos": ["camino_b_coords_multi.json"],
-    "pin":         ["camino_d_coords_multi.json"],
+    "deudas":      ["shared/coords.json"],
+    "movimientos": ["shared/coords.json"],
+    "pin":         ["shared/coords.json"],
 }
 
 # ── Estadísticas del worker ──────────────────────────────────────────

@@ -147,6 +147,7 @@
         <div class="tab active" onclick="switchTab('worker')">Worker</div>
         <div class="tab" onclick="switchTab('t3')">T3 Login</div>
         <div class="tab" onclick="switchTab('git')">Git</div>
+        <div class="tab" onclick="switchTab('modo')">Modo</div>
       </div>
     </div>
 
@@ -212,6 +213,24 @@
       <button class="btn btn-ghost save-btn" style="margin-top:6px" onclick="openT3Manual()">Probar apertura T3</button>
     </div>
 
+    <!-- TAB: Modo (solo afecta worker tipo deudas, no admin) -->
+    <div class="tab-pane" id="tab-modo">
+      <p class="hint">Solo aplica cuando el worker es tipo <code>deudas</code> y no esta en modo admin.</p>
+      <div class="form-group">
+        <label>Modo de consulta</label>
+        <select id="modo_select" onchange="toggleUmbral()">
+          <option value="normal">Normal (score + deudas completas)</option>
+          <option value="validacion">Validacion (umbral de deudas)</option>
+        </select>
+      </div>
+      <div class="form-group" id="umbral_group" style="display:none">
+        <label>Umbral de deudas (ARS)</label>
+        <input id="modo_umbral" type="number" min="0" step="1000" placeholder="60000">
+      </div>
+      <p class="hint" id="umbral_hint" style="display:none">Si la suma supera el umbral, el sistema reporta score 98 directamente sin mostrar deudas.</p>
+      <button class="btn btn-primary save-btn" onclick="saveModo()">Guardar modo</button>
+    </div>
+
     <!-- TAB: Git -->
     <div class="tab-pane" id="tab-git">
       <div class="form-group">
@@ -251,6 +270,7 @@ let eventSource = null;
 // ─── Arranque ───────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   loadConfig();
+  loadModoConfig();
   connectSSE();
   setInterval(pollStatus, 2000);
 });
@@ -389,9 +409,38 @@ async function gitPull() {
 
 // ─── Tabs ──────────────────────────────────────────────────
 function switchTab(name) {
-  const order = ['worker', 't3', 'git'];
+  const order = ['worker', 't3', 'git', 'modo'];
   document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', order[i] === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+}
+
+// ─── Modo config ───────────────────────────────────────────────
+async function loadModoConfig() {
+  try {
+    const r = await fetch('/api/modo');
+    const { modo: cfg } = await r.json();
+    document.getElementById('modo_select').value = cfg.modo || 'normal';
+    document.getElementById('modo_umbral').value = cfg.umbral ?? 60000;
+    toggleUmbral();
+  } catch (e) { console.error('loadModoConfig', e); }
+}
+
+function toggleUmbral() {
+  const esVal = document.getElementById('modo_select').value === 'validacion';
+  document.getElementById('umbral_group').style.display = esVal ? 'block' : 'none';
+  document.getElementById('umbral_hint').style.display  = esVal ? 'block' : 'none';
+}
+
+async function saveModo() {
+  const payload = {
+    modo: document.getElementById('modo_select').value,
+    umbral: parseFloat(document.getElementById('modo_umbral').value) || 60000,
+  };
+  try {
+    const r = await fetch('/api/modo', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const d = await r.json();
+    toast(d.ok ? 'Modo guardado' : d.msg, d.ok ? 'ok' : 'err');
+  } catch { toast('Error de red', 'err'); }
 }
 
 // ─── Toast ─────────────────────────────────────────────────
