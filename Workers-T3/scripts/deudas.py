@@ -150,23 +150,42 @@ def _check_script(path):
     return True, None
 
 
-def _handle_cuenta_progreso(line, dni):
-    """Detecta [CUENTA_PROGRESO] y emite partial 'cuenta_progreso'. Returns True si matcheó."""
-    if '[CUENTA_PROGRESO] ' not in line:
-        return False
-    try:
-        payload = json.loads(line.split('[CUENTA_PROGRESO] ', 1)[1].strip())
-        procesadas = int(payload.get('procesadas', 0))
-        total = int(payload.get('total', 0))
-        _send_partial(
-            dni,
-            "cuenta_progreso",
-            f"Analizando cuentas {procesadas}/{total}",
-            extra_data={"procesadas": procesadas, "total": total},
-        )
-    except Exception as e:
-        print(f"[deudas] WARN parseando CUENTA_PROGRESO: {e}", file=sys.stderr)
-    return True
+def _handle_progress_markers(line, dni):
+    """Detecta [CUENTAS_TOTAL] y [CUENTA_ITEM].
+
+    - [CUENTAS_TOTAL] {"total": N}  → partial etapa='cuentas_total' (bar init, sin body)
+    - [CUENTA_ITEM]   {"id_fa","saldo"} → partial etapa='cuenta_item' (bar tick;
+      si saldo no vacío, info se llena con "Deuda: id_fa - saldo" para el body)
+
+    Returns True si matcheó cualquiera.
+    """
+    if '[CUENTAS_TOTAL] ' in line:
+        try:
+            payload = json.loads(line.split('[CUENTAS_TOTAL] ', 1)[1].strip())
+            total = int(payload.get('total', 0))
+            _send_partial(
+                dni, "cuentas_total", "",
+                extra_data={"total": total},
+            )
+        except Exception as e:
+            print(f"[deudas] WARN parseando CUENTAS_TOTAL: {e}", file=sys.stderr)
+        return True
+
+    if '[CUENTA_ITEM] ' in line:
+        try:
+            item = json.loads(line.split('[CUENTA_ITEM] ', 1)[1].strip())
+            id_fa = item.get('id_fa', '?')
+            saldo = item.get('saldo', '') or ''
+            info = f"Deuda: {id_fa} - {saldo}" if saldo.strip() else ""
+            _send_partial(
+                dni, "cuenta_item", info,
+                extra_data={"id_fa": id_fa, "saldo": saldo},
+            )
+        except Exception as e:
+            print(f"[deudas] WARN parseando CUENTA_ITEM: {e}", file=sys.stderr)
+        return True
+
+    return False
 
 
 # ── Modo admin ─────────────────────────────────────────────────────────────────
@@ -182,7 +201,7 @@ def _run_admin(dni):
            '--dni', dni, '--shots-dir', _CAPTURES_DIR]
 
     def on_line(line):
-        if _handle_cuenta_progreso(line, dni):
+        if _handle_progress_markers(line, dni):
             return
 
         if '[CaminoScoreADMIN] SCORE_CAPTURADO:' in line:
@@ -198,15 +217,6 @@ def _run_admin(dni):
         elif '[CaminoScoreADMIN]' in line and 'cuentas' in line and 'tiempo estimado' in line:
             msg = line.split('[CaminoScoreADMIN]', 1)[-1].strip()
             _send_partial(dni, "validando_deudas", msg)
-
-        elif '[DEUDA_ITEM] ' in line:
-            try:
-                item = json.loads(line.split('[DEUDA_ITEM] ', 1)[1].strip())
-                _send_partial(dni, "deuda_encontrada",
-                              f"Deuda: {item.get('id_fa','?')} - {item.get('saldo','?')}",
-                              extra_data={"deuda_item": item})
-            except Exception as e:
-                print(f"[deudas] WARN parseando DEUDA_ITEM: {e}", file=sys.stderr)
 
     try:
         stdout, rc = _run_subprocess(cmd, timeout=1800, on_line=on_line)
@@ -255,21 +265,12 @@ def _run_deudas_normal(dni, score_data):
             cmd.append(json.dumps(ids_cliente))
 
         def on_line(line):
-            if _handle_cuenta_progreso(line, dni):
+            if _handle_progress_markers(line, dni):
                 return
 
             if '[CaminoDeudasPrincipal]' in line and 'tiempo estimado' in line:
                 msg = line.split('[CaminoDeudasPrincipal]', 1)[-1].strip()
                 _send_partial(dni, "validando_deudas", msg)
-
-            elif '[DEUDA_ITEM] ' in line:
-                try:
-                    item = json.loads(line.split('[DEUDA_ITEM] ', 1)[1].strip())
-                    _send_partial(dni, "deuda_encontrada",
-                                  f"Deuda: {item.get('id_fa','?')} - {item.get('saldo','?')}",
-                                  extra_data={"deuda_item": item})
-                except Exception as e:
-                    print(f"[deudas] WARN parseando DEUDA_ITEM: {e}", file=sys.stderr)
 
         try:
             stdout, rc = _run_subprocess(cmd, timeout=1800, on_line=on_line)

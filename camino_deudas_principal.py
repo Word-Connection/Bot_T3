@@ -288,12 +288,14 @@ def _iterar_registros(
     close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
 
     total = len(fa_data_list)
+    # Anuncio de total de cuentas: el frontend fija la barra en 0/total.
+    print(f"[CUENTAS_TOTAL] {json.dumps({'total': total})}", flush=True)
+
     for idx, fa_data in enumerate(fa_data_list):
         fa_id = fa_data["id_fa"]
         cuit_flag = fa_data.get("cuit", "")
         id_cliente_int = fa_data.get("id_cliente", "")
         print(f"[CaminoDeudasPrincipal] registro {idx + 1}/{total} id_fa={fa_id}{' (CUIT)' if cuit_flag else ''}")
-        print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': idx, 'total': total})}", flush=True)
 
         clipboard.clear()
         cur_y = iay + (idx * offset_y)
@@ -309,19 +311,21 @@ def _iterar_registros(
             item["id_cliente_interno"] = id_cliente_int
         fa_saldos.append(item)
 
-        # Stream item al worker (solo saldos > 0, dedupe por id normalizado)
-        if _parse_saldo_float(saldo) > 0:
-            norm_id = amounts.normalize_id_fa(fa_id)
-            if norm_id and norm_id not in streamed_ids:
+        # Stream: un evento por cuenta procesada (tenga deuda o no). Frontend avanza
+        # la barra con cada [CUENTA_ITEM] y sólo dibuja linea en el body cuando trae
+        # saldo > 0. Dedupe por id normalizado para no contar la misma cuenta dos veces.
+        norm_id = amounts.normalize_id_fa(fa_id)
+        if norm_id and norm_id in streamed_ids:
+            print(f"[CaminoDeudasPrincipal] [DEDUP] id_fa={fa_id} ya emitido, skip stream")
+        else:
+            if norm_id:
                 streamed_ids.add(norm_id)
-                print(f"[DEUDA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': '$' + saldo})}", flush=True)
-            else:
-                print(f"[CaminoDeudasPrincipal] [DEDUP] id_fa={fa_id} ya emitido, skip stream")
+            saldo_emit = ("$" + saldo) if _parse_saldo_float(saldo) > 0 else ""
+            print(f"[CUENTA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': saldo_emit})}", flush=True)
 
         if close_x or close_y:
             mouse.click(close_x, close_y, "close_tab_btn", base_delay)
 
-    print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': total, 'total': total})}", flush=True)
     return fa_saldos
 
 
