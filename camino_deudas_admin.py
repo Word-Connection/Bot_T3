@@ -309,6 +309,10 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
     fa_saldos_todos: list[dict] = []
     streamed_ids: set[str] = set()
     tipo_primera = cuentas[0]["tipo_documento"] if cuentas else "DNI"
+    total_cuentas = len(cuentas) if cuentas else 0
+
+    if total_cuentas > 0:
+        print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': 0, 'total': total_cuentas})}", flush=True)
 
     try:
         primera = buscar_deudas_cuenta(
@@ -328,6 +332,9 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
         print(f"[CaminoDeudasAdmin] ERROR cuenta 1: {e}")
         import traceback
         traceback.print_exc()
+
+    if total_cuentas > 0:
+        print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': 1, 'total': total_cuentas})}", flush=True)
 
     if cuentas and len(cuentas) > 1:
         for idx in range(1, len(cuentas)):
@@ -378,6 +385,8 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
                 print(f"[CaminoDeudasAdmin] ERROR cuenta {cuenta_num}: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': cuenta_num, 'total': total_cuentas})}", flush=True)
 
     # 9. Cerrar y home
     cerrar_tabs(master, veces=5, close_tab_key=CLOSE_TAB_KEY, interval=0.3)

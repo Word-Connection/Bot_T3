@@ -150,6 +150,25 @@ def _check_script(path):
     return True, None
 
 
+def _handle_cuenta_progreso(line, dni):
+    """Detecta [CUENTA_PROGRESO] y emite partial 'cuenta_progreso'. Returns True si matcheó."""
+    if '[CUENTA_PROGRESO] ' not in line:
+        return False
+    try:
+        payload = json.loads(line.split('[CUENTA_PROGRESO] ', 1)[1].strip())
+        procesadas = int(payload.get('procesadas', 0))
+        total = int(payload.get('total', 0))
+        _send_partial(
+            dni,
+            "cuenta_progreso",
+            f"Analizando cuentas {procesadas}/{total}",
+            extra_data={"procesadas": procesadas, "total": total},
+        )
+    except Exception as e:
+        print(f"[deudas] WARN parseando CUENTA_PROGRESO: {e}", file=sys.stderr)
+    return True
+
+
 # ── Modo admin ─────────────────────────────────────────────────────────────────
 
 def _run_admin(dni):
@@ -163,6 +182,9 @@ def _run_admin(dni):
            '--dni', dni, '--shots-dir', _CAPTURES_DIR]
 
     def on_line(line):
+        if _handle_cuenta_progreso(line, dni):
+            return
+
         if '[CaminoScoreADMIN] SCORE_CAPTURADO:' in line:
             score_txt = line.split('SCORE_CAPTURADO:', 1)[-1].strip()
             cap = _latest_capture(dni)
@@ -233,6 +255,9 @@ def _run_deudas_normal(dni, score_data):
             cmd.append(json.dumps(ids_cliente))
 
         def on_line(line):
+            if _handle_cuenta_progreso(line, dni):
+                return
+
             if '[CaminoDeudasPrincipal]' in line and 'tiempo estimado' in line:
                 msg = line.split('[CaminoDeudasPrincipal]', 1)[-1].strip()
                 _send_partial(dni, "validando_deudas", msg)

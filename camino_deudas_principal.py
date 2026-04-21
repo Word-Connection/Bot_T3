@@ -293,6 +293,7 @@ def _iterar_registros(
         cuit_flag = fa_data.get("cuit", "")
         id_cliente_int = fa_data.get("id_cliente", "")
         print(f"[CaminoDeudasPrincipal] registro {idx + 1}/{total} id_fa={fa_id}{' (CUIT)' if cuit_flag else ''}")
+        print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': idx, 'total': total})}", flush=True)
 
         clipboard.clear()
         cur_y = iay + (idx * offset_y)
@@ -320,6 +321,7 @@ def _iterar_registros(
         if close_x or close_y:
             mouse.click(close_x, close_y, "close_tab_btn", base_delay)
 
+    print(f"[CUENTA_PROGRESO] {json.dumps({'procesadas': total, 'total': total})}", flush=True)
     return fa_saldos
 
 
