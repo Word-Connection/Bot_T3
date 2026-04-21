@@ -64,9 +64,21 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
-def _emit_deuda_items(deudas: list[dict]) -> None:
+def _emit_deuda_items(deudas: list[dict], streamed_ids: set[str]) -> None:
+    """Emite [DEUDA_ITEM] dedupeando por id_fa normalizado.
+
+    streamed_ids se actualiza en-place con los ids ya emitidos para evitar
+    duplicados entre cuentas en streaming tiempo real.
+    """
     for d in deudas:
-        item = {"id_fa": d.get("id_fa", ""), "saldo": d.get("saldo", "")}
+        id_raw = d.get("id_fa", "")
+        norm_id = amounts.normalize_id_fa(id_raw)
+        if not norm_id or norm_id in streamed_ids:
+            if norm_id:
+                print(f"[CaminoDeudasAdmin] [DEDUP] id_fa={id_raw} ya emitido, skip stream")
+            continue
+        streamed_ids.add(norm_id)
+        item = {"id_fa": id_raw, "saldo": d.get("saldo", "")}
         print(f"[DEUDA_ITEM] {json.dumps(item, ensure_ascii=False)}", flush=True)
 
 
@@ -295,6 +307,7 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
 
     # 8. buscar deudas primera cuenta + iterar restantes
     fa_saldos_todos: list[dict] = []
+    streamed_ids: set[str] = set()
     tipo_primera = cuentas[0]["tipo_documento"] if cuentas else "DNI"
 
     try:
@@ -307,7 +320,7 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
         )
         if primera:
             fa_saldos_todos.extend(primera)
-            _emit_deuda_items(primera)
+            _emit_deuda_items(primera, streamed_ids)
             print(f"[CaminoDeudasAdmin] cuenta 1: +{len(primera)} deudas")
         else:
             print("[CaminoDeudasAdmin] cuenta 1: sin deudas")
@@ -346,11 +359,18 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
                     print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: sin deudas")
                     continue
 
-                ids_existentes = {d["id_fa"] for d in fa_saldos_todos if "id_fa" in d}
-                nuevas = [d for d in deudas if d.get("id_fa") not in ids_existentes]
+                ids_existentes = {
+                    nid for d in fa_saldos_todos
+                    if (nid := amounts.normalize_id_fa(d.get("id_fa", "")))
+                }
+                nuevas = [
+                    d for d in deudas
+                    if (nid := amounts.normalize_id_fa(d.get("id_fa", "")))
+                    and nid not in ids_existentes
+                ]
                 if nuevas:
                     fa_saldos_todos.extend(nuevas)
-                    _emit_deuda_items(nuevas)
+                    _emit_deuda_items(nuevas, streamed_ids)
                     print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: +{len(nuevas)} deudas nuevas")
                 else:
                     print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: todas duplicadas")

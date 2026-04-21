@@ -33,7 +33,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from shared import capture as cap
+from shared import amounts, capture as cap
 from shared import clipboard, coords, io_worker, keyboard, mouse
 from shared.flows.entrada_cliente import entrada_cliente
 from shared.flows.ver_todos import copiar_tabla
@@ -281,6 +281,7 @@ def _iterar_registros(
     Devuelve [{id_fa, saldo, [cuit?], [id_cliente_interno?]}].
     """
     fa_saldos: list[dict[str, str]] = []
+    streamed_ids: set[str] = set()
 
     iax, iay = coords.xy(master, "saldo_principal.id_area")
     offset_y = int(coords.get(master, "saldo_principal").get("id_area_offset_y", ID_AREA_OFFSET_Y_DEFAULT))
@@ -307,9 +308,14 @@ def _iterar_registros(
             item["id_cliente_interno"] = id_cliente_int
         fa_saldos.append(item)
 
-        # Stream item al worker (solo saldos > 0, con signo $)
+        # Stream item al worker (solo saldos > 0, dedupe por id normalizado)
         if _parse_saldo_float(saldo) > 0:
-            print(f"[DEUDA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': '$' + saldo})}", flush=True)
+            norm_id = amounts.normalize_id_fa(fa_id)
+            if norm_id and norm_id not in streamed_ids:
+                streamed_ids.add(norm_id)
+                print(f"[DEUDA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': '$' + saldo})}", flush=True)
+            else:
+                print(f"[CaminoDeudasPrincipal] [DEDUP] id_fa={fa_id} ya emitido, skip stream")
 
         if close_x or close_y:
             mouse.click(close_x, close_y, "close_tab_btn", base_delay)

@@ -1,391 +1,259 @@
-# VERIFICACION_CAMINOS — Referencia de pasos y coordenadas (rama legacy)
+# VERIFICACION_CAMINOS — Pasos y coordenadas por camino
 
-Documento generado sobre la rama original (sin refactor) para verificar que el refactor conserva el mismo orden de pasos y las mismas coordenadas.
-
----
-
-## Camino D — PIN (`run_camino_d_multi.py` + `camino_d_coords_multi.json`)
-
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| 1 | Click acciones | `acciones` | 311 | 33 |
-| 2 | Click general | `general` | 342 | 189 |
-| 3 | Click area_pin | `area_pin` | 962 | 517 |
-| 4 | Click dni_field (solo si x≠0 o y≠0 — en prod ambos son 0, se omite) | `dni_field` | 0 | 0 |
-| 5 | typewrite DNI (intervalo 0.05s/char) | — | — | — |
-| 6 | Press Enter N veces (default 2); antes del último Enter captura screenshot | — | — | — |
-
-**Región de captura hardcodeada:** x=739, y=461, w=440, h=114
+> **Este documento NO se puede perder.** Es la referencia maestra de qué hace cada camino, en qué orden, y qué coordenada usa en `shared/coords.json`.
+>
+> Última sincronización: post-refactor Fase 3 (caminos renombrados a `camino_*.py`, coords unificadas en `shared/coords.json`).
+>
+> Si algo no coincide con el código, **confía en el código**: abrí el `.py` y chequeá antes de modificar. Las coordenadas son absolutas → si T3 se reubica o cambia de resolución, hay que regrabar.
 
 ---
 
-## Camino C — Score (`run_camino_c_multi.py` + `camino_c_coords_multi.json`)
+## Resumen de caminos
 
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| 1 | Click sección cliente | `cliente_section` | 135 | 168 |
-| 2a | **[DNI]** Click selector tipo doc | `tipo_doc_btn` | 244 | 237 |
-| 2b | **[CUIT]** Click selector tipo doc | `cuit_tipo_doc_btn` | 179 | 262 |
-| 3a | **[DNI]** Click opción DNI | `dni_option` | 140 | 276 |
-| 3b | **[CUIT]** Click opción CUIT | `cuit_option` | 151 | 296 |
-| 4a | **[DNI]** Click campo DNI → typewrite | `dni_field` | 913 | 240 |
-| 4b | **[CUIT]** Click campo CUIT → typewrite | `cuit_field` | 912 | 263 |
+| Archivo | Ex-nombre legacy | Cuándo corre |
+|---|---|---|
+| `camino_score.py` | run_camino_c_multi | Score normal (admin=false, flujo completo de validación fraude/corrupto) |
+| `camino_score_corto.py` | — | Score fijo "98" cuando `camino_deudas_provisorio` abortó por umbral |
+| `camino_deudas_principal.py` | run_camino_a_multi | Modo normal, score==80, >1 cuenta (iteración por id_fa) |
+| `camino_deudas_admin.py` | run_camino_score_ADMIN | Worker admin: score + deudas en TODAS las cuentas |
+| `camino_deudas_viejo.py` | run_camino_a_viejo_multi | Cuenta única detectada ("Llamada" en Ver Todos) |
+| `camino_deudas_provisorio.py` | — | Modo validación: suma saldos salvo la última, aborta exit 42 si ≥ umbral |
+| `camino_movimientos.py` | run_camino_b_multi | Service IDs desde CSV (o búsqueda directa) |
+| `camino_pin.py` | run_camino_d_multi | Envío de PIN por teléfono |
+
+---
+
+## Camino PIN — `camino_pin.py`
+
+Región de captura: `pin.capture_region = x=739, y=461, w=440, h=114`
+
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | Click Acciones | `pin.acciones` | 311 | 33 |
+| 2 | Click General | `pin.general` | 342 | 189 |
+| 3 | Click área PIN | `pin.area_pin` | 962 | 517 |
+| 4 | Click en `pin.dni_field` **solo si** (x,y) ≠ (0,0) | `pin.dni_field` | 0 | 0 |
+| 5 | `keyboard.type_text(telefono)` (intervalo ~0.05s/char) | — | — | — |
+| 6 | Press Enter N veces (default 2; antes del último → captura `pin.capture_region`) | — | — | — |
+| 7 | Close tab + home | `comunes.close_tab_btn1`, `comunes.home_area` | 1896/888 | 138/110 |
+
+ENV relevantes: `START_DELAY`, `D_PRE_CLICK_DELAY`, `ENTER_REPEAT_DELAY`, `PIN_PRE_OK_DELAY`, `ENTER_TIMES`.
+
+---
+
+## Camino SCORE — `camino_score.py`
+
+Usa `cliente_section2`, `ver_todos_btn1`, `client_id_field2`, `seleccionar_btn1`.
+
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | Click sección cliente | `entrada.cliente_section2` | 135 | 168 |
+| 2a | **[DNI]** Click selector tipo doc | `entrada.tipo_doc_btn` | 244 | 237 |
+| 2b | **[CUIT]** Click selector tipo doc | `entrada.cuit_tipo_doc_btn` | 179 | 262 |
+| 3a | **[DNI]** Click opción DNI | `entrada.dni_option` | 140 | 276 |
+| 3b | **[CUIT]** Click opción CUIT | `entrada.cuit_option` | 151 | 296 |
+| 4a | **[DNI]** Click campo DNI + type | `entrada.dni_field1` | 913 | 240 |
+| 4b | **[CUIT]** Click campo CUIT + type | `entrada.cuit_field1` | 912 | 263 |
 | 5 | Press Enter | — | — | — |
-| 6 | **[Solo DNI 7-8 dígitos]** Click no_cuit_field (2 veces, 0.5s entre cada uno) | `no_cuit_field` | 1325 | 180 |
-| 7 | Esperar 2.5s, limpiar clipboard | — | — | — |
-| 8 | Right-click para copiar ID | `client_name_field` | 36 | 236 |
-| 9 | Click opción copiar ID | `copi_id_field` | 77 | 241 |
-| 10 | **[Si clipboard vacío/corto → cliente NO creado]** Captura región, click close x5, click home, terminar | `screenshot_region` | 10 | 47 |
-| — | (screenshot_region) | w=1720 | h=365 | — |
-| — | (close_tab_btn para cerrar) | `close_tab_btn` | 1896 | 138 |
-| — | (home) | `home_area` | 888 | 110 |
-| 11 | **[Si "Telefónico"]** Saltar directo al paso de score (paso 16) | — | — | — |
-| 12 | **[Si ID válido]** Click ver todos | `ver_todos_btn` | 1810 | 159 |
-| 13 | Right-click copiar tabla | `copiar_todo_btn` | 24 | 174 |
-| 14 | Click resaltar | `resaltar_btn` | 97 | 229 |
-| 15 | Right-click copiar tabla (2° vez) | `copiar_todo_btn` | 24 | 174 |
-| 16 | Click copiado (copiar todo) | `copiado_btn` | 96 | 212 |
-| 17 | Parsear IDs de FA del clipboard | — | — | — |
-| 18 | Cerrar ventana Ver Todos | `close_tab_btn` | 1896 | 138 |
-| 19 | Click campo ID cliente | `client_id_field` | 100 | 237 |
-| 20 | **Loop validación (hasta 10 intentos):** Click seleccionar | `seleccionar_btn` | 37 | 981 |
-| 21 | Click sección fraude | `fraude_section` | 877 | 412 |
-| 22 | Right-click sección fraude | `fraude_section` | 877 | 412 |
-| 23 | Click copiar fraude | `fraude_copy` | 921 | 423 |
-| 24 | **[Si "fraude"]** Click cerrar fraude | `close_fraude_btn` | 1246 | 332 |
-| — | (close_tab x2) | `close_tab_btn` | 1896 | 138 |
-| — | (home) | `home_area` | 888 | 110 |
-| 25 | **[Validar registro corrupto]** Enter → right-click client_name_field → click copi_id_field | `client_name_field` | 36 | 236 |
-| — | (copiar ID para validar) | `copi_id_field` | 77 | 241 |
-| 26 | **[Si corrupto]** Click campo ID para navegar al siguiente | `client_id_field` | 100 | 237 |
-| 27 | Esperar 2s | — | — | — |
-| 28 | Click nombre cliente | `nombre_cliente_btn` | 308 | 52 |
-| 29 | Esperar 2.5s → Press Enter | — | — | — |
-| 30 | Right-click área score | `score_area_page` | 981 | 66 |
-| 31 | Click opción copiar del menú | `copy_menu_option` | 1016 | 76 |
-| 32 | Leer score del clipboard | — | — | — |
-| 33 | Click screenshot_confirm (si definido) | `screenshot_confirm` | 953 | 979 |
-| 34 | Captura región | `screenshot_region` | 10 | 47 |
-| — | (screenshot_region) | w=1720 | h=365 | — |
-| 35 | **[Solo CUIT]** Click dni_from_cuit | `dni_from_cuit` | 911 | 174 |
-| 36 | **[Solo CUIT]** Right-click → Click extra_cuit_select_all | `extra_cuit_select_all` | 959 | 336 |
-| 37 | **[Solo CUIT]** Right-click → Click extra_cuit_copy | `extra_cuit_copy` | 937 | 262 |
-| 38 | Click cerrar tab (x5) | `close_tab_btn` | 1896 | 138 |
-| 39 | Click home | `home_area` | 888 | 110 |
-| 40 | Limpiar clipboard | — | — | — |
-| 41 | Emitir JSON resultado final | — | — | — |
+| 6 | Right-click para copiar ID | `validar.client_name_field` | 36 | 236 |
+| 7 | Click opción copiar ID | `validar.copi_id_field` | 77 | 241 |
+| 8 | **[Si clipboard ≈ "Telefonico"]** saltar al paso de score (18) | `shared.flows.telefonico` | — | — |
+| 9 | **[Si clipboard vacío/corto]** CLIENTE NO CREADO: `capture_region`, close×5, home | `captura.screenshot_region` | 10,47 | w=1720,h=365 |
+| 10 | Click Ver Todos | `ver_todos.ver_todos_btn1` | 1810 | 159 |
+| 11 | Ritual copiar tabla (`copiar_todo_btn` → `resaltar_btn` → `copiar_todo_btn` → `copiado_btn`) | sección `ver_todos.*` | — | — |
+| 12 | Parsear IDs de FA del clipboard | — | — | — |
+| 13 | Cerrar ventana Ver Todos | `comunes.close_tab_btn1` | 1896 | 138 |
+| 14 | Click campo ID cliente | `validar.client_id_field2` | 100 | 237 |
+| 15 | **Loop validación (≤10):** Click seleccionar | `comunes.seleccionar_btn1` | 37 | 981 |
+| 16 | Validar fraude: right-click + copy en `validar.fraude_section` → `validar.fraude_copy` | 877,412 / 921,423 |
+| 17 | **[Si fraude]** Click close_fraude_btn + 2 close_tab + home | `validar.close_fraude_btn` | 1246 | 332 |
+| 18 | Validar registro corrupto: Enter → right-click `client_name_field` → copy `copi_id_field`. Si corrupto → Down en `client_id_field2` y repetir | — | — | — |
+| 19 | Click nombre cliente | `score.nombre_cliente_btn` | 308 | 52 |
+| 20 | Wait 2.5s → Press Enter (cierra cartel) | — | — | — |
+| 21 | Right-click área score | `score.score_area_copy` | 981 | 66 |
+| 22 | Click opción copiar del menú | `score.copy_menu_option` | 1016 | 76 |
+| 23 | Leer score del clipboard | — | — | — |
+| 24 | Click `screenshot_confirm` (si definido) | `score.screenshot_confirm` | 953 | 979 |
+| 25 | Captura región | `captura.screenshot_region` | 10,47 | w=1720,h=365 |
+| 26 | **[Solo CUIT]** `cuit_fallback.dni_from_cuit` → `extra_cuit_select_all` → `extra_cuit_copy` | sección `cuit_fallback.*` | — | — |
+| 27 | Close tab ×5 + home + clear clipboard | `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 28 | Emitir JSON_RESULT: `{score, ids_cliente[]}` | — | — | — |
 
 ---
 
-## Camino A — Deudas principal (`run_camino_a_multi.py` + `camino_a_coords_multi.json`)
+## Camino SCORE CORTO — `camino_score_corto.py`
+
+Retorna siempre `score="98"`. Se invoca cuando `camino_deudas_provisorio` salió con exit 42 (suma de saldos ≥ umbral en modo validación).
 
 | Paso | Acción | Coord | x | y |
 |------|--------|-------|---|---|
-| 1 | Click sección cliente | `cliente_section` | 266 | 168 |
-| 2a | **[DNI]** Click selector tipo doc | `tipo_doc_btn` | 244 | 237 |
-| 2b | **[CUIT]** Click selector tipo doc | `cuit_tipo_doc_btn` | 179 | 262 |
-| 3a | **[DNI]** Click opción DNI | `dni_option` | 140 | 276 |
-| 3b | **[CUIT]** Click opción CUIT | `cuit_option` | 151 | 296 |
-| 4a | **[DNI]** Click campo DNI → typewrite | `dni_field` | 913 | 240 |
-| 4b | **[CUIT]** Click campo CUIT → typewrite | `cuit_field` | 912 | 263 |
-| 5 | Press Enter (espera 1.0s) | — | — | — |
-| 6 | Esperar 0.8s | — | — | — |
-| 7 | Click ver todos | `ver_todos_btn` | 1810 | 159 |
-| 8 | Esperar 0.8s | — | — | — |
-| 9 | Right-click copiar tabla | `copiar_todo_btn` | 24 | 174 |
-| 10 | Click resaltar | `resaltar_btn` | 97 | 229 |
-| 11 | Right-click copiar tabla (2° vez) | `copiar_todo_btn` | 24 | 174 |
-| 12 | Click copiado (copiar todo) | `copiado_btn` | 96 | 212 |
-| 13 | Leer clipboard | — | — | — |
-| 14 | **[Si clipboard < 30 chars]** Right-click en (23,195), click Copiar en (42,207) — coords hardcodeadas | — | 23 | 195 |
-| — | (click copiar en menú — hardcodeado) | — | 42 | 207 |
-| 15 | **[Si "Llamada" en clipboard]** Lanzar run_camino_a_viejo.py --skip-initial y terminar | — | — | — |
-| 16 | **[Si clipboard < 10 chars]** Captura región de error | `screenshot_region` | 10 | 47 |
-| — | (screenshot_region) | w=1720 | h=365 | — |
-| — | Press Enter para cerrar cartel | — | — | — |
-| — | Click close x3 | `close_tab_btn` | 1896 | 138 |
-| — | Click home | `home_area` | 888 | 110 |
-| 17 | Parsear IDs de FA del clipboard | — | — | — |
-| 18 | **[Si > 20 registros]** Click configuración registros | `config_registros_btn` | 1875 | 155 |
-| 19 | **[Si > 20 registros]** Click campo número de registros | `num_registros_field` | 940 | 516 |
-| 20 | **[Si > 20 registros]** Limpiar campo (2 clicks + delete + backspace x3) y typewrite cantidad | — | — | — |
-| 21 | **[Si > 20 registros]** Click buscar | `buscar_registros_btn` | 938 | 570 |
-| 22 | Cerrar ventana Ver Todos | `close_tab_btn` | 1896 | 138 |
-| 23 | **Loop por cada FA (idx=0,1,2…):** Click id_area con offset vertical de 19px por registro | `id_area` | 914 | 239+idx×19 |
-| 24 | Esperar 1.5s | — | — | — |
-| 25 | Doble-click saldo | `saldo` | 1020 | 173 |
-| 26 | Esperar 0.5s | — | — | — |
-| 27 | Right-click saldo | `saldo` | 1020 | 173 |
-| 28 | Esperar 0.5s | — | — | — |
-| 29 | Click saldo_all_copy | `saldo_all_copy` | 1051 | 338 |
-| 30 | Right-click saldo | `saldo` | 1020 | 173 |
-| 31 | Esperar 0.5s | — | — | — |
-| 32 | Click saldo_copy | `saldo_copy` | 1031 | 263 |
-| 33 | Leer saldo del clipboard | — | — | — |
-| 34 | Cerrar tab del registro | `close_tab_btn` | 1896 | 138 |
-| 35 | **[Si es el último registro]** Click close x3 adicionales | `close_tab_btn` | 1896 | 138 |
-| 36 | Emitir JSON con fa_saldos | — | — | — |
+| 1 | `entrada_cliente` con `cliente_section2` | `entrada.cliente_section2` | 135 | 168 |
+| 2 | Ver Todos + contar filas de la tabla | `ver_todos.ver_todos_btn1` + ritual | — | — |
+| 3 | Click `client_id_field2` + Down × (total-1) + Enter | `validar.client_id_field2` | 100 | 237 |
+| 4 | Click nombre cliente + Enter | `score.nombre_cliente_btn` | 308 | 52 |
+| 5 | `capturar_score` (captura región) | `captura.screenshot_region` | 10,47 | w=1720,h=365 |
+| 6 | `cerrar_y_home` (close_tab_btn1 + home_area) | `comunes.close_tab_btn1` / `comunes.home_area` | — | — |
+| 7 | Emitir JSON_RESULT `{score: "98"}` | — | — | — |
 
 ---
 
-## Camino B — Movimientos (`run_camino_b_multi.py` + `camino_b_coords_multi.json`)
+## Camino DEUDAS PRINCIPAL — `camino_deudas_principal.py`
 
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| I-1 | **Limpieza inicial** Click service_id_field → 2 clicks + delete + backspace x3 | `service_id_field` | 305 | 257 |
-| I-2 | Limpieza inicial Click dni_field → 2 clicks + delete + backspace x3 | `dni_field` | 1560 | 256 |
-| I-3 | Limpieza inicial Click cuit_field → 2 clicks + delete + backspace x3 | `cuit_field` | 1690 | 256 |
-| I-4 | Leer IDs del CSV (columna Linea2 + columna Domicilio para DNI) | — | — | — |
-| I-5a | **[DNI]** Click campo DNI → typewrite | `dni_field` | 1560 | 256 |
-| I-5b | **[CUIT]** Click campo CUIT → typewrite | `cuit_field` | 1690 | 256 |
-| I-6 | **[Sin IDs en CSV — búsqueda directa]** Press Enter → recolectar IDs del sistema vía id_servicio/id_copy | `id_servicio` | 307 | 275 |
-| — | (click copiar del menú) | `id_copy` | 338 | 310 |
-| — | (offset vertical por fila) | `id_servicio_offset_y` | 19 | — |
-| **Loop por cada service_id:** | | | | |
-| L-1 | Click service_id_field | `service_id_field` | 305 | 257 |
-| L-2 | Limpiar campo: 2 clicks + delete + backspace x3 | — | — | — |
-| L-3 | typewrite service_id | — | — | — |
-| L-4 | Press Enter (espera 2s fija + post_enter_delay) | — | — | — |
-| L-5 | Validar contenido: Click id_servicio, right-click, click id_copy | `id_servicio` | 307 | 275 |
-| — | (menú copiar para validar) | `id_copy` | 338 | 310 |
-| L-6 | **[Sin movimientos]** Loguear "No Tiene Movimientos" → continuar al siguiente service_id | — | — | — |
-| L-7 | Doble-click primera fila | `first_row` | 951 | 273 |
-| L-8 | Doble-click actividad | `actividad_btn` | 44 | 272 |
-| L-9 | Navegar a pestaña Actividad: 2 flechas derecha con pynput (config: steps=2, delay=0.3, methods=["pynput_right"]) | `actividad_right_moves` | — | — |
-| L-10 | Doble-click filtro | `filtro_btn` | 832 | 318 |
-| L-11 | Click área de copia | `copy_area` | 837 | 374 |
-| L-12 | Limpiar clipboard | — | — | — |
-| L-13 | Ctrl+C → leer clipboard → loguear en multi_copias.log | — | — | — |
-| L-14 | Cerrar pestaña | `close_tab_btn` | 1899 | 134 |
-| **Post-loop:** | | | | |
-| F-1 | Click service_id_field → Home + Shift+End + Delete | `service_id_field` | 305 | 257 |
-| F-2 | Click dni_field o cuit_field → Home + Shift+End + Delete | `dni_field`/`cuit_field` | 1560/1690 | 256 |
+Flujo completo por id_fa cuando hay >1 cuenta. Usa `cliente_section1`, `ver_todos_btn1`, `close_tab_btn1`.
+
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | `entrada_cliente(cliente_section1)` | `entrada.cliente_section1` | 266 | 168 |
+| — | DNI/CUIT field según tipo doc | `entrada.dni_field1` / `entrada.cuit_field1` | 913/912 | 240/263 |
+| 2 | `copiar_tabla(ver_todos_btn1)` (ritual copiar todo) | `ver_todos.*` | — | — |
+| 3 | **[Tabla corta]** Verificar cuenta única: right-click (23,195) + click (42,207) → si texto contiene "llamada" → delegar `camino_deudas_viejo --skip-initial` | hardcoded | 23/42 | 195/207 |
+| 4 | **[Aún vacía]** CLIENTE NO CREADO: `screenshot_region` + close×3 + home | `captura.screenshot_region`, `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 5 | Parsear tabla → `[{id_fa, cuit, id_cliente}]`. Columnas: `ID del FA`/`FA ID`, `Tipo ID Compania`, `ID del Cliente`/`Customer ID` | — | — | — |
+| 6 | **[Si >20 registros]** Expandir: click `config_registros_btn` → limpiar + type(N) en `num_registros_field` → click `buscar_registros_btn` | `saldo_principal.config_registros_btn`, `saldo_principal.num_registros_field`, `saldo_principal.buscar_registros_btn` | 1875/940/938 | 155/516/570 |
+| 7 | **Iterar cada registro:** click `id_area` con `y += idx * id_area_offset_y` (default 19) | `saldo_principal.id_area` | 914 | 239 |
+| 7.1 | Doble-click saldo | `saldo_principal.saldo` | 1020 | 173 |
+| 7.2 | Right-click saldo | `saldo_principal.saldo` | 1020 | 173 |
+| 7.3 | Click `saldo_all_copy` | `saldo_principal.saldo_all_copy` | 1051 | 338 |
+| 7.4 | Right-click saldo otra vez | `saldo_principal.saldo` | 1020 | 173 |
+| 7.5 | Click `saldo_copy` → leer clipboard | `saldo_principal.saldo_copy` | 1031 | 263 |
+| 7.6 | Si saldo > 0 y `normalize_id_fa(id_fa) ∉ streamed_ids`: emitir `[DEUDA_ITEM] {"id_fa": X, "saldo": "$N,NN"}` y agregarlo al set | — | — | — |
+| 7.7 | Click close_tab | `comunes.close_tab_btn1` | 1896 | 138 |
+| 8 | **[Si vino `ids_cliente_filter`]** filtrar solo fa_saldos con id_cliente_interno ∈ filter | — | — | — |
+| 9 | Para cada id faltante del filter: `_buscar_por_id_cliente` — usa `entrada.id_cliente_field` (1612,219) + Enter + `copiar_tabla` → iterar | `entrada.id_cliente_field` | 1612 | 219 |
+| 10 | Close tab ×3 + home | `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 11 | Dedupe por id_fa, sumar total, emitir JSON_RESULT `{dni, success, total_deuda, fa_saldos?}` | — | — | — |
 
 ---
 
-## Camino Score ADMIN (`run_camino_score_ADMIN.py` + `camino_score_ADMIN_coords.json`)
+## Camino DEUDAS ADMIN — `camino_deudas_admin.py`
 
-> **Nota:** Los pasos 1–34 son idénticos a Camino C con coordenadas equivalentes (algunas difieren levemente).
+Modo admin: obtiene score + busca deudas en TODAS las cuentas. Usa `cliente_section2`, `ver_todos_btn2`, `seleccionar_btn2`, `close_tab_btn1`, `close_score_tab`, variantes `fa_*_btn2`/`fa_*_etapa2`.
 
-### Fase 1 — Buscar cliente y score
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | `entrada_cliente(cliente_section2)` | `entrada.cliente_section2` | 135 | 168 |
+| 2 | `validar_cliente_creado(base_delay)` → texto del cliente | — | — | — |
+| 2a | **[Si texto == "Telefonico"]** flujo cuenta única: `nombre_cliente_btn` → Enter → `copiar_score` → `capturar_score` → close×5 + home → JSON_RESULT `{score, fa_saldos: []}` | `score.nombre_cliente_btn` | 308 | 52 |
+| 2b | **[Si no creado]** captura + JSON_RESULT `{fa_saldos: [], error: "CLIENTE NO CREADO"}` + close×5 + home | `captura.screenshot_region` | — | — |
+| 3 | Ver Todos (variant 2) → `copiar_tabla(ver_todos_btn2)` → `extract_cuentas_with_tipo_doc(tabla)` | `ver_todos.ver_todos_btn2` | 1814 | 151 |
+| 4 | Click `client_id_field2` | `validar.client_id_field2` | 100 | 237 |
+| 5 | **Loop ≤10:** click `seleccionar_btn2` → `validar_fraude` → `validar_registro_corrupto` | `comunes.seleccionar_btn2`, `validar.fraude_section`, `validar.validation_area` | 50/877/97 | 980/412/237 |
+| 5a | **[Fraude]** click `close_fraude_btn` + 2 close + home + JSON_RESULT `{error: "FRAUDE"}` | `validar.close_fraude_btn` | 1246 | 332 |
+| 5b | **[Corrupto]** click `client_id_field2` + Down + repetir | — | — | — |
+| 6 | Click `nombre_cliente_btn` → Enter (cartel) → `copiar_score(master, pre_delay=2.5)` | `score.nombre_cliente_btn` | 308 | 52 |
+| 7 | `capturar_score(master, dni, shot_dir)` | `captura.screenshot_region` + `score.screenshot_confirm` | — | — |
+| 8 | `print("[CaminoScoreADMIN] SCORE_CAPTURADO:<score>")` → partial `score_obtenido` | — | — | — |
+| 9 | `print("[CaminoScoreADMIN] Buscando deudas...")` → partial `buscando_deudas` + `validando_deudas` | — | — | — |
+| 10 | Click `close_tab_btn1` (cerrar 1 tab para ver deudas) | `comunes.close_tab_btn1` | 1896 | 138 |
+| 11 | `buscar_deudas_cuenta(master, tipo_documento=cuentas[0].tipo, fa_variant=2)` → devuelve `[{id_fa, saldo, tipo_documento}]` | `fa_cobranza.fa_cobranza_btn2`, `fa_cobranza.fa_cobranza_etapa2`, `fa_cobranza.fa_cobranza_actual2`, `fa_cobranza.fa_cobranza_buscar2`, `resumen_cf.mostrar_lista_btn2`, `resumen_cf.copy_area1` | — | — |
+| 11.1 | Para cada deuda de la primera cuenta: `_emit_deuda_items(..., streamed_ids)` (dedupe por id_fa normalizado) | — | — | — |
+| 12 | **Iterar cuentas[1:]:** click `client_id_field2` → Down×idx → click `seleccionar_btn2` → `_verify_entrada_cuenta` (right-click `client_name_field` + `copi_id_field` — espera "telefonico") → `buscar_deudas_cuenta` | — | — | — |
+| 12.1 | Dedupe inter-cuentas vía walrus: `{nid for d in fa_saldos_todos if (nid := normalize_id_fa(d.id_fa))}` | — | — | — |
+| 13 | `cerrar_tabs(veces=5, close_tab_btn1)` + `volver_a_home` + `clipboard.clear()` | `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 14 | `amounts.sanitize_fa_saldos(fa_saldos_todos, min_digits=4)` → dedupe final | — | — | — |
+| 15 | Emitir JSON_RESULT `{dni, score, fa_saldos}` | — | — | — |
 
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| 1 | Click sección cliente | `cliente_section` | 135 | 168 |
-| 2a | **[DNI]** Click selector tipo doc | `tipo_doc_btn` | 244 | 237 |
-| 2b | **[CUIT]** Click selector tipo doc | `cuit_tipo_doc_btn` | 179 | 262 |
-| 3a | **[DNI]** Click opción DNI | `dni_option` | 140 | 276 |
-| 3b | **[CUIT]** Click opción CUIT | `cuit_option` | 151 | 296 |
-| 4a | **[DNI]** Click campo DNI → typewrite | `dni_field` | 913 | 240 |
-| 4b | **[CUIT]** Click campo CUIT → typewrite | `cuit_field` | 912 | 263 |
-| 5 | Press Enter | — | — | — |
-| 6 | **[Solo DNI 7-8 dígitos]** Click no_cuit_field (2 veces) | `no_cuit_field` | 1325 | 180 |
-| 7 | Esperar 2.5s, limpiar clipboard | — | — | — |
-| 8 | Right-click para copiar ID | `client_name_field` | 36 | 236 |
-| 9 | Click copiar ID | `copi_id_field` | 77 | 241 |
-| 10 | **[Si ID válido]** Click ver todos | `ver_todos_btn` | 1814 | 151 |
-| 11 | Right-click copiar tabla | `copiar_todo_btn` | 24 | 174 |
-| 12 | Click resaltar | `resaltar_btn` | 97 | 229 |
-| 13 | Right-click copiar tabla (2° vez) | `copiar_todo_btn` | 24 | 174 |
-| 14 | Click copiado | `copiado_btn` | 96 | 212 |
-| 15 | Parsear IDs de cliente (col 7) y tipo de documento (col 2) de la tabla | — | — | — |
-| 16 | Cerrar ventana Ver Todos | `close_tab_btn` | 1896 | 138 |
-| 17 | **[Si "Telefónico"]** Saltar directo a paso score (paso 23) | — | — | — |
-| 18 | **[Si clipboard vacío]** Captura, emitir error, close x5, home, terminar | `screenshot_region` | 10 | 47 |
-| — | (screenshot_region) | w=1720 | h=365 | — |
-| 19 | Click campo ID cliente | `client_id_field` | 100 | 237 |
-| 20 | **Loop validación (hasta 10):** Click seleccionar | `seleccionar_btn` | 50 | 980 |
-| 21 | Click fraude_section | `fraude_section` | 877 | 412 |
-| 22 | Right-click fraude_section | `fraude_section` | 877 | 412 |
-| 23 | Click fraude_copy | `fraude_copy` | 921 | 423 |
-| 24 | **[Si fraude]** Click close_fraude_btn | `close_fraude_btn` | 1246 | 332 |
-| — | (close_tab x2, home) | `close_tab_btn` | 1896 | 138 |
-| — | (home) | `home_area` | 888 | 110 |
-| 25 | Validar registro: Enter → right-click client_name_field → click copi_id_field | `client_name_field` | 36 | 236 |
-| — | (copiar para validar) | `copi_id_field` | 77 | 241 |
-| 26 | **[Si corrupto]** Click client_id_field → Down | `client_id_field` | 100 | 237 |
-| 27 | Esperar 2s | — | — | — |
-| 28 | Click nombre cliente | `nombre_cliente_btn` | 308 | 52 |
-| 29 | Esperar 2.5s → Press Enter | — | — | — |
-| 30 | Right-click área score | `score_area_page` | 981 | 66 |
-| 31 | Click opción copiar del menú | `copy_menu_option` | 1016 | 76 |
-| 32 | Leer score del clipboard | — | — | — |
-| 33 | Click screenshot_confirm (si definido) | `screenshot_confirm` | 953 | 979 |
-| 34 | Captura región | `screenshot_region` | 10 | 47 |
-| — | (screenshot_region) | w=1720 | h=365 | — |
-| 35 | Emitir SCORE_CAPTURADO + partial update | — | — | — |
-| 36 | Cerrar 1 tab | `close_tab_btn` | 1896 | 138 |
+### Coords extras exclusivas del ritual admin en Ver Todos
 
-### Fase 2 — Buscar deudas (`_buscar_deudas_cuenta`) — se llama por cada cuenta
+Sección `ver_todos_admin_extra.*`:
+- `ver_todos_right_click` 72,189
+- `resaltar_todas_btn` 110,247
+- `ver_todos_right_click_2` 80,185
+- `copiar_todas_btn` 137,221
+- `close_ver_todos` 1888,129
+- `primera_cuenta` 97,240
 
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| D-1 | Click FA Cobranza | `fa_cobranza_btn` | 580 | 328 |
-| D-2 | Click filtro etapa | `fa_cobranza_etapa` | 540 | 418 |
-| D-3 | Click filtro actual | `fa_cobranza_actual` | 555 | 454 |
-| D-4 | Click buscar | `fa_cobranza_buscar` | 38 | 356 |
-| D-5 | Esperar 1.5s | — | — | — |
-| D-6 | Limpiar clipboard, Right-click área actual | `fa_actual_area_rightclick` | 540 | 437 |
-| D-7 | Click copiar para validar | `fa_actual_area_copy` | 555 | 443 |
-| D-8 | **[Si "actual" en clipboard]** Click área actual | `fa_actual_area_rightclick` | 540 | 437 |
-| D-9 | Limpiar clipboard, Right-click saldo | `fa_actual_saldo_rightclick` | 19 | 209 |
-| D-10 | Click resaltar todo | `fa_actual_resaltar_todo` | 91 | 374 |
-| D-11 | Right-click saldo (2° vez) | `fa_actual_saldo_rightclick` | 19 | 209 |
-| D-12 | Click copiar saldo | `fa_actual_saldo_copy` | 59 | 298 |
-| D-13 | Leer saldo del clipboard | — | — | — |
-| D-14 | Limpiar clipboard, Right-click ID | `fa_actual_id_rightclick` | 26 | 174 |
-| D-15 | Click copiar ID | `fa_actual_id_copy` | 44 | 185 |
-| D-16 | Leer ID del clipboard | — | — | — |
-| D-17 | Cerrar tab de FA Actual | `close_tab_btn` | 1896 | 138 |
-| D-18 | Click Resumen de Facturación | `resumen_facturacion_btn` | 700 | 329 |
-| D-19 | Click label Cuenta Financiera (para iterar CF) | `cuenta_financiera_label_click` | 67 | 437 |
-| D-20 | **Loop CF:** Ctrl+C para leer label → si 'cuenta financiera' continuar | — | — | — |
-| D-21 | Mover 2 posiciones a la derecha (arrow right x2), Ctrl+C → leer cantidad | — | — | — |
-| D-22 | **[Si cantidad > 0]** Click mostrar lista | `mostrar_lista_btn` | 50 | 498 |
-| D-23 | Click primera celda de la CF | `cuenta_financiera_first_cell` | — | — |
-| D-24 | **Loop filas CF:** Ctrl+C → ID; right x3; Ctrl+C → saldo; left x3; Down | — | — | — |
-| D-25 | Cerrar tabs de FA (x3) | `close_tab_btn` | 1896 | 138 |
-| D-26 | Click house | `house_area` | 954 | 112 |
-
-### Fase 3 — Iterar cuentas adicionales (si hay más de 1)
-
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| C-1 | Click client_id_field para abrir dropdown | `client_id_field` | 100 | 237 |
-| C-2 | Press Down x idx (para llegar a la cuenta N) | — | — | — |
-| C-3 | Click seleccionar | `seleccionar_btn` | 50 | 980 |
-| C-4 | Verificar entrada: right-click client_name_field → click copi_id_field | `client_name_field` | 36 | 236 |
-| — | (copiar para verificar) | `copi_id_field` | 77 | 241 |
-| C-5 | Ejecutar `_buscar_deudas_cuenta` para esta cuenta (pasos D-1 a D-26) | — | — | — |
-
-### Fase 4 — Cierre final
-
-| Paso | Acción | Coord | x | y |
-|------|--------|-------|---|---|
-| Z-1 | Cerrar tabs (x5) | `close_tab_btn` | 1896 | 138 |
-| Z-2 | Click home | `home_area` | 888 | 110 |
-| Z-3 | Limpiar clipboard | — | — | — |
-| Z-4 | Emitir JSON resultado final con score + fa_saldos | — | — | — |
+Y `score.close_score_tab` 1902,139 (solo usado aquí).
 
 ---
 
-## Tabla de coordenadas por archivo JSON
+## Camino DEUDAS VIEJO — `camino_deudas_viejo.py`
 
-### `camino_d_coords_multi.json`
+Legacy cuenta única. Invocado por `camino_deudas_principal._delegar_a_viejo(dni)` cuando Ver Todos muestra "Llamada" (cuenta única detectada).
 
-| Clave | x | y |
-|-------|---|---|
-| acciones | 311 | 33 |
-| general | 342 | 189 |
-| area_pin | 962 | 517 |
-| dni_field | 0 | 0 |
+Usa `client_id_field1`, `validar`/`validar_copy`, `seleccionar_btn1`, `fa_*_btn1`/`fa_*_etapa1`/`fa_*_actual1`/`fa_*_buscar1`, `mostrar_lista_btn1`, `copy_area1`, `close_tab_btn1`.
 
-### `camino_c_coords_multi.json`
+Flag `--skip-initial`: cuando `camino_deudas_principal` delega, ya hizo entrada + Ver Todos. Saltar directo al flujo FA.
 
-| Clave | x | y |
-|-------|---|---|
-| cliente_section | 135 | 168 |
-| tipo_doc_btn | 244 | 237 |
-| cuit_tipo_doc_btn | 179 | 262 |
-| dni_option | 140 | 276 |
-| cuit_option | 151 | 296 |
-| dni_field | 913 | 240 |
-| cuit_field | 912 | 263 |
-| client_id_field | 100 | 237 |
-| client_name_field | 36 | 236 |
-| copi_id_field | 77 | 241 |
-| no_cuit_field | 1325 | 180 |
-| ver_todos_btn | 1810 | 159 |
-| copiar_todo_btn | 24 | 174 |
-| resaltar_btn | 97 | 229 |
-| copiado_btn | 96 | 212 |
-| seleccionar_btn | 37 | 981 |
-| fraude_section | 877 | 412 |
-| fraude_copy | 921 | 423 |
-| close_fraude_btn | 1246 | 332 |
-| nombre_cliente_btn | 308 | 52 |
-| score_area_page | 981 | 66 |
-| score_area_copy | 981 | 66 |
-| copy_menu_option | 1016 | 76 |
-| screenshot_confirm | 953 | 979 |
-| close_tab_btn | 1896 | 138 |
-| home_area | 888 | 110 |
-| dni_from_cuit | 911 | 174 |
-| extra_cuit_select_all | 959 | 336 |
-| extra_cuit_copy | 937 | 262 |
-| screenshot_region | x=10 | y=47 |
-| screenshot_region (tamaño) | w=1720 | h=365 |
+| Paso | Acción | Coord | x | y |
+|------|--------|-------|---|---|
+| 1 | **(si no skip-initial)** entrada_cliente + validar | — | — | — |
+| 2 | Click `client_id_field1` | `validar.client_id_field1` | 36 | 236 |
+| 3 | Click `validar` / `validar_copy` | `validar.validar` / `validar.validar_copy` | 956/999 | 234/246 |
+| 4 | Click `seleccionar_btn1` | `comunes.seleccionar_btn1` | 37 | 981 |
+| 5 | **FA actuales**: `fa_cobranza_btn1` → `fa_cobranza_etapa1` → `fa_cobranza_actual1` → `fa_cobranza_buscar1` | sección `fa_cobranza.*` (variant 1) | 575/573/547/56 | 328/414/449/354 |
+| 5.1 | Iterar por `fa_records_btn` (1876,351) + right-click `fa_actual_*_rightclick` + `fa_actual_*_copy` | `fa_cobranza.fa_records_btn`, `fa_cobranza.fa_actual_*` | — | — |
+| 5.2 | Por cada FA: `_emit_deuda(dni, id_fa, saldo, streamed_ids)` — dedupe por `normalize_id_fa` | — | — | — |
+| 6 | **Cuenta financiera (resumen_cf)**: click `mostrar_lista_btn1` → click `copy_area1` → ritual copy | `resumen_cf.mostrar_lista_btn1`, `resumen_cf.copy_area1` | 57/556 | 504/590 |
+| 6.1 | Iterar filas con `cf_row_step` (20 px) y extraer saldos. Dedupe consistente con paso 5.2 | — | — | — |
+| 7 | Close tab + home | `comunes.close_tab_btn1` / `comunes.home_area` | 1896/888 | 138/110 |
+| 8 | Emitir JSON_RESULT `{dni, fa_saldos, fa_actual?, cuenta_financiera?}` | — | — | — |
 
-### `camino_a_coords_multi.json`
+---
 
-| Clave | x | y |
-|-------|---|---|
-| cliente_section | 266 | 168 |
-| tipo_doc_btn | 244 | 237 |
-| cuit_tipo_doc_btn | 179 | 262 |
-| dni_option | 140 | 276 |
-| cuit_option | 151 | 296 |
-| dni_field | 913 | 240 |
-| cuit_field | 912 | 263 |
-| ver_todos_btn | 1810 | 159 |
-| copiar_todo_btn | 24 | 174 |
-| resaltar_btn | 97 | 229 |
-| copiado_btn | 96 | 212 |
-| close_tab_btn | 1896 | 138 |
-| home_area | 888 | 110 |
-| id_area | 914 | 239 |
-| saldo | 1020 | 173 |
-| saldo_copy | 1031 | 263 |
-| saldo_all_copy | 1051 | 338 |
-| id_cliente_field | 1612 | 219 |
-| dni_field_clear | 373 | 218 |
-| error_dialog_ok | 960 | 546 |
-| config_registros_btn | 1875 | 155 |
-| num_registros_field | 940 | 516 |
-| buscar_registros_btn | 938 | 570 |
-| screenshot_region | x=10 | y=47 |
-| screenshot_region (tamaño) | w=1720 | h=365 |
+## Camino DEUDAS PROVISORIO — `camino_deudas_provisorio.py`
 
-### `camino_b_coords_multi.json`
+Modo validación. Iguala al admin hasta el momento de sumar saldos, PERO:
+- Itera TODAS las cuentas **MENOS la última**.
+- No emite `[DEUDA_ITEM]` ni JSON_RESULT con fa_saldos.
+- Si la suma de saldos ≥ `umbral` (default 60000) → `sys.exit(42)`.
+- Si está por debajo → exit 0 (interpreta `deudas.py` como "deuda válida, seguir flujo normal").
 
-| Clave | x | y |
-|-------|---|---|
-| service_id_field | 305 | 257 |
-| dni_field | 1560 | 256 |
-| cuit_field | 1690 | 256 |
-| first_row | 951 | 273 |
-| actividad_btn | 44 | 272 |
-| filtro_btn | 832 | 318 |
-| close_tab_btn | 1899 | 134 |
-| copy_area | 837 | 374 |
-| id_servicio | 307 | 275 |
-| id_copy | 338 | 310 |
-| id_servicio_offset_y | 19 | — |
-| actividad_right_moves | steps=2 | delay=0.3, methods=["pynput_right"] |
+Constantes:
+- `SCORE_FIJO = "80"` (no se captura del sistema, se hardcodea para marcar "con deuda")
+- `DEFAULT_UMBRAL = 60000.0`
+- `EXIT_UMBRAL_SUPERADO = 42`
 
-### `camino_score_ADMIN_coords.json` — coordenadas exclusivas (las de Camino C también aplican)
+Usa las mismas coords que `camino_deudas_admin` (cliente_section2, ver_todos_btn2, seleccionar_btn2, fa_cobranza_btn2, mostrar_lista_btn2). Ver sección admin para coords.
 
-| Clave | x | y |
-|-------|---|---|
-| ver_todos_btn | 1814 | 151 |
-| seleccionar_btn | 50 | 980 |
-| fa_cobranza_btn | 580 | 328 |
-| fa_cobranza_etapa | 540 | 418 |
-| fa_cobranza_actual | 555 | 454 |
-| fa_cobranza_buscar | 38 | 356 |
-| fa_actual_area_rightclick | 540 | 437 |
-| fa_actual_area_copy | 555 | 443 |
-| fa_actual_saldo_rightclick | 19 | 209 |
-| fa_actual_resaltar_todo | 91 | 374 |
-| fa_actual_saldo_copy | 59 | 298 |
-| fa_actual_id_rightclick | 26 | 174 |
-| fa_actual_id_copy | 44 | 185 |
-| resumen_facturacion_btn | 700 | 329 |
-| cuenta_financiera_label_click / cuenta_financiera_btn | 67 | 437 |
-| mostrar_lista_btn | 50 | 498 |
-| copy_area | 556 | 590 |
-| house_area | 954 | 112 |
-| close_score_tab | 1902 | 139 |
-| primera_cuenta | 97 | 240 |
-| validation_telefonico | 40 | 226 |
-| validation_telefonico_copy | 58 | 242 |
+---
+
+## Camino MOVIMIENTOS — `camino_movimientos.py`
+
+Para cada Service ID (del CSV o descubierto por búsqueda directa):
+
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | Limpieza inicial: 3 campos (service_id, dni_field2, cuit_field2) — patrón 2-clicks + delete/backspace + 3 backspaces | `movimientos.service_id_field`, `entrada.dni_field2`, `entrada.cuit_field2` | 305/1560/1690 | 257/256/256 |
+| 2 | Click DNI/CUIT field + type(dni) | `entrada.dni_field2` o `entrada.cuit_field2` | — | — |
+| 3 | **[Si no hay IDs en CSV]** modo búsqueda directa: Enter + `_recolectar_ids_uno_por_uno` usando `movimientos.id_servicio` + offset Y (19px) | `movimientos.id_servicio`, `movimientos.id_copy` | 307/338 | 275/310 |
+| **Para cada Service ID:** | | | | |
+| 4 | Limpiar service_id_field | `movimientos.service_id_field` | 305 | 257 |
+| 5 | type(service_id) + Enter | — | — | — |
+| 6 | Validar tiene movimientos: right-click `id_servicio` + click `id_copy` → parsear línea de datos (≥3 cols, id con ≥4 dígitos) | — | — | — |
+| 7 | **[No tiene]** log `"{sid}  No Tiene Movimientos"` + siguiente | — | — | — |
+| 8 | Doble-click primera fila | `movimientos.first_row` | 951 | 273 |
+| 9 | Doble-click Actividad | `movimientos.actividad_btn` | 44 | 272 |
+| 10 | Navegación sin mouse (pynput Right ×2) — config `movimientos.actividad_right_moves` | — | — | — |
+| 11 | Doble-click Filtro | `movimientos.filtro_btn` | 832 | 318 |
+| 12 | Click `copy_area2` + Ctrl+C → leer clipboard | `movimientos.copy_area2` | 837 | 374 |
+| 13 | Parsear línea (deduplicar vs `prev_trailing`), log en `multi_copias.log` | — | — | — |
+| 14 | Close tab | `comunes.close_tab_btn2` | 1899 | 134 |
+| Final | Limpieza final de campos + partial `completado` + JSON_RESULT `{dni, ids[], modo: "csv"|"busqueda_directa", log}` | — | — | — |
+
+### CSV
+
+`Workers-T3/scripts/movimientos.py` filtra `20250918_Mza_MIXTA_TM_TT.csv` por columna `DNI`, extrae `Linea2` + números 9-12 dígitos de columnas desde `Domicilio`. Si el DNI no existe, crea un CSV temporal vacío (solo headers) para activar modo búsqueda directa en `camino_movimientos.py`.
+
+---
+
+## Anexo: ritual "copiar tabla" (usado en Ver Todos)
+
+Está centralizado en `shared/flows/ver_todos.py::copiar_tabla`. Secuencia:
+
+1. Click `ver_todos.{ver_todos_btn1|2}` (según camino).
+2. Right-click en `ver_todos.copiar_todo_btn` (24,174).
+3. Click `ver_todos.resaltar_btn` (97,229).
+4. Right-click en `ver_todos.copiar_todo_btn` (24,174) otra vez.
+5. Click `ver_todos.copiado_btn` (96,212).
+6. `clipboard.get_text()`.
+7. Click `comunes.{close_tab_btn1|2}` para cerrar.
+
+---
+
+## Convenciones que sobreviven al refactor
+
+- **Coordenadas absolutas**. Si cambia la resolución de la VM o T3 se reubica → regrabar con `record_camino.py` (F12 para parar). Actualizar `shared/coords.json`.
+- **Claves con sufijo numérico** (`_btn1` vs `_btn2`, `_field1` vs `_field2`) se preservan porque los JSON legacy tenían mismo nombre con diferente valor. Cada camino declara cuál usa en `_used_by`.
+- **Nunca compartir `shared/coords.json` con valores específicos de una VM que no compartan con otra**. Si una VM tiene offset distinto, usar un master propio vía `--coords <path>`.
+- **`normalize_id_fa(id_raw, min_digits=4)`** en `shared/amounts.py` es el normalizador canónico de IDs de FA. Úsalo tanto en streaming (`[DEUDA_ITEM]`) como en el dedupe final (`sanitize_fa_saldos`).

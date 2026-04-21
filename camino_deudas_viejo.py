@@ -26,7 +26,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from shared import clipboard, coords, io_worker, keyboard, mouse
+from shared import amounts, clipboard, coords, io_worker, keyboard, mouse
 from shared.flows.cerrar_y_home import cerrar_tabs, volver_a_home
 from shared.flows.validar_cliente import (
     VALID_FUNCIONAL,
@@ -82,8 +82,23 @@ def _is_valid_fa_id(txt: str, saldo_txt: str = "") -> bool:
     return True
 
 
-def _emit_deuda(dni: str, id_fa: str, saldo: str, tipo: str = "DNI") -> None:
-    """Emite linea [DEUDA_ITEM] que el worker reconoce como deuda_encontrada."""
+def _emit_deuda(
+    dni: str,
+    id_fa: str,
+    saldo: str,
+    streamed_ids: set[str],
+    tipo: str = "DNI",
+) -> None:
+    """Emite linea [DEUDA_ITEM] con dedup por id_fa normalizado.
+
+    streamed_ids se muta en-place con los ids ya emitidos.
+    """
+    norm_id = amounts.normalize_id_fa(id_fa)
+    if not norm_id or norm_id in streamed_ids:
+        if norm_id:
+            print(f"[CaminoDeudasViejo] [DEDUP] id_fa={id_fa} ya emitido, skip stream")
+        return
+    streamed_ids.add(norm_id)
     print(f"[DEUDA_ITEM] dni={dni} id_fa={id_fa} saldo={saldo} tipo={tipo}", flush=True)
 
 
@@ -92,6 +107,7 @@ def _process_fa_actuales(
     base_delay: float,
     dni: str,
     deudas: list[dict],
+    streamed_ids: set[str],
 ) -> int:
     """Busca y procesa multiples 'Actual' por offset Y. Retorna cuantos proceso."""
     bx, by = coords.xy(master, "fa_cobranza.fa_cobranza_buscar1")
@@ -152,7 +168,7 @@ def _process_fa_actuales(
 
         if id_txt and saldo_txt and not any(d.get("id_fa") == id_txt for d in deudas):
             deudas.append({"id_fa": id_txt, "saldo": saldo_txt, "tipo_documento": "DNI"})
-            _emit_deuda(dni, id_txt, saldo_txt)
+            _emit_deuda(dni, id_txt, saldo_txt, streamed_ids)
 
         cerrar_tabs(master, veces=1, close_tab_key=CLOSE_TAB_KEY)
         procesados += 1
@@ -203,6 +219,7 @@ def _process_cuenta_financiera(
     base_delay: float,
     dni: str,
     deudas: list[dict],
+    streamed_ids: set[str],
 ) -> None:
     """Itera secciones 'Cuenta Financiera' (~5 max) copiando ID/saldo de cada fila."""
     cf_section = coords.get(master, "resumen_cf")
@@ -300,7 +317,7 @@ def _process_cuenta_financiera(
 
         if first_id and not any(d.get("id_fa") == first_id for d in deudas):
             deudas.append({"id_fa": first_id, "saldo": first_saldo, "tipo_documento": "DNI"})
-            _emit_deuda(dni, first_id, first_saldo)
+            _emit_deuda(dni, first_id, first_saldo, streamed_ids)
         prev_first_id = first_id_num
 
         # filas restantes
@@ -317,7 +334,7 @@ def _process_cuenta_financiera(
             saldo_cf = clipboard.get_text().strip()
             if id_cf and not any(d.get("id_fa") == id_cf for d in deudas):
                 deudas.append({"id_fa": id_cf, "saldo": saldo_cf, "tipo_documento": "DNI"})
-                _emit_deuda(dni, id_cf, saldo_cf)
+                _emit_deuda(dni, id_cf, saldo_cf, streamed_ids)
             keyboard.send_left_presses(3, interval=0.2, use_pynput=use_pynput)
 
         if cf_index == 0 and n_to_copy == 1:
@@ -346,6 +363,7 @@ def _ejecutar_un_registro(
     base_delay: float,
     dni: str,
     deudas: list[dict],
+    streamed_ids: set[str],
 ) -> bool:
     """Selecciona + valida + procesa FA Actuales y CF. True si proceso algo."""
     sx, sy = coords.xy(master, "comunes.seleccionar_btn1")
@@ -365,8 +383,8 @@ def _ejecutar_un_registro(
         x, y = coords.xy(master, clave)
         mouse.click(x, y, label, base_delay)
 
-    _process_fa_actuales(master, base_delay, dni, deudas)
-    _process_cuenta_financiera(master, base_delay, dni, deudas)
+    _process_fa_actuales(master, base_delay, dni, deudas, streamed_ids)
+    _process_cuenta_financiera(master, base_delay, dni, deudas, streamed_ids)
     return True
 
 
@@ -380,6 +398,7 @@ def run(dni: str, master_path: Path | None, skip_initial: bool = False) -> None:
 
     master = coords.load_master(master_path) if master_path else coords.load_master()
     deudas: list[dict] = []
+    streamed_ids: set[str] = set()
 
     if skip_initial:
         print("[CaminoDeudasViejo] MODO SKIP_INITIAL: ya dentro de la cuenta, voy a FA")
@@ -391,8 +410,8 @@ def run(dni: str, master_path: Path | None, skip_initial: bool = False) -> None:
         ):
             x, y = coords.xy(master, clave)
             mouse.click(x, y, label, base_delay)
-        _process_fa_actuales(master, base_delay, dni, deudas)
-        _process_cuenta_financiera(master, base_delay, dni, deudas)
+        _process_fa_actuales(master, base_delay, dni, deudas, streamed_ids)
+        _process_cuenta_financiera(master, base_delay, dni, deudas, streamed_ids)
         cerrar_tabs(master, veces=3, close_tab_key=CLOSE_TAB_KEY)
         volver_a_home(master)
         _emitir_resultado(dni, deudas)
@@ -406,7 +425,7 @@ def run(dni: str, master_path: Path | None, skip_initial: bool = False) -> None:
     print(f"[CaminoDeudasViejo] ID registro 1: '{primer_id}'")
     processed_ids: list[str] = [primer_id] if primer_id else []
 
-    _ejecutar_un_registro(master, base_delay, dni, deudas)
+    _ejecutar_un_registro(master, base_delay, dni, deudas, streamed_ids)
 
     for loop_iteration in range(1, MAX_RECORDS):
         clipboard_before = _read_clipboard_stable(max_attempts=2, delay=0.2)
@@ -426,7 +445,7 @@ def run(dni: str, master_path: Path | None, skip_initial: bool = False) -> None:
             break
 
         processed_ids.append(current_id)
-        _ejecutar_un_registro(master, base_delay, dni, deudas)
+        _ejecutar_un_registro(master, base_delay, dni, deudas, streamed_ids)
 
     time.sleep(2.0)
     volver_a_home(master)

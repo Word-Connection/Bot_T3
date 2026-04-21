@@ -92,3 +92,25 @@ def sum_saldos(fa_saldos: list[dict]) -> float:
         if v is not None:
             total += v
     return total
+
+
+def normalize_id_fa(id_raw: Any, min_digits: int = 4) -> str | None:
+    """Extrae los primeros digitos de un id_fa. None si no cumple min_digits o es <=0.
+
+    Misma regla que `sanitize_fa_saldos` para garantizar dedup consistente entre
+    streaming y resultado final.
+    """
+    if id_raw is None:
+        return None
+    s = str(id_raw).strip()
+    if not s:
+        return None
+    m = re.search(rf"(\d{{{min_digits},}})", s)
+    if not m:
+        return None
+    try:
+        if int(m.group(0)) <= 0:
+            return None
+    except ValueError:
+        return None
+    return m.group(0)
