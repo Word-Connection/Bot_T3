@@ -50,8 +50,10 @@ def sanitize_fa_saldos(fa_saldos: Any, min_digits: int = 4) -> list[dict]:
     """Limpia la lista de fa_saldos: id valido (>=min_digits, >0), saldo string.
 
     Filtra entradas sin id, con id <=0, o con menos de min_digits.
+    Deduplica por id_fa: ante el mismo id conserva solo la primera aparicion.
     """
     cleaned: list[dict] = []
+    seen_ids: set[str] = set()
     if not fa_saldos:
         return cleaned
     for item in fa_saldos:
@@ -70,7 +72,11 @@ def sanitize_fa_saldos(fa_saldos: Any, min_digits: int = 4) -> list[dict]:
             continue
         if id_value <= 0:
             continue
-        entry = {"id_fa": m.group(0), "saldo": saldo_raw}
+        id_normalized = m.group(0)
+        if id_normalized in seen_ids:
+            continue
+        seen_ids.add(id_normalized)
+        entry = {"id_fa": id_normalized, "saldo": saldo_raw}
         for extra_key in ("tipo_documento", "cuit"):
             if extra_key in item and item[extra_key]:
                 entry[extra_key] = item[extra_key]
