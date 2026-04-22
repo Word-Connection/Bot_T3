@@ -302,11 +302,19 @@ def _run_deudas_validacion(dni, score_data, umbral):
         sys.exit(1)
 
     score = score_data.get("score", "")
+    ids_cliente = score_data.get("ids_cliente", [])
+    dni_usar = score_data.get("dni", dni)
+
     cmd = [sys.executable, '-u', _CAMINO_DEUDAS_PROV,
-           '--dni', dni, '--umbral-suma', str(umbral)]
+           '--dni', dni_usar, '--umbral-suma', str(umbral)]
+    if ids_cliente:
+        cmd.append(json.dumps(ids_cliente))
+
+    def on_line(line):
+        _handle_progress_markers(line, dni)
 
     try:
-        stdout, rc = _run_subprocess(cmd, timeout=1800)
+        stdout, rc = _run_subprocess(cmd, timeout=1800, on_line=on_line)
     except subprocess.TimeoutExpired:
         _send_partial(dni, "error_analisis", "Timeout en validacion de deudas")
         _emit_result({"error": "Timeout camino_deudas_provisorio", "dni": dni})

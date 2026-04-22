@@ -17,7 +17,7 @@
 | `camino_deudas_principal.py` | run_camino_a_multi | Modo normal, score==80, >1 cuenta (iteración por id_fa) |
 | `camino_deudas_admin.py` | run_camino_score_ADMIN | Worker admin: score + deudas en TODAS las cuentas |
 | `camino_deudas_viejo.py` | run_camino_a_viejo_multi | Cuenta única detectada ("Llamada" en Ver Todos) |
-| `camino_deudas_provisorio.py` | — | Modo validación: suma saldos salvo la última, aborta exit 42 si ≥ umbral |
+| `camino_deudas_provisorio.py` | — | Modo validación: mismo flujo rápido que principal, suma en tiempo real y aborta exit 42 si ≥ umbral |
 | `camino_movimientos.py` | run_camino_b_multi | Service IDs desde CSV (o búsqueda directa) |
 | `camino_pin.py` | run_camino_d_multi | Envío de PIN por teléfono |
 
@@ -198,37 +198,67 @@ Flag `--skip-initial`: cuando `camino_deudas_principal` delega, ya hizo entrada 
 
 ## Camino DEUDAS PROVISORIO — `camino_deudas_provisorio.py`
 
-Modo validación. Iguala al admin hasta el momento de sumar saldos, PERO:
-- Itera TODAS las cuentas **MENOS la última**.
-- No emite `[DEUDA_ITEM]` ni JSON_RESULT con fa_saldos.
-- Si la suma de saldos ≥ `umbral` (default 60000) → `sys.exit(42)`.
-- Si está por debajo → exit 0 (interpreta `deudas.py` como "deuda válida, seguir flujo normal").
+Modo validación. Reutiliza el **mismo flujo rápido** de `camino_deudas_principal` vía `shared/flows/iterar_registros.py` (iteración por `id_fa` con `saldo_principal.*`), con dos diferencias:
+
+1. **Chequeo de umbral en tiempo real**: tras copiar cada saldo se suma al acumulado; si `suma >= umbral` (default 60000 ARS) aborta la iteración, cierra tabs + home y `sys.exit(42)` SIN emitir `JSON_RESULT` → el orquestador (`Workers-T3/scripts/deudas.py`) dispara `camino_score_corto` para devolver score=98 falso.
+2. **Modo batch**: `iterar_registros(..., stream_cuenta_item=False)` — NO imprime `[CUENTAS_TOTAL]` ni `[CUENTA_ITEM]`, los saldos se envían solo en el `JSON_RESULT` final si la suma no supera el umbral.
 
 Constantes:
-- `SCORE_FIJO = "80"` (no se captura del sistema, se hardcodea para marcar "con deuda")
+- `SCORE_FIJO = "80"` (hardcodeado; el score ya fue validado por `camino_score` upstream)
 - `DEFAULT_UMBRAL = 60000.0`
 - `EXIT_UMBRAL_SUPERADO = 42`
 
-Usa las mismas coords que `camino_deudas_admin` (cliente_section2, ver_todos_btn2, seleccionar_btn2, fa_cobranza_btn2, mostrar_lista_btn2). Ver sección admin para coords.
+Usa las mismas coords que `camino_deudas_principal` (`cliente_section1`, `ver_todos_btn1`, `saldo_principal.*`, `close_tab_btn1`). Ver sección principal para el detalle.
 
-### Validación de entrada por cuenta (`_validar_entrada_cuenta`)
+### Secuencia
 
-**Ritual B "¿es telefonico?" post-seleccionar** — centralizado en `shared/flows/telefonico.py::verificar_telefonico_post_seleccionar`. Usado por `camino_deudas_provisorio` y `camino_deudas_admin._verify_entrada_cuenta` (y debería agregarse a `camino_deudas_principal` cuando corresponda).
+| Paso | Acción | Coord / helper | Nota |
+|------|--------|----------------|------|
+| 1 | `entrada_cliente(cliente_section1)` | `entrada.cliente_section1` (266, 168) + `dni_field1`/`cuit_field1` | Igual que principal |
+| 2 | **Ritual A "¿cliente creado?"** `validar_cliente_creado` | `validar.client_name_field` (36,236) + `validar.copi_id_field` (77,241) | ANTES de Ver Todos |
+| 2a | `es_telefonico(texto_a)` → delegar `camino_deudas_viejo --skip-initial`, parsear su JSON_RESULT, sumar saldos → si ≥ umbral `exit 42`, sino emitir JSON_RESULT | — | Cuenta única detectada ya en ritual A |
+| 3 | **[A vacío]** Ritual B "¿es telefonico?" `verificar_telefonico_post_seleccionar` | `validar.validation_telefonico_focus` (64,235) + `validation_telefonico` (35,225) + `validation_telefonico_copy` (58,242) | Ritual compartido con principal/admin |
+| 3a | **[Ritual B == 'telefonico']** mismo delegate a `camino_deudas_viejo --skip-initial` + chequeo umbral | — | — |
+| 3b | **[Ritual B vacío]** CLIENTE NO CREADO: Enter + cerrar tabs + home + JSON_RESULT `{error}` | — | — |
+| 4 | **[A = True]** `copiar_tabla(ver_todos_btn1)` | `ver_todos.ver_todos_btn1` | Igual que principal |
+| 5 | `parse_fa_data(tabla)` → `[{id_fa, cuit, id_cliente}]` | `shared/flows/iterar_registros.parse_fa_data` | Todas las cuentas (no excluye la última) |
+| 6 | **[Si >20]** `expandir_registros(master, N, base_delay)` | `saldo_principal.config_registros_btn/num_registros_field/buscar_registros_btn` | Igual que principal |
+| 7 | `iterar_registros(..., stream_cuenta_item=False, on_row=check_umbral)` | `shared/flows/iterar_registros.iterar_registros` | **Callback `check_umbral` aborta la iteración si `sum_saldos >= umbral`** |
+| 7a | **[aborted=True]** `_abortar_por_umbral` → cerrar tabs + home + `sys.exit(42)` | — | Sin JSON_RESULT |
+| 8 | **[Si vino `ids_cliente_filter` del score]** filtrar fa_saldos por `id_cliente_interno ∈ filter` + `buscar_por_id_cliente` para faltantes (también con check_umbral) | `shared/flows/iterar_registros.buscar_por_id_cliente` | Mismo filtro que principal |
+| 9 | Cerrar tabs + home | `cerrar_y_home` | — |
+| 10 | `sanitize_fa_saldos` + emitir JSON_RESULT `{dni, score: "80", fa_saldos, suma_deudas, total_deuda, finalizado: "exitoso"}` | — | Solo si umbral NO superado |
 
-Distinto del **Ritual A "¿cliente creado?"** (`validar_cliente_creado`, usa `client_name_field`/`copi_id_field` = (36, 236)/(77, 241)), que se ejecuta ANTES de Ver Todos y solo chequea si hay ID del cliente.
+CLI:
 
-| Paso | Acción | Coord (sección.key) | x | y |
-|------|--------|---------------------|---|---|
+```bash
+python camino_deudas_provisorio.py --dni 12345678 --umbral-suma 60000 '[1234,5678]'
+```
+
+Argumentos:
+- `--dni` (obligatorio)
+- `--coords` (opcional, path a master JSON)
+- `--umbral-suma` (opcional, default 60000)
+- posicional opcional: JSON con IDs cliente del `camino_score` para filtrar (igual que principal)
+
+### Ritual B "¿es telefonico?" — post-seleccionar
+
+Centralizado en `shared/flows/telefonico.py::verificar_telefonico_post_seleccionar`. Usado por `camino_deudas_principal`, `camino_deudas_provisorio` y `camino_deudas_admin._verify_entrada_cuenta`. Distinto del **Ritual A "¿cliente creado?"** (`validar_cliente_creado`, usa `client_name_field`/`copi_id_field` = (36,236)/(77,241)).
+
+| Paso | Acción | Coord | x | y |
+|------|--------|-------|---|---|
 | 1 | `clipboard.clear()` + sleep 0.25 | — | — | — |
-| 2 | **Left-click** focus del área | `validar.validation_telefonico_focus` | **64** | **235** |
-| 3 | **Right-click** abre menú contextual | `validar.validation_telefonico` | **35** | **225** |
+| 2 | **Left-click** focus | `validar.validation_telefonico_focus` | 64 | 235 |
+| 3 | **Right-click** abre menú | `validar.validation_telefonico` | 35 | 225 |
 | 4 | sleep 0.4 | — | — | — |
-| 5 | **Left-click** opción "Copiar" del menú | `validar.validation_telefonico_copy` | **58** | **242** |
+| 5 | **Left-click** "Copiar" | `validar.validation_telefonico_copy` | 58 | 242 |
 | 6 | sleep 0.35 + leer clipboard + `es_telefonico(texto)` | — | — | — |
 
-Si no matchea → provisorio corre `_recuperar_dropdown` y salta la cuenta; admin presiona Enter y devuelve False.
-
-> Cambio 2026-04-22: (a) se separaron explícitamente los rituales A (pre-VerTodos) y B (post-seleccionar), las coords `client_name_field`/`copi_id_field` (36,236)/(77,241) quedan SOLO para ritual A; (b) ritual B gana la key `validation_telefonico_focus` (64, 235) como paso previo de focus, y usa `validation_telefonico` (35, 225) + `validation_telefonico_copy` (58, 242); (c) provisorio y admin ahora delegan en `verificar_telefonico_post_seleccionar` en vez de duplicar el ritual.
+> Cambio 2026-04-22:
+> - (a) rituales A (pre-VerTodos) y B (post-seleccionar) quedan separados; coords `client_name_field`/`copi_id_field` (36,236)/(77,241) son SOLO para ritual A; ritual B usa `validation_telefonico_*`;
+> - (b) `camino_deudas_provisorio` pasa a usar el MISMO flujo rápido de principal (helper `shared/flows/iterar_registros.py`), NO el flujo legacy FA Cobranza/Cuenta Financiera; itera TODAS las cuentas (sin excluir la última);
+> - (c) el chequeo de umbral se hace vía `on_row` callback pasado a `iterar_registros` → aborta in-situ y `exit 42` (sin emitir JSON_RESULT) cuando `sum_saldos >= umbral`;
+> - (d) provisorio acepta ahora un posicional JSON con `ids_cliente` (igual que principal) que `Workers-T3/scripts/deudas.py::_run_deudas_validacion` le pasa desde `score_data`.
 
 ---
 

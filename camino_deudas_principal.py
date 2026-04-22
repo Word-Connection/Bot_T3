@@ -24,12 +24,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import pyautogui as pg
 
@@ -37,18 +35,23 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from shared import amounts, capture as cap
-from shared import clipboard, coords, io_worker, keyboard, mouse
+from shared import capture as cap
+from shared import coords, io_worker, keyboard, mouse
 from shared.flows.entrada_cliente import entrada_cliente
+from shared.flows.iterar_registros import (
+    MAX_REGISTROS_SIN_EXPANDIR,
+    buscar_por_id_cliente,
+    expandir_registros,
+    iterar_registros,
+    parse_fa_data,
+)
 from shared.flows.telefonico import es_telefonico, verificar_telefonico_post_seleccionar
 from shared.flows.validar_cliente import validar_cliente_creado
 from shared.flows.ver_todos import copiar_tabla
-from shared.parsing import extract_first_number, split_table_cols
 
 CAPTURE_DIR_DEFAULT = _HERE / "capturas_camino_deudas_principal"
 CLOSE_TAB_KEY = "close_tab_btn1"
-ID_AREA_OFFSET_Y_DEFAULT = 19
-MAX_REGISTROS_SIN_EXPANDIR = 20
+LOG_PREFIX = "[CaminoDeudasPrincipal]"
 
 
 def _float_env(name: str, default: float) -> float:
@@ -56,108 +59,6 @@ def _float_env(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
     except ValueError:
         return default
-
-
-def _parse_fa_data(table_text: str) -> list[dict[str, str]]:
-    """Parsea la tabla copiada y extrae [{id_fa, cuit, id_cliente}].
-
-    Detecta header (tabs o 4+ espacios), localiza columnas:
-      - 'ID del FA' / 'FA ID'
-      - 'Tipo ID Compania' (opcional)
-      - 'ID del Cliente' / 'Customer ID' (opcional)
-
-    Si la columna del FA no contiene digitos, prueba la anterior.
-    Fallback: busca el primer numerico de >=6 digitos en columnas posteriores al FA.
-    """
-    if not table_text:
-        return []
-    lines = table_text.strip().split("\n")
-    if len(lines) < 2:
-        print("[CaminoDeudasPrincipal] WARN tabla con menos de 2 lineas")
-        return []
-
-    header = lines[0]
-    header_parts = re.split(r"\t+", header.strip())
-    if len(header_parts) == 1:
-        header_parts = re.split(r"\s{4,}", header.strip())
-
-    fa_index = None
-    for cand in ("ID del FA", "FA ID"):
-        try:
-            fa_index = header_parts.index(cand)
-            break
-        except ValueError:
-            continue
-    if fa_index is None:
-        print(f"[CaminoDeudasPrincipal] ERROR no se encontro 'ID del FA'/'FA ID' en header: {header_parts}")
-        return []
-
-    cuit_index = None
-    for idx, part in enumerate(header_parts):
-        if "Tipo ID Compa" in part:
-            cuit_index = idx
-            break
-
-    cliente_index = None
-    for cand in ("ID del Cliente", "Customer ID"):
-        try:
-            cliente_index = header_parts.index(cand)
-            break
-        except ValueError:
-            continue
-
-    print(f"[CaminoDeudasPrincipal] columnas: fa={fa_index} cuit={cuit_index} cliente={cliente_index}")
-
-    out: list[dict[str, str]] = []
-    for i, line in enumerate(lines[1:], start=1):
-        if not line.strip():
-            continue
-        parts = re.split(r"\t+", line.strip())
-        if len(parts) == 1:
-            parts = re.split(r"\s{4,}", line.strip())
-        if len(parts) <= fa_index:
-            continue
-
-        fa_id = parts[fa_index].strip()
-        if not (fa_id and fa_id.isdigit()):
-            if fa_index > 0 and len(parts) > fa_index - 1:
-                alt = parts[fa_index - 1].strip()
-                if alt and alt.isdigit():
-                    fa_id = alt
-
-        if not (fa_id and fa_id.isdigit()):
-            continue
-
-        tiene_cuit = ""
-        if cuit_index is not None and len(parts) > cuit_index:
-            if parts[cuit_index].strip().upper() == "CUIT":
-                tiene_cuit = "CUIT"
-
-        id_cliente = ""
-        if cliente_index is not None and len(parts) > cliente_index:
-            cand = parts[cliente_index].strip()
-            if cand.isdigit():
-                id_cliente = cand
-
-        if not id_cliente:
-            for offset in (2, 3, 4):
-                fb = fa_index + offset
-                if len(parts) > fb:
-                    cand = parts[fb].strip()
-                    if cand.isdigit() and len(cand) >= 6:
-                        id_cliente = cand
-                        break
-
-        out.append({"id_fa": fa_id, "cuit": tiene_cuit, "id_cliente": id_cliente})
-        log = f"[CaminoDeudasPrincipal] reg {i}: id_fa={fa_id}"
-        if tiene_cuit:
-            log += " (CUIT)"
-        if id_cliente:
-            log += f" id_cliente={id_cliente}"
-        print(log)
-
-    print(f"[CaminoDeudasPrincipal] total IDs parseados: {len(out)}")
-    return out
 
 
 def _delegar_a_viejo(dni: str) -> int:
@@ -188,44 +89,6 @@ def _captura_cliente_no_creado(master: dict, dni: str, shot_dir: Path) -> Path |
     return None
 
 
-def _expandir_registros(master: dict, num_registros: int, base_delay: float) -> None:
-    """Configura el sistema para mostrar N>20 registros."""
-    print(f"[CaminoDeudasPrincipal] expandiendo a {num_registros} registros")
-
-    cbx, cby = coords.xy(master, "saldo_principal.config_registros_btn")
-    if not (cbx or cby):
-        print("[CaminoDeudasPrincipal] WARN config_registros_btn no definido")
-        return
-    mouse.click(cbx, cby, "config_registros_btn", 1.0)
-
-    nfx, nfy = coords.xy(master, "saldo_principal.num_registros_field")
-    if not (nfx or nfy):
-        print("[CaminoDeudasPrincipal] WARN num_registros_field no definido")
-        return
-    mouse.click(nfx, nfy, "num_registros_field", 0.3)
-
-    # limpieza robusta
-    pg.click()
-    time.sleep(0.1)
-    pg.click()
-    time.sleep(0.2)
-    pg.press("delete")
-    time.sleep(0.3)
-    pg.press("backspace")
-    time.sleep(0.2)
-    mouse.click(nfx, nfy, "num_registros_field (re-click)", 0.2)
-    for _ in range(3):
-        pg.press("backspace")
-        time.sleep(0.1)
-    time.sleep(0.3)
-
-    keyboard.type_text(str(num_registros), 0.8)
-
-    bbx, bby = coords.xy(master, "saldo_principal.buscar_registros_btn")
-    if bbx or bby:
-        mouse.click(bbx, bby, "buscar_registros_btn", 2.5)
-
-
 def _parse_saldo_float(saldo: str) -> float:
     """Convierte saldo en formato es_AR ('1.234,56') a float. Retorna 0.0 si no parseable o vacío."""
     if not saldo:
@@ -243,147 +106,6 @@ def _format_currency(value: float) -> str:
     """Formatea float como moneda argentina: '$1.234.567,89'."""
     s = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"${s}"
-
-
-def _copiar_saldo_registro(master: dict, base_delay: float) -> str:
-    """Doble-click saldo -> right-click -> saldo_all_copy -> right-click -> saldo_copy."""
-    sx, sy = coords.xy(master, "saldo_principal.saldo")
-    sax, say = coords.xy(master, "saldo_principal.saldo_all_copy")
-    scx, scy = coords.xy(master, "saldo_principal.saldo_copy")
-
-    mouse.double_click(sx, sy, "saldo", 0.5)
-    mouse.right_click(sx, sy, "saldo (right 1)", 0.5)
-    mouse.click(sax, say, "saldo_all_copy", base_delay)
-    mouse.right_click(sx, sy, "saldo (right 2)", 0.5)
-    mouse.click(scx, scy, "saldo_copy", 0.5)
-
-    return clipboard.get_text().strip()
-
-
-def _iterar_registros(
-    master: dict,
-    fa_data_list: list[dict[str, str]],
-    base_delay: float,
-) -> list[dict[str, str]]:
-    """Itera cada registro (id_area + offset Y), copia saldo, cierra tab.
-
-    Devuelve [{id_fa, saldo, [cuit?], [id_cliente_interno?]}].
-    """
-    fa_saldos: list[dict[str, str]] = []
-    streamed_ids: set[str] = set()
-
-    iax, iay = coords.xy(master, "saldo_principal.id_area")
-    offset_y = int(coords.get(master, "saldo_principal").get("id_area_offset_y", ID_AREA_OFFSET_Y_DEFAULT))
-    close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
-
-    total = len(fa_data_list)
-    # Anuncio de total de cuentas: el frontend fija la barra en 0/total.
-    print(f"[CUENTAS_TOTAL] {json.dumps({'total': total})}", flush=True)
-
-    for idx, fa_data in enumerate(fa_data_list):
-        fa_id = fa_data["id_fa"]
-        cuit_flag = fa_data.get("cuit", "")
-        id_cliente_int = fa_data.get("id_cliente", "")
-        print(f"[CaminoDeudasPrincipal] registro {idx + 1}/{total} id_fa={fa_id}{' (CUIT)' if cuit_flag else ''}")
-
-        clipboard.clear()
-        cur_y = iay + (idx * offset_y)
-        mouse.click(iax, cur_y, f"id_area #{idx + 1}", 1.5)
-
-        saldo = _copiar_saldo_registro(master, base_delay)
-        print(f"[CaminoDeudasPrincipal] id_fa={fa_id} saldo='{saldo}'")
-
-        item: dict[str, str] = {"id_fa": fa_id, "saldo": saldo}
-        if cuit_flag:
-            item["cuit"] = cuit_flag
-        if id_cliente_int:
-            item["id_cliente_interno"] = id_cliente_int
-        fa_saldos.append(item)
-
-        # Stream: un evento por cuenta procesada (tenga deuda o no). Frontend avanza
-        # la barra con cada [CUENTA_ITEM] y sólo dibuja linea en el body cuando trae
-        # saldo > 0. Dedupe por id normalizado para no contar la misma cuenta dos veces.
-        norm_id = amounts.normalize_id_fa(fa_id)
-        if norm_id and norm_id in streamed_ids:
-            print(f"[CaminoDeudasPrincipal] [DEDUP] id_fa={fa_id} ya emitido, skip stream")
-        else:
-            if norm_id:
-                streamed_ids.add(norm_id)
-            saldo_emit = ("$" + saldo) if _parse_saldo_float(saldo) > 0 else ""
-            print(f"[CUENTA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': saldo_emit})}", flush=True)
-
-        if close_x or close_y:
-            mouse.click(close_x, close_y, "close_tab_btn", base_delay)
-
-    return fa_saldos
-
-
-def _limpiar_campo(master: dict, key: str, label: str) -> None:
-    """Patron de limpieza: 2 clicks + delete + backspace + 3 backspaces."""
-    fx, fy = coords.xy(master, key)
-    if not (fx or fy):
-        return
-    print(f"[CaminoDeudasPrincipal] limpiando {label}")
-    mouse.click(fx, fy, label, 0.2)
-    mouse.click(fx, fy, label, 0.1)
-    mouse.click(fx, fy, label, 0.2)
-    pg.press("delete")
-    time.sleep(0.6)
-    pg.press("backspace")
-    time.sleep(0.2)
-    mouse.click(fx, fy, label, 0.2)
-    for _ in range(3):
-        pg.press("backspace")
-        time.sleep(0.1)
-    time.sleep(0.2)
-
-
-def _buscar_por_id_cliente(
-    master: dict,
-    id_cliente: str,
-    base_delay: float,
-) -> list[dict[str, str]]:
-    """Busca cuentas FA filtrando por ID Cliente. Retorna [{id_fa, saldo, id_cliente_interno}]."""
-    print(f"[CaminoDeudasPrincipal] buscando por ID Cliente {id_cliente}")
-
-    _limpiar_campo(master, "entrada.dni_field_clear", "dni_field_clear")
-    _limpiar_campo(master, "entrada.id_cliente_field", "id_cliente_field")
-
-    icx, icy = coords.xy(master, "entrada.id_cliente_field")
-    mouse.click(icx, icy, "id_cliente_field", base_delay)
-    keyboard.type_text(id_cliente, base_delay)
-    keyboard.press_enter(1.0)
-
-    tabla = copiar_tabla(
-        master,
-        ver_todos_key="ver_todos_btn1",
-        close_tab_key=CLOSE_TAB_KEY,
-    )
-    if len(tabla.strip()) < 30:
-        print(f"[CaminoDeudasPrincipal] sin cuentas para ID Cliente {id_cliente}")
-        keyboard.press_enter(0.5)
-        eox, eoy = coords.xy(master, "ver_todos.error_dialog_ok")
-        if eox or eoy:
-            mouse.click(eox, eoy, "error_dialog_ok", 0.5)
-        return []
-
-    fa_data_list = _parse_fa_data(tabla)
-    if not fa_data_list:
-        return []
-
-    print(f"[CaminoDeudasPrincipal] encontrados {len(fa_data_list)} para ID Cliente {id_cliente}")
-
-    fa_saldos = _iterar_registros(master, fa_data_list, base_delay)
-    # marcar todos con id_cliente_interno (override) para el filtro posterior
-    for item in fa_saldos:
-        item["id_cliente_interno"] = id_cliente
-
-    # cerrar pestanas adicionales tras el ultimo
-    close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
-    if close_x or close_y:
-        for i in range(3):
-            mouse.click(close_x, close_y, f"close_tab_btn (extra {i + 1})", 0.5)
-    return fa_saldos
 
 
 def run(
@@ -468,7 +190,7 @@ def run(
     )
 
     # 5. Parsear
-    fa_data_list = _parse_fa_data(tabla)
+    fa_data_list = parse_fa_data(tabla, log_prefix=LOG_PREFIX)
     num_registros = len(fa_data_list)
 
     # cerrar Ver Todos (copiar_tabla ya lo cierra, pero por si acaso)
@@ -477,7 +199,7 @@ def run(
     # 6. Expandir si >20
     if num_registros > MAX_REGISTROS_SIN_EXPANDIR:
         time.sleep(1.0)
-        _expandir_registros(master, num_registros, base_delay)
+        expandir_registros(master, num_registros, base_delay, log_prefix=LOG_PREFIX)
 
     # 7. Iterar
     if not fa_data_list:
@@ -490,7 +212,13 @@ def run(
     msg_est = f"Analizando {num_registros} cuenta{'s' if num_registros > 1 else ''}, tiempo estimado ~{mins_est}:{segs_est:02d} minutos"
     print(f"[CaminoDeudasPrincipal] {msg_est}")
 
-    fa_saldos = _iterar_registros(master, fa_data_list, base_delay)
+    fa_saldos, _ = iterar_registros(
+        master,
+        fa_data_list,
+        base_delay,
+        log_prefix=LOG_PREFIX,
+        close_tab_key=CLOSE_TAB_KEY,
+    )
 
     # cerrar pestanas adicionales del ultimo
     close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
@@ -519,7 +247,13 @@ def run(
         if faltantes:
             print(f"[CaminoDeudasPrincipal] IDs faltantes: {len(faltantes)}")
             for id_falt in faltantes:
-                extras = _buscar_por_id_cliente(master, id_falt, base_delay)
+                extras, _ = buscar_por_id_cliente(
+                    master,
+                    id_falt,
+                    base_delay,
+                    log_prefix=LOG_PREFIX,
+                    close_tab_key=CLOSE_TAB_KEY,
+                )
                 for ex in extras:
                     ex.pop("id_cliente_interno", None)
                     fa_saldos.append(ex)
