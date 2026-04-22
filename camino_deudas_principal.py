@@ -4,16 +4,20 @@ Flujo principal de busqueda de deudas (saldos por ID de FA) cuando hay >1 cuenta
 
 Secuencia:
   1. entrada_cliente (cliente_section1, dni_field1/cuit_field1)
-  2. Ver Todos -> copiar tabla
-  3. Si tabla corta: verificar (23,195) -> si dice "Llamada" -> delegar en camino_deudas_viejo --skip-initial
-  4. Si sigue vacia: cliente no creado -> captura -> resultado
-  5. Parsear tabla -> [{id_fa, cuit, id_cliente}]
-  6. Si >20 registros: expandir via config_registros_btn / num_registros_field / buscar_registros_btn
-  7. Iterar cada registro: id_area + offset_y -> doble-click saldo -> right-click ->
+  2. Ritual A '¿cliente creado?': validar_cliente_creado (right-click validar.client_name_field + click validar.copi_id_field)
+  3. Si ritual A NO copio ID:
+       - Ritual B '¿es telefonico?': verificar_telefonico_post_seleccionar (focus + right-click + copy en validation_telefonico*)
+       - Si ritual B == 'telefonico' -> delegar en camino_deudas_viejo --skip-initial
+       - Si ritual B vacio -> CLIENTE NO CREADO (captura + cerrar + home + result)
+  4. Si ritual A copio ID (o devolvio texto 'Telefonico' literal) -> seguir con Ver Todos
+  5. Ver Todos -> copiar tabla
+  6. Parsear tabla -> [{id_fa, cuit, id_cliente}]
+  7. Si >20 registros: expandir via config_registros_btn / num_registros_field / buscar_registros_btn
+  8. Iterar cada registro: id_area + offset_y -> doble-click saldo -> right-click ->
      saldo_all_copy -> right-click -> saldo_copy -> leer clipboard
-  8. Filtrar por ids_cliente_filter (si vino del camino_score)
-  9. Buscar IDs faltantes por id_cliente_field
- 10. Cerrar tabs + home, dedupe, emitir JSON_RESULT
+  9. Filtrar por ids_cliente_filter (si vino del camino_score)
+ 10. Buscar IDs faltantes por id_cliente_field
+ 11. Cerrar tabs + home, dedupe, emitir JSON_RESULT
 """
 from __future__ import annotations
 
@@ -36,6 +40,8 @@ if str(_HERE) not in sys.path:
 from shared import amounts, capture as cap
 from shared import clipboard, coords, io_worker, keyboard, mouse
 from shared.flows.entrada_cliente import entrada_cliente
+from shared.flows.telefonico import es_telefonico, verificar_telefonico_post_seleccionar
+from shared.flows.validar_cliente import validar_cliente_creado
 from shared.flows.ver_todos import copiar_tabla
 from shared.parsing import extract_first_number, split_table_cols
 
@@ -43,10 +49,6 @@ CAPTURE_DIR_DEFAULT = _HERE / "capturas_camino_deudas_principal"
 CLOSE_TAB_KEY = "close_tab_btn1"
 ID_AREA_OFFSET_Y_DEFAULT = 19
 MAX_REGISTROS_SIN_EXPANDIR = 20
-LLAMADA_VERIFY_X = 23
-LLAMADA_VERIFY_Y = 195
-LLAMADA_COPY_X = 42
-LLAMADA_COPY_Y = 207
 
 
 def _float_env(name: str, default: float) -> float:
@@ -156,19 +158,6 @@ def _parse_fa_data(table_text: str) -> list[dict[str, str]]:
 
     print(f"[CaminoDeudasPrincipal] total IDs parseados: {len(out)}")
     return out
-
-
-def _verificar_llamada(master: dict) -> str:
-    """Right-click en (23,195) -> click en (42,207) -> lee clipboard.
-
-    Coordenadas del cartel de cuenta unica. Retorna texto copiado (vacio si nada).
-    """
-    print(f"[CaminoDeudasPrincipal] verificacion cuenta unica en ({LLAMADA_VERIFY_X},{LLAMADA_VERIFY_Y})")
-    pg.rightClick(LLAMADA_VERIFY_X, LLAMADA_VERIFY_Y)
-    time.sleep(0.3)
-    pg.click(LLAMADA_COPY_X, LLAMADA_COPY_Y)
-    time.sleep(0.5)
-    return clipboard.get_text() or ""
 
 
 def _delegar_a_viejo(dni: str) -> int:
@@ -423,36 +412,29 @@ def run(
         base_delay=base_delay,
         post_enter_delay=post_enter,
     )
-
-    # 2. Ver Todos -> tabla
     time.sleep(0.8)
-    tabla = copiar_tabla(
-        master,
-        ver_todos_key="ver_todos_btn1",
-        close_tab_key=CLOSE_TAB_KEY,
-        post_ver_todos_delay=0.8,
-        base_delay=base_delay,
-    )
 
-    # 3. Si tabla corta, verificar cartel de cuenta unica
-    if len(tabla.strip()) < 30:
-        print(f"[CaminoDeudasPrincipal] tabla corta ({len(tabla)} chars), verificando cuenta unica")
-        verif = _verificar_llamada(master)
-        print(f"[CaminoDeudasPrincipal] verificacion: '{verif[:60]}'")
-        if "llamada" in verif.lower():
-            print("[CaminoDeudasPrincipal] CUENTA UNICA detectada -> camino_deudas_viejo --skip-initial")
-            _delegar_a_viejo(dni)
-            return
-        tabla = verif
+    # 2. Ritual A '¿cliente creado?' (ANTES de Ver Todos)
+    creado, texto_a = validar_cliente_creado(master, base_delay=base_delay)
+    print(f"[CaminoDeudasPrincipal] ritual A: creado={creado}, texto='{texto_a[:40]}'")
 
-    # ANTIGUO check directo
-    if "llamada" in tabla.lower():
-        print("[CaminoDeudasPrincipal] 'Llamada' en primera copia -> camino_deudas_viejo --skip-initial")
+    # Si el propio texto A dice 'Telefonico', delegar directo (cuenta unica)
+    if es_telefonico(texto_a):
+        print("[CaminoDeudasPrincipal] TELEFONICO detectado en ritual A -> camino_deudas_viejo --skip-initial")
         _delegar_a_viejo(dni)
         return
 
-    # 4. Sigue vacia -> cliente no creado
-    if len(tabla.strip()) < 10:
+    # 3. Ritual A vacio -> probar Ritual B '¿es telefonico?'
+    if not creado:
+        print("[CaminoDeudasPrincipal] ritual A sin ID, probando ritual B (validation_telefonico)")
+        es_tel, texto_b = verificar_telefonico_post_seleccionar(master)
+        print(f"[CaminoDeudasPrincipal] ritual B: es_tel={es_tel}, texto='{texto_b[:40]}'")
+        if es_tel:
+            print("[CaminoDeudasPrincipal] TELEFONICO detectado en ritual B -> camino_deudas_viejo --skip-initial")
+            _delegar_a_viejo(dni)
+            return
+
+        # Ambos rituales fallaron -> CLIENTE NO CREADO
         print("[CaminoDeudasPrincipal] CLIENTE NO CREADO")
         shot_path = _captura_cliente_no_creado(master, dni, shot_dir)
         keyboard.press_enter(0.5)
@@ -474,6 +456,16 @@ def run(
         io_worker.print_json_result(result)
         print("[CaminoDeudasPrincipal] Finalizado - cliente no creado")
         return
+
+    # 4. Cliente creado (tiene ID) -> Ver Todos
+    time.sleep(0.5)
+    tabla = copiar_tabla(
+        master,
+        ver_todos_key="ver_todos_btn1",
+        close_tab_key=CLOSE_TAB_KEY,
+        post_ver_todos_delay=0.8,
+        base_delay=base_delay,
+    )
 
     # 5. Parsear
     fa_data_list = _parse_fa_data(tabla)

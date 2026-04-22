@@ -52,13 +52,14 @@
   "validar": {
     "client_id_field1":  { "x": 36,  "y": 236, "_used_by": ["camino_deudas_viejo"] },
     "client_id_field2":  { "x": 100, "y": 237, "_used_by": ["camino_score", "camino_deudas_admin", "camino_deudas_provisorio"] },
-    "client_name_field": { "x": 36,  "y": 236 },
-    "copi_id_field":     { "x": 77,  "y": 241 },
+    "client_name_field": { "x": 36,  "y": 236, "_note": "ritual 'cliente creado?' ANTES de Ver Todos" },
+    "copi_id_field":     { "x": 77,  "y": 241, "_note": "opcion 'Copiar ID' del menu contextual (ritual cliente creado)" },
     "validar":           { "x": 956, "y": 234, "_note": "solo en camino_deudas_viejo" },
     "validar_copy":      { "x": 999, "y": 246, "_note": "solo en camino_deudas_viejo" },
     "validation_area":   { "x": 97,  "y": 237 },
-    "validation_telefonico":      { "x": 40, "y": 226 },
-    "validation_telefonico_copy": { "x": 58, "y": 242 },
+    "validation_telefonico_focus": { "x": 64, "y": 235, "_note": "click izquierdo previo para dar focus al area (ritual telefonico post-seleccionar)" },
+    "validation_telefonico":       { "x": 35, "y": 225, "_note": "ritual '¿es telefonico?' DESPUES de seleccionar cuenta" },
+    "validation_telefonico_copy":  { "x": 58, "y": 242, "_note": "opcion 'Copiar' del menu contextual (ritual telefonico post-seleccionar)" },
     "fraude_section":    { "x": 877,  "y": 412 },
     "fraude_copy":       { "x": 921,  "y": 423 },
     "close_fraude_btn":  { "x": 1246, "y": 332 }

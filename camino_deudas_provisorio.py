@@ -34,6 +34,7 @@ from shared import amounts, clipboard, coords, io_worker, keyboard, mouse
 from shared.flows.buscar_deudas_cuenta import buscar_deudas_cuenta
 from shared.flows.cerrar_y_home import cerrar_tabs, volver_a_home
 from shared.flows.entrada_cliente import entrada_cliente
+from shared.flows.telefonico import verificar_telefonico_post_seleccionar
 from shared.flows.ver_todos import copiar_tabla
 from shared.parsing import extract_cuentas_with_tipo_doc
 
@@ -51,22 +52,10 @@ def _float_env(name: str, default: float) -> float:
 
 
 def _validar_entrada_cuenta(master: dict, cuenta_num: int) -> bool:
-    """Right-click validation_telefonico + copy + chequear 'telefonico'."""
-    rcx, rcy = coords.xy(master, "validar.validation_telefonico")
-    cpx, cpy = coords.xy(master, "validar.validation_telefonico_copy")
-    if not ((rcx or rcy) and (cpx or cpy)):
-        print(f"[CaminoDeudasProvisorio] WARN coords de validacion no definidas, asumo OK")
-        return True
-
-    clipboard.clear()
-    time.sleep(0.15)
-    pg.click(rcx, rcy, button="right")
-    time.sleep(0.25)
-    mouse.click(cpx, cpy, "validation_telefonico_copy", 0.25)
-    time.sleep(0.2)
-    txt = clipboard.get_text().strip().lower()
-    print(f"[CaminoDeudasProvisorio] validacion cuenta {cuenta_num}: '{txt[:40]}'")
-    return "telefonico" in txt or "telef" in txt
+    """Ritual post-seleccionar '¿es telefonico?' (ver shared/flows/telefonico.py)."""
+    ok, texto = verificar_telefonico_post_seleccionar(master)
+    print(f"[CaminoDeudasProvisorio] validacion cuenta {cuenta_num}: '{texto[:40]}'")
+    return ok
 
 
 def _recuperar_dropdown(master: dict) -> bool:

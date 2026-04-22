@@ -55,7 +55,7 @@ Usa `cliente_section2`, `ver_todos_btn1`, `client_id_field2`, `seleccionar_btn1`
 | 4a | **[DNI]** Click campo DNI + type | `entrada.dni_field1` | 913 | 240 |
 | 4b | **[CUIT]** Click campo CUIT + type | `entrada.cuit_field1` | 912 | 263 |
 | 5 | Press Enter | — | — | — |
-| 6 | Right-click para copiar ID | `validar.client_name_field` | 36 | 236 |
+| 6 | Right-click para copiar ID (ritual A: "¿cliente creado?", ANTES de Ver Todos) | `validar.client_name_field` | 36 | 236 |
 | 7 | Click opción copiar ID | `validar.copi_id_field` | 77 | 241 |
 | 8 | **[Si clipboard ≈ "Telefonico"]** saltar al paso de score (18) | `shared.flows.telefonico` | — | — |
 | 9 | **[Si clipboard vacío/corto]** CLIENTE NO CREADO: `capture_region`, close×5, home | `captura.screenshot_region` | 10,47 | w=1720,h=365 |
@@ -101,13 +101,18 @@ Retorna siempre `score="98"`. Se invoca cuando `camino_deudas_provisorio` salió
 
 Flujo completo por id_fa cuando hay >1 cuenta. Usa `cliente_section1`, `ver_todos_btn1`, `close_tab_btn1`.
 
+**Orden importante:** la validación de cliente creado se hace ANTES de Ver Todos. Solo si el cliente está creado se presiona Ver Todos. Si ritual A falla, se prueba ritual B (telefonico). Si ambos fallan → CLIENTE NO CREADO sin presionar Ver Todos.
+
 | Paso | Acción | Coord (sección.key) | x | y |
 |------|--------|---------------------|---|---|
 | 1 | `entrada_cliente(cliente_section1)` | `entrada.cliente_section1` | 266 | 168 |
 | — | DNI/CUIT field según tipo doc | `entrada.dni_field1` / `entrada.cuit_field1` | 913/912 | 240/263 |
-| 2 | `copiar_tabla(ver_todos_btn1)` (ritual copiar todo) | `ver_todos.*` | — | — |
-| 3 | **[Tabla corta]** Verificar cuenta única: right-click (23,195) + click (42,207) → si texto contiene "llamada" → delegar `camino_deudas_viejo --skip-initial` | hardcoded | 23/42 | 195/207 |
-| 4 | **[Aún vacía]** CLIENTE NO CREADO: `screenshot_region` + close×3 + home | `captura.screenshot_region`, `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 2 | **Ritual A "¿cliente creado?"**: `validar_cliente_creado(master)` (right-click `validar.client_name_field` + click `validar.copi_id_field`) → `(creado, texto_a)` | `validar.client_name_field`, `validar.copi_id_field` | 36/77 | 236/241 |
+| 2a | **[`es_telefonico(texto_a)`]** Delegar `camino_deudas_viejo --skip-initial` y salir | — | — | — |
+| 3 | **[`creado=False`] Ritual B "¿es telefonico?"**: `verificar_telefonico_post_seleccionar(master)` (focus + right-click + copy en `validation_telefonico_*`) | `validar.validation_telefonico_focus`, `validar.validation_telefonico`, `validar.validation_telefonico_copy` | 64/35/58 | 235/225/242 |
+| 3a | **[Ritual B == 'telefonico']** Delegar `camino_deudas_viejo --skip-initial` y salir | — | — | — |
+| 3b | **[Ritual B vacío]** CLIENTE NO CREADO: `screenshot_region` + press_enter + close×3 + home + JSON_RESULT `{error: 'Cliente no creado en sistema'}` | `captura.screenshot_region`, `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
+| 4 | **[`creado=True`]** `copiar_tabla(ver_todos_btn1)` (ritual copiar todo) | `ver_todos.*` | — | — |
 | 5 | Parsear tabla → `[{id_fa, cuit, id_cliente}]`. Columnas: `ID del FA`/`FA ID`, `Tipo ID Compania`, `ID del Cliente`/`Customer ID` | — | — | — |
 | 6 | **[Si >20 registros]** Expandir: click `config_registros_btn` → limpiar + type(N) en `num_registros_field` → click `buscar_registros_btn` | `saldo_principal.config_registros_btn`, `saldo_principal.num_registros_field`, `saldo_principal.buscar_registros_btn` | 1875/940/938 | 155/516/570 |
 | 7 | **Iterar cada registro:** click `id_area` con `y += idx * id_area_offset_y` (default 19) | `saldo_principal.id_area` | 914 | 239 |
@@ -205,6 +210,25 @@ Constantes:
 - `EXIT_UMBRAL_SUPERADO = 42`
 
 Usa las mismas coords que `camino_deudas_admin` (cliente_section2, ver_todos_btn2, seleccionar_btn2, fa_cobranza_btn2, mostrar_lista_btn2). Ver sección admin para coords.
+
+### Validación de entrada por cuenta (`_validar_entrada_cuenta`)
+
+**Ritual B "¿es telefonico?" post-seleccionar** — centralizado en `shared/flows/telefonico.py::verificar_telefonico_post_seleccionar`. Usado por `camino_deudas_provisorio` y `camino_deudas_admin._verify_entrada_cuenta` (y debería agregarse a `camino_deudas_principal` cuando corresponda).
+
+Distinto del **Ritual A "¿cliente creado?"** (`validar_cliente_creado`, usa `client_name_field`/`copi_id_field` = (36, 236)/(77, 241)), que se ejecuta ANTES de Ver Todos y solo chequea si hay ID del cliente.
+
+| Paso | Acción | Coord (sección.key) | x | y |
+|------|--------|---------------------|---|---|
+| 1 | `clipboard.clear()` + sleep 0.25 | — | — | — |
+| 2 | **Left-click** focus del área | `validar.validation_telefonico_focus` | **64** | **235** |
+| 3 | **Right-click** abre menú contextual | `validar.validation_telefonico` | **35** | **225** |
+| 4 | sleep 0.4 | — | — | — |
+| 5 | **Left-click** opción "Copiar" del menú | `validar.validation_telefonico_copy` | **58** | **242** |
+| 6 | sleep 0.35 + leer clipboard + `es_telefonico(texto)` | — | — | — |
+
+Si no matchea → provisorio corre `_recuperar_dropdown` y salta la cuenta; admin presiona Enter y devuelve False.
+
+> Cambio 2026-04-22: (a) se separaron explícitamente los rituales A (pre-VerTodos) y B (post-seleccionar), las coords `client_name_field`/`copi_id_field` (36,236)/(77,241) quedan SOLO para ritual A; (b) ritual B gana la key `validation_telefonico_focus` (64, 235) como paso previo de focus, y usa `validation_telefonico` (35, 225) + `validation_telefonico_copy` (58, 242); (c) provisorio y admin ahora delegan en `verificar_telefonico_post_seleccionar` en vez de duplicar el ritual.
 
 ---
 

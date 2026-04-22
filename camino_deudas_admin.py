@@ -43,6 +43,7 @@ from shared.flows.buscar_deudas_cuenta import buscar_deudas_cuenta
 from shared.flows.cerrar_y_home import cerrar_tabs, volver_a_home
 from shared.flows.entrada_cliente import entrada_cliente
 from shared.flows.score import capturar_score, copiar_score
+from shared.flows.telefonico import es_telefonico, verificar_telefonico_post_seleccionar
 from shared.flows.validar_cliente import (
     VALID_CORRUPTO,
     validar_cliente_creado,
@@ -83,24 +84,10 @@ def _emit_deuda_items(deudas: list[dict], streamed_ids: set[str]) -> None:
 
 
 def _verify_entrada_cuenta(master: dict) -> bool:
-    """Right-click client_name_field + copi_id_field, espera 'telefonico'."""
-    cnx, cny = coords.xy(master, "validar.client_name_field")
-    if not (cnx or cny):
-        print("[CaminoDeudasAdmin] WARN client_name_field no definido, asumo OK")
-        return True
-    clipboard.clear()
-    time.sleep(0.4)
-    pg.click(cnx, cny, button="right")
-    time.sleep(0.4)
-    ccx, ccy = coords.xy(master, "validar.copi_id_field")
-    if not (ccx or ccy):
-        print("[CaminoDeudasAdmin] WARN copi_id_field no definido, asumo OK")
-        return True
-    mouse.click(ccx, ccy, "copi_id_field", 0.4)
-    time.sleep(0.5)
-    txt = clipboard.get_text().strip().lower()
-    print(f"[CaminoDeudasAdmin] verify entrada: '{txt[:40]}'")
-    if txt in ("telefonico", "telefónico"):
+    """Ritual post-seleccionar '¿es telefonico?' (ver shared/flows/telefonico.py)."""
+    ok, texto = verificar_telefonico_post_seleccionar(master)
+    print(f"[CaminoDeudasAdmin] verify entrada: '{texto[:40]}'")
+    if ok:
         return True
     pg.press("enter")
     time.sleep(0.5)
