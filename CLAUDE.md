@@ -169,21 +169,23 @@ Los caminos NUNCA hablan directo con el backend. Imprimen marcadores en stdout; 
 | `[CaminoScoreADMIN] Buscando deudas...` | `camino_deudas_admin` | — | Partial `etapa="buscando_deudas"` |
 | `[CaminoDeudasPrincipal] Analizando N cuentas, tiempo estimado X:YY` | `camino_deudas_principal` | Estimación | Partial `etapa="validando_deudas"` |
 
-### Dedupe de `[DEUDA_ITEM]` en tiempo real
+### Dedupe de `[DEUDA_ITEM]` / `[CUENTA_ITEM]` en tiempo real
 
-**Regla:** nunca enviar dos `[DEUDA_ITEM]` con el mismo `id_fa` normalizado. Para detectar duplicados se extraen los primeros ≥4 dígitos (`amounts.normalize_id_fa`). Mismo id → se descarta; mismo monto pero id distinto → se conservan ambos.
+**Regla:** siempre emitir un marker por cuenta analizada. Si el `id_fa` normalizado (≥4 dígitos via `amounts.normalize_id_fa`) ya fue stream-eado antes, se emite igual pero con flag `duplicate: true` (JSON) o sufijo `duplicate=true` (key=value en camino_viejo). Esto permite al frontend avanzar la barra de progreso proporcionalmente a `[CUENTAS_TOTAL]` aunque no re-muestre la deuda duplicada.
+
+Razón: antes se hacía skip total del marker duplicado, y la barra quedaba en 2/3 cuando una cuenta con id_fa repetido caía. El dedupe visual es responsabilidad del frontend.
 
 Implementación:
 
 - Cada camino mantiene `streamed_ids: set[str]` de IDs ya emitidos.
-- Antes de imprimir `[DEUDA_ITEM]`, normaliza el id y chequea el set.
-- `amounts.sanitize_fa_saldos()` hace la misma dedupe al JSON_RESULT final (`seen_ids: set[str]`).
+- Antes de imprimir, normaliza el id: si ya está en el set → agrega `duplicate`; si no → agrega al set y emite limpio.
+- `amounts.sanitize_fa_saldos()` sigue dedupeando al JSON_RESULT final (`seen_ids: set[str]`), entonces el resultado final no tiene duplicados.
 
-Archivos con dedupe activo:
-- `camino_deudas_principal.py::_iterar_registros`
-- `camino_deudas_admin.py::_emit_deuda_items` (stateful; el loop inter-cuentas también filtra usando `amounts.normalize_id_fa` con walrus)
-- `camino_deudas_viejo.py::_emit_deuda` (propaga `streamed_ids` por todas las ramas)
-- `shared/flows/buscar_deudas_cuenta.py` ya tenía dedupe interno por `ids: set[str]` e `existentes_ids` al iterar cuentas financieras.
+Archivos con la lógica:
+- `shared/flows/iterar_registros.py::iterar_registros` — usado por `camino_deudas_principal` y `camino_deudas_provisorio`.
+- `camino_deudas_admin.py::_emit_deuda_items` — en el loop inter-cuentas se pasan TODAS las deudas (no solo nuevas) y el helper marca las dups.
+- `camino_deudas_viejo.py::_emit_deuda` — se llama siempre, el `if not any(...)` solo controla `deudas.append`, no la emisión.
+- `shared/flows/buscar_deudas_cuenta.py` tiene dedupe interno por `ids: set[str]` e `existentes_ids` al iterar cuentas financieras — ese NO emite markers, solo acumula para devolver al caller, y se mantiene como estaba.
 
 ### Partial update schema
 

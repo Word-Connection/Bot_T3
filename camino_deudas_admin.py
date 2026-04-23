@@ -66,20 +66,24 @@ def _float_env(name: str, default: float) -> float:
 
 
 def _emit_deuda_items(deudas: list[dict], streamed_ids: set[str]) -> None:
-    """Emite [CUENTA_ITEM] dedupeando por id_fa normalizado.
+    """Emite [CUENTA_ITEM] por cada deuda, marcando duplicate=true si el id_fa
+    normalizado ya fue stream-eado antes.
 
-    streamed_ids se actualiza en-place con los ids ya emitidos para evitar
-    duplicados entre cuentas en streaming tiempo real.
+    streamed_ids se actualiza en-place con los ids nuevos para que las llamadas
+    siguientes los detecten como duplicados. Los duplicados se emiten igual
+    (con flag) para que el frontend pueda avanzar la barra de progreso aunque
+    no re-muestre la deuda.
     """
     for d in deudas:
         id_raw = d.get("id_fa", "")
         norm_id = amounts.normalize_id_fa(id_raw)
-        if not norm_id or norm_id in streamed_ids:
-            if norm_id:
-                print(f"[CaminoDeudasAdmin] [DEDUP] id_fa={id_raw} ya emitido, skip stream")
-            continue
-        streamed_ids.add(norm_id)
-        item = {"id_fa": id_raw, "saldo": d.get("saldo", "")}
+        is_duplicate = bool(norm_id and norm_id in streamed_ids)
+        if norm_id and not is_duplicate:
+            streamed_ids.add(norm_id)
+        item: dict = {"id_fa": id_raw, "saldo": d.get("saldo", "")}
+        if is_duplicate:
+            item["duplicate"] = True
+            print(f"[CaminoDeudasAdmin] [DEDUP] id_fa={id_raw} ya emitido, marcando duplicate")
         print(f"[CUENTA_ITEM] {json.dumps(item, ensure_ascii=False)}", flush=True)
 
 
@@ -356,12 +360,9 @@ def run(dni: str, master_path: Path | None, shot_dir: Path) -> None:
                     if (nid := amounts.normalize_id_fa(d.get("id_fa", "")))
                     and nid not in ids_existentes
                 ]
-                if nuevas:
-                    fa_saldos_todos.extend(nuevas)
-                    _emit_deuda_items(nuevas, streamed_ids)
-                    print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: +{len(nuevas)} deudas nuevas")
-                else:
-                    print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: todas duplicadas")
+                fa_saldos_todos.extend(nuevas)
+                _emit_deuda_items(deudas, streamed_ids)
+                print(f"[CaminoDeudasAdmin] cuenta {cuenta_num}: +{len(nuevas)} nuevas, {len(deudas) - len(nuevas)} duplicadas")
             except Exception as e:
                 print(f"[CaminoDeudasAdmin] ERROR cuenta {cuenta_num}: {e}")
                 import traceback

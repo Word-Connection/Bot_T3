@@ -89,17 +89,20 @@ def _emit_deuda(
     streamed_ids: set[str],
     tipo: str = "DNI",
 ) -> None:
-    """Emite linea [DEUDA_ITEM] con dedup por id_fa normalizado.
+    """Emite linea [DEUDA_ITEM]. Si el id_fa normalizado ya fue stream-eado,
+    se emite igual con sufijo ` duplicate=true` para que el frontend pueda
+    avanzar la barra de progreso sin re-mostrar la deuda.
 
-    streamed_ids se muta en-place con los ids ya emitidos.
+    streamed_ids se muta en-place con los ids nuevos.
     """
     norm_id = amounts.normalize_id_fa(id_fa)
-    if not norm_id or norm_id in streamed_ids:
-        if norm_id:
-            print(f"[CaminoDeudasViejo] [DEDUP] id_fa={id_fa} ya emitido, skip stream")
-        return
-    streamed_ids.add(norm_id)
-    print(f"[DEUDA_ITEM] dni={dni} id_fa={id_fa} saldo={saldo} tipo={tipo}", flush=True)
+    is_duplicate = bool(norm_id and norm_id in streamed_ids)
+    if norm_id and not is_duplicate:
+        streamed_ids.add(norm_id)
+    suffix = " duplicate=true" if is_duplicate else ""
+    if is_duplicate:
+        print(f"[CaminoDeudasViejo] [DEDUP] id_fa={id_fa} ya emitido, marcando duplicate")
+    print(f"[DEUDA_ITEM] dni={dni} id_fa={id_fa} saldo={saldo} tipo={tipo}{suffix}", flush=True)
 
 
 def _process_fa_actuales(
@@ -166,8 +169,9 @@ def _process_fa_actuales(
                 break
         print(f"[CaminoDeudasViejo] id='{id_txt}'")
 
-        if id_txt and saldo_txt and not any(d.get("id_fa") == id_txt for d in deudas):
-            deudas.append({"id_fa": id_txt, "saldo": saldo_txt, "tipo_documento": "DNI"})
+        if id_txt and saldo_txt:
+            if not any(d.get("id_fa") == id_txt for d in deudas):
+                deudas.append({"id_fa": id_txt, "saldo": saldo_txt, "tipo_documento": "DNI"})
             _emit_deuda(dni, id_txt, saldo_txt, streamed_ids)
 
         cerrar_tabs(master, veces=1, close_tab_key=CLOSE_TAB_KEY)
@@ -315,8 +319,9 @@ def _process_cuenta_financiera(
             cerrar_tabs(master, veces=1, close_tab_key=CLOSE_TAB_KEY)
             break
 
-        if first_id and not any(d.get("id_fa") == first_id for d in deudas):
-            deudas.append({"id_fa": first_id, "saldo": first_saldo, "tipo_documento": "DNI"})
+        if first_id:
+            if not any(d.get("id_fa") == first_id for d in deudas):
+                deudas.append({"id_fa": first_id, "saldo": first_saldo, "tipo_documento": "DNI"})
             _emit_deuda(dni, first_id, first_saldo, streamed_ids)
         prev_first_id = first_id_num
 
@@ -332,8 +337,9 @@ def _process_cuenta_financiera(
             time.sleep(0.3)
             keyboard.hotkey("ctrl", "c", delay_after=0.4)
             saldo_cf = clipboard.get_text().strip()
-            if id_cf and not any(d.get("id_fa") == id_cf for d in deudas):
-                deudas.append({"id_fa": id_cf, "saldo": saldo_cf, "tipo_documento": "DNI"})
+            if id_cf:
+                if not any(d.get("id_fa") == id_cf for d in deudas):
+                    deudas.append({"id_fa": id_cf, "saldo": saldo_cf, "tipo_documento": "DNI"})
                 _emit_deuda(dni, id_cf, saldo_cf, streamed_ids)
             keyboard.send_left_presses(3, interval=0.2, use_pynput=use_pynput)
 

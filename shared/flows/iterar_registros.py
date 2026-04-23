@@ -228,13 +228,15 @@ def iterar_registros(
 
         if stream_cuenta_item:
             norm_id = amounts.normalize_id_fa(fa_id)
-            if norm_id and norm_id in streamed_ids:
-                print(f"{log_prefix} [DEDUP] id_fa={fa_id} ya emitido, skip stream")
-            else:
-                if norm_id:
-                    streamed_ids.add(norm_id)
-                saldo_emit = ("$" + saldo) if amounts.parse_to_float(saldo) else ""
-                print(f"[CUENTA_ITEM] {json.dumps({'id_fa': fa_id, 'saldo': saldo_emit})}", flush=True)
+            is_duplicate = bool(norm_id and norm_id in streamed_ids)
+            if norm_id and not is_duplicate:
+                streamed_ids.add(norm_id)
+            saldo_emit = ("$" + saldo) if amounts.parse_to_float(saldo) else ""
+            payload: dict = {"id_fa": fa_id, "saldo": saldo_emit}
+            if is_duplicate:
+                payload["duplicate"] = True
+                print(f"{log_prefix} [DEDUP] id_fa={fa_id} ya emitido, marcando duplicate")
+            print(f"[CUENTA_ITEM] {json.dumps(payload)}", flush=True)
 
         if close_x or close_y:
             mouse.click(close_x, close_y, "close_tab_btn", base_delay)

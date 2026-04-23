@@ -176,11 +176,14 @@ def _handle_progress_markers(line, dni):
             item = json.loads(line.split('[CUENTA_ITEM] ', 1)[1].strip())
             id_fa = item.get('id_fa', '?')
             saldo = item.get('saldo', '') or ''
-            info = f"Deuda: {id_fa} - {saldo}" if saldo.strip() else ""
-            _send_partial(
-                dni, "cuenta_item", info,
-                extra_data={"id_fa": id_fa, "saldo": saldo},
-            )
+            duplicate = bool(item.get('duplicate'))
+            # duplicate=true: el id_fa ya fue emitido antes. El front debe avanzar
+            # la barra pero no pintar la linea "Deuda:" (info vacio fuerza eso).
+            info = f"Deuda: {id_fa} - {saldo}" if saldo.strip() and not duplicate else ""
+            extra = {"id_fa": id_fa, "saldo": saldo}
+            if duplicate:
+                extra["duplicate"] = True
+            _send_partial(dni, "cuenta_item", info, extra_data=extra)
         except Exception as e:
             print(f"[deudas] WARN parseando CUENTA_ITEM: {e}", file=sys.stderr)
         return True

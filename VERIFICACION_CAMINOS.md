@@ -101,6 +101,8 @@ Retorna siempre `score="98"`. Se invoca cuando `camino_deudas_provisorio` salió
 
 Flujo completo por id_fa cuando hay >1 cuenta. Usa `cliente_section1`, `ver_todos_btn1`, `close_tab_btn1`.
 
+**Helpers compartidos** (viven en `shared/flows/iterar_registros.py`, reusados por `camino_deudas_provisorio`): `parse_fa_data`, `expandir_registros`, `copiar_saldo_registro`, `iterar_registros(..., stream_cuenta_item, on_row)`, `buscar_por_id_cliente`. `iterar_registros` retorna `(fa_saldos, aborted)` — `on_row` devolviendo `True` corta la iteración (lo usa provisorio para chequear umbral).
+
 **Orden importante:** la validación de cliente creado se hace ANTES de Ver Todos. Solo si el cliente está creado se presiona Ver Todos. Si ritual A falla, se prueba ritual B (telefonico). Si ambos fallan → CLIENTE NO CREADO sin presionar Ver Todos.
 
 | Paso | Acción | Coord (sección.key) | x | y |
@@ -113,18 +115,14 @@ Flujo completo por id_fa cuando hay >1 cuenta. Usa `cliente_section1`, `ver_todo
 | 3a | **[Ritual B == 'telefonico']** Delegar `camino_deudas_viejo --skip-initial` y salir | — | — | — |
 | 3b | **[Ritual B vacío]** CLIENTE NO CREADO: `screenshot_region` + press_enter + close×3 + home + JSON_RESULT `{error: 'Cliente no creado en sistema'}` | `captura.screenshot_region`, `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
 | 4 | **[`creado=True`]** `copiar_tabla(ver_todos_btn1)` (ritual copiar todo) | `ver_todos.*` | — | — |
-| 5 | Parsear tabla → `[{id_fa, cuit, id_cliente}]`. Columnas: `ID del FA`/`FA ID`, `Tipo ID Compania`, `ID del Cliente`/`Customer ID` | — | — | — |
-| 6 | **[Si >20 registros]** Expandir: click `config_registros_btn` → limpiar + type(N) en `num_registros_field` → click `buscar_registros_btn` | `saldo_principal.config_registros_btn`, `saldo_principal.num_registros_field`, `saldo_principal.buscar_registros_btn` | 1875/940/938 | 155/516/570 |
-| 7 | **Iterar cada registro:** click `id_area` con `y += idx * id_area_offset_y` (default 19) | `saldo_principal.id_area` | 914 | 239 |
-| 7.1 | Doble-click saldo | `saldo_principal.saldo` | 1020 | 173 |
-| 7.2 | Right-click saldo | `saldo_principal.saldo` | 1020 | 173 |
-| 7.3 | Click `saldo_all_copy` | `saldo_principal.saldo_all_copy` | 1051 | 338 |
-| 7.4 | Right-click saldo otra vez | `saldo_principal.saldo` | 1020 | 173 |
-| 7.5 | Click `saldo_copy` → leer clipboard | `saldo_principal.saldo_copy` | 1031 | 263 |
-| 7.6 | Si saldo > 0 y `normalize_id_fa(id_fa) ∉ streamed_ids`: emitir `[DEUDA_ITEM] {"id_fa": X, "saldo": "$N,NN"}` y agregarlo al set | — | — | — |
-| 7.7 | Click close_tab | `comunes.close_tab_btn1` | 1896 | 138 |
+| 5 | `parse_fa_data(tabla)` → `[{id_fa, cuit, id_cliente}]`. Columnas: `ID del FA`/`FA ID`, `Tipo ID Compania`, `ID del Cliente`/`Customer ID` | `shared/flows/iterar_registros.parse_fa_data` | — | — |
+| 6 | **[Si >20 registros]** `expandir_registros(master, N, base_delay)`: click `config_registros_btn` → limpiar + type(N) en `num_registros_field` → click `buscar_registros_btn` | `saldo_principal.config_registros_btn`, `saldo_principal.num_registros_field`, `saldo_principal.buscar_registros_btn` | 1875/940/938 | 155/516/570 |
+| 7 | **`iterar_registros(..., stream_cuenta_item=True)`** — para cada registro: click `id_area` con `y += idx * id_area_offset_y` (default 19) | `saldo_principal.id_area` | 914 | 239 |
+| 7.1 | `copiar_saldo_registro`: doble-click + right-click `saldo` → click `saldo_all_copy` → right-click `saldo` → click `saldo_copy` → leer clipboard | `saldo_principal.saldo` / `saldo_all_copy` / `saldo_copy` | 1020/1051/1031 | 173/338/263 |
+| 7.2 | Si `normalize_id_fa(id_fa) ∉ streamed_ids`: emitir `[CUENTA_ITEM] {"id_fa": X, "saldo": "$N,NN"\|""}` (uno por cuenta procesada; `saldo=""` si 0 en T3). También se emite `[CUENTAS_TOTAL] {"total": N}` al empezar. | — | — | — |
+| 7.3 | Click close_tab | `comunes.close_tab_btn1` | 1896 | 138 |
 | 8 | **[Si vino `ids_cliente_filter`]** filtrar solo fa_saldos con id_cliente_interno ∈ filter | — | — | — |
-| 9 | Para cada id faltante del filter: `_buscar_por_id_cliente` — usa `entrada.id_cliente_field` (1612,219) + Enter + `copiar_tabla` → iterar | `entrada.id_cliente_field` | 1612 | 219 |
+| 9 | Para cada id faltante del filter: `buscar_por_id_cliente(master, id, ...)` — usa `entrada.id_cliente_field` (1612,219) + Enter + `copiar_tabla` → `parse_fa_data` → `iterar_registros` | `shared/flows/iterar_registros.buscar_por_id_cliente`, `entrada.id_cliente_field` | 1612 | 219 |
 | 10 | Close tab ×3 + home | `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
 | 11 | Dedupe por id_fa, sumar total, emitir JSON_RESULT `{dni, success, total_deuda, fa_saldos?}` | — | — | — |
 
@@ -288,6 +286,24 @@ Para cada Service ID (del CSV o descubierto por búsqueda directa):
 ### CSV
 
 `Workers-T3/scripts/movimientos.py` filtra `20250918_Mza_MIXTA_TM_TT.csv` por columna `DNI`, extrae `Linea2` + números 9-12 dígitos de columnas desde `Domicilio`. Si el DNI no existe, crea un CSV temporal vacío (solo headers) para activar modo búsqueda directa en `camino_movimientos.py`.
+
+---
+
+## Anexo: helpers compartidos en `shared/flows/iterar_registros.py`
+
+Módulo introducido 2026-04-22 para eliminar la duplicación entre `camino_deudas_principal` y `camino_deudas_provisorio`. Ambos caminos arman exactamente el mismo flujo por id_fa; solo cambian en (a) si emiten `[CUENTA_ITEM]` streaming y (b) si tienen callback de corte por umbral.
+
+| Función | Parámetros clave | Qué hace |
+|---|---|---|
+| `parse_fa_data(table_text, log_prefix)` | texto de la tabla de Ver Todos | Devuelve `[{id_fa, cuit, id_cliente}]`. Detecta columnas `ID del FA`/`FA ID`, `Tipo ID Compania`, `ID del Cliente`/`Customer ID`. |
+| `expandir_registros(master, N, base_delay, log_prefix)` | N = cantidad de registros | Clicks en `saldo_principal.config_registros_btn` → limpia `num_registros_field` → type(N) → `buscar_registros_btn`. |
+| `copiar_saldo_registro(master, base_delay)` | — | Doble-click + right-click `saldo` → click `saldo_all_copy` → right-click `saldo` → click `saldo_copy`. Devuelve el texto del clipboard (string vacío = 0 en T3, normal). |
+| `iterar_registros(master, fa_data_list, base_delay, *, log_prefix, close_tab_key, stream_cuenta_item, on_row)` | `stream_cuenta_item` (True=principal, False=provisorio), `on_row(idx, item, acum) -> bool` | Itera cada registro (id_area + offset Y), copia saldo, opcionalmente emite `[CUENTA_ITEM]`/`[CUENTAS_TOTAL]`, cierra tab. Si `on_row` devuelve `True` corta la iteración. Devuelve `(fa_saldos, aborted)`. |
+| `buscar_por_id_cliente(master, id_cliente, base_delay, *, ver_todos_key, close_tab_key, stream_cuenta_item, on_row)` | — | Limpia campos, escribe el ID en `entrada.id_cliente_field`, Enter, copia tabla → `parse_fa_data` → `iterar_registros`. Devuelve `(fa_saldos, aborted)` con todos los items marcados con `id_cliente_interno=id_cliente`. |
+
+Quienes lo usan:
+- `camino_deudas_principal.py` — modo normal, `stream_cuenta_item=True`, sin `on_row`.
+- `camino_deudas_provisorio.py` — modo validación, `stream_cuenta_item=False`, `on_row=check_umbral` (aborta con `sys.exit(42)` si `amounts.sum_saldos(acum) >= umbral`).
 
 ---
 
