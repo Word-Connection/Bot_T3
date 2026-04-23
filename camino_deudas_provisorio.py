@@ -16,7 +16,8 @@ Flujo (identico a principal salvo el chequeo de umbral y el modo batch):
   4. Si creado -> Ver Todos -> parse_fa_data
   5. Si >20 registros: expandir_registros
   6. iterar_registros (SIN stream [CUENTA_ITEM], con on_row chequeando umbral)
-  7. Filtrar por ids_cliente_filter (si vino del camino_score) + buscar faltantes
+  7. NUNCA descartar cuentas. Si vino ids_cliente_filter, identificar cuales
+     aparecieron en el Ver Todos y buscar los del score que NO aparecieron.
   8. Cerrar tabs + home, dedupe, emitir JSON_RESULT con fa_saldos + total_deuda
 """
 from __future__ import annotations
@@ -253,25 +254,27 @@ def run(dni: str, master_path: Path | None, umbral: float, ids_cliente_filter: l
         _abortar_por_umbral(master, suma_state["total"], umbral)
         return  # unreachable
 
-    # 7. Filtrar por IDs del camino_score + buscar faltantes
+    # 7. Sumar busquedas por ids_cliente del camino_score (NUNCA descartar).
+    # Las cuentas del Ver Todos del provisorio se conservan TODAS. Los ids del
+    # score que no aparecieron aqui se buscan despues con buscar_por_id_cliente.
     if ids_cliente_filter:
         ids_set = {str(i) for i in ids_cliente_filter}
         encontrados: set[str] = set()
-        filtrados: list[dict[str, str]] = []
         for item in fa_saldos:
             id_c = item.get("id_cliente_interno", "")
             if id_c and id_c in ids_set:
                 encontrados.add(id_c)
-                item.pop("id_cliente_interno", None)
-                filtrados.append(item)
-                print(f"{LOG_PREFIX} [OK] id_fa={item['id_fa']} cliente={id_c}")
+                print(f"{LOG_PREFIX} [OK] id_fa={item['id_fa']} cliente={id_c} (ya en score)")
             else:
-                print(f"{LOG_PREFIX} [SKIP] id_fa={item['id_fa']} cliente={id_c or 'sin_id'}")
-        fa_saldos = filtrados
+                print(f"{LOG_PREFIX} [EXTRA] id_fa={item['id_fa']} cliente={id_c or 'sin_id'}")
+
+        # Limpiar id_cliente_interno de todos (se conservan todas).
+        for item in fa_saldos:
+            item.pop("id_cliente_interno", None)
 
         faltantes = [str(i) for i in ids_cliente_filter if str(i) not in encontrados]
         if faltantes:
-            print(f"{LOG_PREFIX} IDs faltantes: {len(faltantes)}")
+            print(f"{LOG_PREFIX} IDs del score a buscar manualmente: {len(faltantes)} ({faltantes})")
             for id_falt in faltantes:
                 extras, aborted2 = buscar_por_id_cliente(
                     master,

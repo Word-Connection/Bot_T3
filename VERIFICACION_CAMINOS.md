@@ -121,8 +121,8 @@ Flujo completo por id_fa cuando hay >1 cuenta. Usa `cliente_section1`, `ver_todo
 | 7.1 | `copiar_saldo_registro`: doble-click + right-click `saldo` → click `saldo_all_copy` → right-click `saldo` → click `saldo_copy` → leer clipboard | `saldo_principal.saldo` / `saldo_all_copy` / `saldo_copy` | 1020/1051/1031 | 173/338/263 |
 | 7.2 | Si `normalize_id_fa(id_fa) ∉ streamed_ids`: emitir `[CUENTA_ITEM] {"id_fa": X, "saldo": "$N,NN"\|""}` (uno por cuenta procesada; `saldo=""` si 0 en T3). También se emite `[CUENTAS_TOTAL] {"total": N}` al empezar. | — | — | — |
 | 7.3 | Click close_tab | `comunes.close_tab_btn1` | 1896 | 138 |
-| 8 | **[Si vino `ids_cliente_filter`]** filtrar solo fa_saldos con id_cliente_interno ∈ filter | — | — | — |
-| 9 | Para cada id faltante del filter: `buscar_por_id_cliente(master, id, ...)` — usa `entrada.id_cliente_field` (1612,219) + Enter + `copiar_tabla` → `parse_fa_data` → `iterar_registros` | `shared/flows/iterar_registros.buscar_por_id_cliente`, `entrada.id_cliente_field` | 1612 | 219 |
+| 8 | **[Si vino `ids_cliente_filter`]** Conservar TODAS las cuentas iteradas (nunca descartar). Marcar como "encontradas" solo los ids del filter que coincidan con `id_cliente_interno` de alguna cuenta — sirve para saber cuales NO aparecieron aqui. | — | — | — |
+| 9 | Para cada id del filter que NO esta en `encontrados`: `buscar_por_id_cliente(master, id, ...)` — usa `entrada.id_cliente_field` (1612,219) + Enter + `copiar_tabla` → `parse_fa_data` → `iterar_registros`. Las deudas extraidas se AGREGAN a `fa_saldos` (suma, no filtro). | `shared/flows/iterar_registros.buscar_por_id_cliente`, `entrada.id_cliente_field` | 1612 | 219 |
 | 10 | Close tab ×3 + home | `comunes.close_tab_btn1`, `comunes.home_area` | — | — |
 | 11 | Dedupe por id_fa, sumar total, emitir JSON_RESULT `{dni, success, total_deuda, fa_saldos?}` | — | — | — |
 
@@ -223,7 +223,7 @@ Usa las mismas coords que `camino_deudas_principal` (`cliente_section1`, `ver_to
 | 6 | **[Si >20]** `expandir_registros(master, N, base_delay)` | `saldo_principal.config_registros_btn/num_registros_field/buscar_registros_btn` | Igual que principal |
 | 7 | `iterar_registros(..., stream_cuenta_item=False, on_row=check_umbral)` | `shared/flows/iterar_registros.iterar_registros` | **Callback `check_umbral` aborta la iteración si `sum_saldos >= umbral`** |
 | 7a | **[aborted=True]** `_abortar_por_umbral` → cerrar tabs + home + `sys.exit(42)` | — | Sin JSON_RESULT |
-| 8 | **[Si vino `ids_cliente_filter` del score]** filtrar fa_saldos por `id_cliente_interno ∈ filter` + `buscar_por_id_cliente` para faltantes (también con check_umbral) | `shared/flows/iterar_registros.buscar_por_id_cliente` | Mismo filtro que principal |
+| 8 | **[Si vino `ids_cliente_filter` del score]** Conservar TODAS las cuentas; identificar cuales ids del filter ya aparecieron y llamar `buscar_por_id_cliente` (con check_umbral) solo para los que faltan. Las deudas extra se SUMAN a `fa_saldos`. | `shared/flows/iterar_registros.buscar_por_id_cliente` | Mismo comportamiento que principal |
 | 9 | Cerrar tabs + home | `cerrar_y_home` | — |
 | 10 | `sanitize_fa_saldos` + emitir JSON_RESULT `{dni, score: "80", fa_saldos, suma_deudas, total_deuda, finalizado: "exitoso"}` | — | Solo si umbral NO superado |
 

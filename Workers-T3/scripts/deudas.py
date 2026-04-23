@@ -53,6 +53,25 @@ def _send_partial(dni, etapa, info, score="", extra_data=None):
                extra_data=extra_data, identifier_key="dni")
 
 
+def _parse_saldo_ars(raw):
+    """Parsea saldo en formato argentino ('$1.234,56') a float. 0.0 si no parseable."""
+    if raw is None:
+        return 0.0
+    s = str(raw).strip()
+    if not s:
+        return 0.0
+    if s.startswith("$"):
+        s = s[1:].strip()
+    if s.endswith("$"):
+        s = s[:-1].strip()
+    try:
+        if "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _get_image_b64(path):
     if not path or not os.path.exists(path):
         return ""
@@ -177,9 +196,13 @@ def _handle_progress_markers(line, dni):
             id_fa = item.get('id_fa', '?')
             saldo = item.get('saldo', '') or ''
             duplicate = bool(item.get('duplicate'))
-            # duplicate=true: el id_fa ya fue emitido antes. El front debe avanzar
-            # la barra pero no pintar la linea "Deuda:" (info vacio fuerza eso).
-            info = f"Deuda: {id_fa} - {saldo}" if saldo.strip() and not duplicate else ""
+            # Solo generamos la linea visible "Deuda:" cuando el saldo es > 0.
+            # Cuentas sin deuda, con saldo 0 o negativo se procesan pero no se
+            # muestran al usuario (info vacio evita que el front pinte la linea,
+            # pero el partial se envia igual para que la barra avance).
+            saldo_num = _parse_saldo_ars(saldo)
+            show_line = bool(saldo.strip()) and saldo_num > 0 and not duplicate
+            info = f"Deuda: {id_fa} - {saldo}" if show_line else ""
             extra = {"id_fa": id_fa, "saldo": saldo}
             if duplicate:
                 extra["duplicate"] = True

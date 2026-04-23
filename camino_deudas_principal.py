@@ -15,8 +15,11 @@ Secuencia:
   7. Si >20 registros: expandir via config_registros_btn / num_registros_field / buscar_registros_btn
   8. Iterar cada registro: id_area + offset_y -> doble-click saldo -> right-click ->
      saldo_all_copy -> right-click -> saldo_copy -> leer clipboard
-  9. Filtrar por ids_cliente_filter (si vino del camino_score)
- 10. Buscar IDs faltantes por id_cliente_field
+  9. NUNCA descartar cuentas. Si vino ids_cliente_filter del camino_score, se
+     identifica que id_cliente del score aparecieron aqui (para no re-buscarlos).
+ 10. Para cada id del score que NO aparecio en el Ver Todos del principal ->
+     buscar_por_id_cliente (escribe el id en entrada.id_cliente_field, recopia
+     tabla y agrega esas deudas).
  11. Cerrar tabs + home, dedupe, emitir JSON_RESULT
 """
 from __future__ import annotations
@@ -162,10 +165,9 @@ def run(
         keyboard.press_enter(0.5)
         close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
         if close_x or close_y:
-            for i in range(3):
-                mouse.click(close_x, close_y, f"close_tab_btn ({i + 1}/3)", 0.3)
+            mouse.multi_click(close_x, close_y, "close_tab_btn (no_creado)", times=3, interval=0.15)
         hx, hy = coords.xy(master, "comunes.home_area")
-        mouse.click(hx, hy, "home_area", base_delay)
+        mouse.click(hx, hy, "home_area", delay=0.25)
         result = {
             "dni": dni,
             "fa_saldos": [],
@@ -220,32 +222,35 @@ def run(
         close_tab_key=CLOSE_TAB_KEY,
     )
 
-    # cerrar pestanas adicionales del ultimo
+    # cerrar pestanas adicionales del ultimo (multi_click: 1 solo moveTo + N clicks)
     close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
     if close_x or close_y:
-        for i in range(3):
-            mouse.click(close_x, close_y, f"close_tab_btn (extra {i + 1})", base_delay)
+        mouse.multi_click(close_x, close_y, "close_tab_btn (extra)", times=3, interval=0.15)
 
-    # 8. Filtrar por IDs del camino_score
+    # 8. Sumar busquedas por ids_cliente del camino_score (NUNCA descartar).
+    # Las cuentas del Ver Todos del principal se conservan TODAS — las que
+    # tienen id_cliente_interno que coincide con un id del score se marcan como
+    # "ya encontradas" para no re-buscarlas. Las cuentas cuyo id_cliente no
+    # estaba en el score igual se mantienen (son deudas reales del cliente).
     if ids_cliente_filter:
         ids_set = {str(i) for i in ids_cliente_filter}
         encontrados: set[str] = set()
-        filtrados: list[dict[str, str]] = []
         for item in fa_saldos:
             id_c = item.get("id_cliente_interno", "")
             if id_c and id_c in ids_set:
                 encontrados.add(id_c)
-                item.pop("id_cliente_interno", None)
-                filtrados.append(item)
-                print(f"[CaminoDeudasPrincipal] [OK] id_fa={item['id_fa']} cliente={id_c}")
+                print(f"[CaminoDeudasPrincipal] [OK] id_fa={item['id_fa']} cliente={id_c} (ya en score)")
             else:
-                print(f"[CaminoDeudasPrincipal] [SKIP] id_fa={item['id_fa']} cliente={id_c or 'sin_id'}")
-        fa_saldos = filtrados
+                print(f"[CaminoDeudasPrincipal] [EXTRA] id_fa={item['id_fa']} cliente={id_c or 'sin_id'}")
 
-        # 9. IDs faltantes
+        # Limpiar id_cliente_interno de todos (se conservan todas).
+        for item in fa_saldos:
+            item.pop("id_cliente_interno", None)
+
+        # 9. Buscar los IDs del score que NO aparecieron en el Ver Todos del principal.
         faltantes = [str(i) for i in ids_cliente_filter if str(i) not in encontrados]
         if faltantes:
-            print(f"[CaminoDeudasPrincipal] IDs faltantes: {len(faltantes)}")
+            print(f"[CaminoDeudasPrincipal] IDs del score a buscar manualmente: {len(faltantes)} ({faltantes})")
             for id_falt in faltantes:
                 extras, _ = buscar_por_id_cliente(
                     master,
@@ -261,13 +266,13 @@ def run(
         for item in fa_saldos:
             item.pop("id_cliente_interno", None)
 
-    # 10. Cerrar y home
+    # 10. Cerrar y home (rapido: multi_click + home con delay corto al final)
     close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
     if close_x or close_y:
-        for i in range(3):
-            mouse.click(close_x, close_y, f"close_tab_btn (final {i + 1})", base_delay)
+        mouse.multi_click(close_x, close_y, "close_tab_btn (final)", times=3, interval=0.15)
     hx, hy = coords.xy(master, "comunes.home_area")
-    mouse.click(hx, hy, "home_area", base_delay)
+    # Pequeño breathe (0.25s) para que T3 procese los cierres antes del home.
+    mouse.click(hx, hy, "home_area", delay=0.25)
 
     # Dedupe + normalizacion por id_fa (misma regla que streaming / camino_deudas_admin).
     sanitized = amounts.sanitize_fa_saldos(fa_saldos, min_digits=4)
