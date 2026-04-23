@@ -35,7 +35,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from shared import capture as cap
+from shared import amounts, capture as cap
 from shared import coords, io_worker, keyboard, mouse
 from shared.flows.entrada_cliente import entrada_cliente
 from shared.flows.iterar_registros import (
@@ -204,7 +204,7 @@ def run(
     # 7. Iterar
     if not fa_data_list:
         print("[CaminoDeudasPrincipal] sin IDs de FA, fin")
-        io_worker.print_json_result({"dni": dni, "success": True, "timestamp": io_worker.now_ms(), "finalizado": "exitoso", "total_deuda": "$0,00"})
+        io_worker.print_json_result({"dni": dni, "success": True, "timestamp": io_worker.now_ms(), "finalizado": "exitoso", "total_deuda": "$0,00", "fa_saldos": []})
         return
 
     secs_est = num_registros * 5
@@ -269,16 +269,14 @@ def run(
     hx, hy = coords.xy(master, "comunes.home_area")
     mouse.click(hx, hy, "home_area", base_delay)
 
-    # Dedupe por id_fa preservando orden
-    vistos: set[str] = set()
-    unicos: list[dict[str, str]] = []
-    for item in fa_saldos:
-        if item["id_fa"] in vistos:
-            continue
-        vistos.add(item["id_fa"])
-        unicos.append(item)
+    # Dedupe + normalizacion por id_fa (misma regla que streaming / camino_deudas_admin).
+    sanitized = amounts.sanitize_fa_saldos(fa_saldos, min_digits=4)
 
-    total_deuda = sum(_parse_saldo_float(item["saldo"]) for item in unicos if _parse_saldo_float(item["saldo"]) > 0)
+    total_deuda = sum(
+        _parse_saldo_float(item["saldo"])
+        for item in sanitized
+        if _parse_saldo_float(item["saldo"]) > 0
+    )
     total_str = _format_currency(total_deuda)
     result = {
         "dni": dni,
@@ -286,9 +284,10 @@ def run(
         "timestamp": io_worker.now_ms(),
         "finalizado": "exitoso",
         "total_deuda": total_str,
+        "fa_saldos": sanitized,
     }
     io_worker.print_json_result(result)
-    print(f"[CaminoDeudasPrincipal] Finalizado. total_deuda={total_str}, {len(unicos)} registros procesados")
+    print(f"[CaminoDeudasPrincipal] Finalizado. total_deuda={total_str}, {len(sanitized)} registros procesados")
 
 
 def _parse_args() -> argparse.Namespace:
