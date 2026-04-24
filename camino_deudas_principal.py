@@ -209,7 +209,7 @@ def run(
         io_worker.print_json_result({"dni": dni, "success": True, "timestamp": io_worker.now_ms(), "finalizado": "exitoso", "total_deuda": "$0,00", "fa_saldos": []})
         return
 
-    secs_est = num_registros * 5
+    secs_est = num_registros * 7
     mins_est, segs_est = secs_est // 60, secs_est % 60
     msg_est = f"Analizando {num_registros} cuenta{'s' if num_registros > 1 else ''}, tiempo estimado ~{mins_est}:{segs_est:02d} minutos"
     print(f"[CaminoDeudasPrincipal] {msg_est}")
