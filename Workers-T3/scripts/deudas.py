@@ -174,7 +174,7 @@ def _handle_progress_markers(line, dni):
 
     - [CUENTAS_TOTAL] {"total": N}  → partial etapa='cuentas_total' (bar init, sin body)
     - [CUENTA_ITEM]   {"id_fa","saldo"} → partial etapa='cuenta_item' (bar tick;
-      si saldo no vacío, info se llena con "Deuda: id_fa - saldo" para el body)
+      si saldo no vacío, info se llena con "• $saldo - ID: id_fa" para el body)
 
     Returns True si matcheó cualquiera.
     """
@@ -202,7 +202,7 @@ def _handle_progress_markers(line, dni):
             # pero el partial se envia igual para que la barra avance).
             saldo_num = _parse_saldo_ars(saldo)
             show_line = bool(saldo.strip()) and saldo_num > 0 and not duplicate
-            info = f"Deuda: {id_fa} - {saldo}" if show_line else ""
+            info = f"• ${saldo} - ID: {id_fa}" if show_line else ""
             extra = {"id_fa": id_fa, "saldo": saldo}
             if duplicate:
                 extra["duplicate"] = True
@@ -415,7 +415,6 @@ def main():
             admin_mode = os.getenv('ADMIN_MODE', '0').lower() in ('1', 'true', 'yes', 'on')
 
         _clean_captures()
-        _send_partial(dni, "iniciando", f"Analisis iniciado para DNI {dni}")
 
         if admin_mode:
             _run_admin(dni)
