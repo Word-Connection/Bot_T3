@@ -50,15 +50,13 @@ def main():
 
     dni = sys.argv[1]
 
-    # ===== ENVIAR UPDATE INICIAL INMEDIATAMENTE =====
-    send_partial_update(dni, "iniciando", f"Análisis iniciado para DNI {dni}")
-
-    stages = []
+    # Nota: el worker ya emite el "Iniciando automatizacion para DNI X"
+    # generico antes de lanzarnos; no duplicamos.
 
     # Ruta al CSV principal
     csv_main = Path(__file__).parent / '../../20250918_Mza_MIXTA_TM_TT.csv'
     if not csv_main.exists():
-        error_result = {"error": "CSV principal no encontrado", "dni": dni, "stages": []}
+        error_result = {"error": "CSV principal no encontrado", "dni": dni}
         print("===JSON_RESULT_START===", flush=True)
         print(json.dumps(error_result), flush=True)
         print("===JSON_RESULT_END===", flush=True)
@@ -118,10 +116,8 @@ def main():
     try:
         # Verificar que los archivos existen
         if not script_path.exists():
-            stages.append({
-                "info": f"Error: No se encuentra el script {script_path}"
-            })
-            result = {"dni": dni, "stages": stages}
+            send_partial_update(dni, "error", f"No se encuentra el script {script_path}")
+            result = {"error": f"Script no encontrado: {script_path}", "dni": dni}
             print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
             print("===JSON_RESULT_END===", flush=True)
@@ -132,8 +128,8 @@ def main():
         venv_python = project_root / 'venv' / 'Scripts' / 'python.exe'
 
         if not venv_python.exists():
-            send_partial_update(dni, "error", f"Error: No se encuentra Python del venv")
-            result = {"error": f"Python del venv no encontrado", "dni": dni, "stages": []}
+            send_partial_update(dni, "error", "No se encuentra Python del venv")
+            result = {"error": "Python del venv no encontrado", "dni": dni}
             print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
             print("===JSON_RESULT_END===", flush=True)
@@ -160,10 +156,7 @@ def main():
         except Exception as e:
             print(f"WARNING: No se pudo limpiar el log: {e}", file=sys.stderr)
         
-        # ===== ENVIAR UPDATE DE PROGRESO =====
-        send_partial_update(dni, "running", "Iniciando scraping de movimientos...")
-        
-        # Variables para tracking de líneas procesadas
+        # Variables para tracking de lineas procesadas
         lineas_procesadas = set()
         total_movimientos = 0
         
@@ -260,28 +253,23 @@ def main():
                                         if content and not content.startswith("No Tiene"):
                                             total_movimientos += 1
                                             ultimo_mov = content[:60] if len(content) > 60 else content
-                                            
-                                            info_msg = f"Línea {service_id}: Último movimiento {ultimo_mov}"
-                                            send_partial_update(dni, "linea_procesada", info_msg, {
+                                            send_partial_update(dni, "linea_procesada", f"• ID {service_id} - {ultimo_mov}", {
                                                 "service_id": service_id,
                                                 "count": 1,
-                                                "ultimo": ultimo_mov
+                                                "ultimo": ultimo_mov,
                                             })
-                                        # Formato con múltiples movimientos
+                                        # Formato con multiples movimientos
                                         elif content != "No Tiene Pedido" and "No Tiene Movimientos" not in content:
                                             lines = content.replace('\\n', '\n').split('\n')
                                             valid_movs = [mov.strip() for mov in lines if mov.strip() and mov.strip() != "No Tiene Pedido"]
-                                            
                                             if valid_movs:
                                                 count_movs = len(valid_movs)
                                                 total_movimientos += count_movs
                                                 ultimo_mov = valid_movs[0][:60] if valid_movs else content[:60]
-                                                
-                                                info_msg = f"Línea {service_id}: {count_movs} movimiento(s) - Último: {ultimo_mov}..."
-                                                send_partial_update(dni, "linea_procesada", info_msg, {
+                                                send_partial_update(dni, "linea_procesada", f"• ID {service_id} - {ultimo_mov}", {
                                                     "service_id": service_id,
                                                     "count": count_movs,
-                                                    "ultimo": ultimo_mov
+                                                    "ultimo": ultimo_mov,
                                                 })
                     except Exception as e:
                         print(f"WARNING: Error monitoreando log: {e}", file=sys.stderr)
@@ -309,11 +297,10 @@ def main():
                                                     if content and not content.startswith("No Tiene"):
                                                         total_movimientos += 1
                                                         ultimo_mov = content[:60] if len(content) > 60 else content
-                                                        info_msg = f"Línea {service_id}: Último movimiento {ultimo_mov}"
-                                                        send_partial_update(dni, "linea_procesada", info_msg, {
+                                                        send_partial_update(dni, "linea_procesada", f"• ID {service_id} - {ultimo_mov}", {
                                                             "service_id": service_id,
                                                             "count": 1,
-                                                            "ultimo": ultimo_mov
+                                                            "ultimo": ultimo_mov,
                                                         })
                         except Exception as e:
                             print(f"WARNING: Error en lectura final: {e}", file=sys.stderr)
@@ -336,8 +323,8 @@ def main():
             
         except subprocess.TimeoutExpired:
             process.kill()
-            send_partial_update(dni, "error", "Timeout: El proceso tardó demasiado tiempo")
-            result = {"error": "Timeout ejecutando camino_movimientos", "dni": dni, "stages": []}
+            send_partial_update(dni, "error", "Timeout: el proceso tardo demasiado tiempo")
+            result = {"error": "Timeout ejecutando camino_movimientos", "dni": dni}
             print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
             print("===JSON_RESULT_END===", flush=True)
@@ -347,14 +334,14 @@ def main():
         stderr_full = ''.join(stderr_lines)
         
         if returncode != 0:
-            error_msg = f"Error en camino_movimientos (código {returncode})"
+            error_msg = f"Error en camino_movimientos (codigo {returncode})"
             send_partial_update(dni, "error", error_msg)
-            
+
             # Imprimir stderr completo para debugging
-            print(f"\n=== STDERR COMPLETO DE CAMINO B ===", file=sys.stderr)
+            print(f"\n=== STDERR COMPLETO DE CAMINO MOVIMIENTOS ===", file=sys.stderr)
             print(stderr_full, file=sys.stderr)
-            
-            result = {"error": error_msg, "dni": dni, "stages": []}
+
+            result = {"error": error_msg, "dni": dni}
             print("===JSON_RESULT_START===", flush=True)
             print(json.dumps(result), flush=True)
             print("===JSON_RESULT_END===", flush=True)
@@ -365,14 +352,14 @@ def main():
         # Enviar update final con total de movimientos procesados
         num_lineas = len(lineas_procesadas)
         if total_movimientos > 0:
-            send_partial_update(dni, "completado", f"{total_movimientos} movimientos encontrados en {num_lineas} líneas", {
+            send_partial_update(dni, "completado", f"{total_movimientos} movimientos en {num_lineas} lineas", {
                 "total_movimientos": total_movimientos,
-                "total_lineas": num_lineas
+                "total_lineas": num_lineas,
             })
         else:
             send_partial_update(dni, "completado", "Sin movimientos activos", {
                 "total_movimientos": 0,
-                "total_lineas": num_lineas
+                "total_lineas": num_lineas,
             })
 
     except Exception as e:
@@ -381,16 +368,16 @@ def main():
         
         # Sanitizar error para el frontend
         if 'codec' in error_msg_raw.lower() or 'decode' in error_msg_raw.lower() or 'encode' in error_msg_raw.lower():
-            error_msg_frontend = "Error de codificación al procesar datos"
+            error_msg_frontend = "Error de codificacion al procesar datos"
         elif 'timeout' in error_msg_raw.lower():
-            error_msg_frontend = "El proceso tardó demasiado tiempo"
+            error_msg_frontend = "El proceso tardo demasiado tiempo"
         elif 'permission' in error_msg_raw.lower() or 'access' in error_msg_raw.lower():
             error_msg_frontend = "Error de permisos al acceder a archivos"
         else:
             error_msg_frontend = "Error inesperado al procesar movimientos"
-        
+
         send_partial_update(dni, "error", error_msg_frontend)
-        result = {"error": error_msg_frontend, "dni": dni, "stages": []}
+        result = {"error": error_msg_frontend, "dni": dni}
         print("===JSON_RESULT_START===", flush=True)
         print(json.dumps(result), flush=True)
         print("===JSON_RESULT_END===", flush=True)
@@ -402,11 +389,9 @@ def main():
         except:
             pass
 
-    # El thread monitor_log_file() ya envió todos los updates en tiempo real
-    # Solo enviamos el resultado final vacío para indicar completitud
-    result = {"dni": dni, "stages": []}
-    
-    # ===== ENVIAR RESULTADO FINAL CON MARCADORES =====
+    # El thread monitor_log_file() ya envio todos los updates en tiempo real.
+    # El JSON_RESULT final cierra la tarea.
+    result = {"dni": dni}
     print("===JSON_RESULT_START===", flush=True)
     print(json.dumps(result), flush=True)
     print("===JSON_RESULT_END===", flush=True)

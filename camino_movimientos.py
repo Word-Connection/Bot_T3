@@ -373,7 +373,8 @@ def run(
     logging_utils.reset_log(log_path)
     print(f"[CaminoMovimientos] log reiniciado: {log_path}")
 
-    _send_partial(dni, "iniciando", f"Iniciando movimientos para DNI {dni}")
+    # Nota: el dispatcher (scripts/movimientos.py) y el worker ya anuncian inicio.
+    # No emitimos "iniciando" desde aca para evitar duplicados al frontend.
 
     print(f"[CaminoMovimientos] Iniciando en {start_delay}s")
     time.sleep(start_delay)
@@ -415,7 +416,8 @@ def run(
         ids = _recolectar_ids_uno_por_uno(master, log_path, dni)
         if not ids:
             print("[CaminoMovimientos] busqueda directa no encontro IDs validos")
-            _send_partial(dni, "completado", "Sin movimientos en sistema", {"total_servicios": 0})
+            # El dispatcher emite el "completado" final al frontend; aca solo
+            # imprimimos el resultado del camino.
             io_worker.print_json_result({"dni": dni, "success": True, "ids": [], "modo": "busqueda_directa"})
             return
         print(f"[CaminoMovimientos] busqueda directa recolecto {len(ids)} IDs unicos: {ids}")
@@ -444,11 +446,8 @@ def run(
         time.sleep(0.2)
         pg.press("delete")
 
-    _send_partial(dni, "completado", f"{len(ids)} servicios procesados", {
-        "total_servicios": len(ids),
-        "archivo_log": str(log_path),
-    })
-
+    # El dispatcher (scripts/movimientos.py) emite el "completado" con los
+    # totales reales al frontend. Desde el camino solo imprimimos el JSON_RESULT.
     print(f"[CaminoMovimientos] Finalizado. Modo={'busqueda_directa' if busqueda_directa else 'csv'} ids={len(ids)}")
     io_worker.print_json_result({
         "dni": dni,
