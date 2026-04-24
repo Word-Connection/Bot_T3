@@ -222,10 +222,11 @@ def run(
         close_tab_key=CLOSE_TAB_KEY,
     )
 
-    # cerrar pestanas adicionales del ultimo (multi_click: 1 solo moveTo + N clicks)
-    close_x, close_y = coords.xy(master, f"comunes.{CLOSE_TAB_KEY}")
-    if close_x or close_y:
-        mouse.multi_click(close_x, close_y, "close_tab_btn (extra)", times=3, interval=0.15)
+    # Nota: NO hacemos close aca. iterar_registros ya cerro la tab del saldo
+    # del ultimo registro, y los campos `dni_field_clear`/`id_cliente_field`
+    # que usa `buscar_por_id_cliente` son visibles desde la pantalla actual
+    # (barra superior persistente). Cualquier close adicional rompe esa
+    # pantalla y el buscar_por_id_cliente falla.
 
     # 8. Sumar busquedas por ids_cliente del camino_score (NUNCA descartar).
     # Las cuentas del Ver Todos del principal se conservan TODAS — las que
